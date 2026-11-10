@@ -6,6 +6,9 @@ APK=$(ls AnzuOne-*.apk | head -1)
 fail() { echo "::error title=Smoke test::$1"; adb logcat -d -s AndroidRuntime:E | tail -60; exit 1; }
 note() { echo "::notice title=Smoke test::$1"; }
 
+mkdir -p shots
+shot() { adb exec-out screencap -p > "shots/$1.png" 2>/dev/null || true; }
+adb shell cmd uimode night yes || true
 adb install -r "$APK" || fail "install failed"
 for p in BLUETOOTH_CONNECT BLUETOOTH_SCAN RECORD_AUDIO POST_NOTIFICATIONS ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION READ_CALENDAR ACTIVITY_RECOGNITION; do
   adb shell pm grant $PKG android.permission.$p || true
@@ -33,7 +36,7 @@ tap() { # tap the centre of the LAST element whose text is $1 (the nav bar sits 
   local xy; xy=$(python3 - "$1" <<'PY'
 import sys, re
 x = open('ui.xml', encoding='utf-8', errors='ignore').read()
-m = re.findall(r'text="%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % re.escape(sys.argv[1]), x)
+m = re.findall(r'(?:text|content-desc)="%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % re.escape(sys.argv[1]), x)
 if m:
     a, b, c, d = map(int, m[-1]); print((a + c) // 2, (b + d) // 2)
 PY
@@ -42,7 +45,7 @@ PY
   adb shell input tap $xy
 }
 PASSED=""
-check() { sleep 4; alive || fail "process died: $1"; crashed && fail "crash: $1"; PASSED="$PASSED$1; "; echo "OK $1: $(texts)"; }
+check() { sleep 4; alive || fail "process died: $1"; crashed && fail "crash: $1"; shot "$(echo "$1" | tr ' A-Z' '_a-z')"; PASSED="$PASSED$1; "; echo "OK $1: $(texts)"; }
 
 adb shell am start -W -n $PKG/.MainActivity || fail "could not start MainActivity"
 check "Home screen"
@@ -87,12 +90,12 @@ tap "Settings"; sleep 2
 seen=""
 for i in $(seq 1 30); do
   dump
-  for sec in BRAIN IDENTITY PRESENCE "GLASSES AND EARBUDS" VOICE LISTENING "BUDDIE EARBUDS" "HOME ASSISTANT" "OBELISK AND LOCAL MODELS" APP; do
+  for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
     case "$seen" in *"[$sec]"*) ;; *) grep -q "text=\"$sec\"" ui.xml && seen="$seen[$sec]";; esac
   done
   adb shell input swipe 12 1500 12 600 300; sleep 1
 done
-for sec in BRAIN IDENTITY PRESENCE "GLASSES AND EARBUDS" VOICE LISTENING "BUDDIE EARBUDS" "HOME ASSISTANT" "OBELISK AND LOCAL MODELS" APP; do
+for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
   case "$seen" in *"[$sec]"*) ;; *) fail "Settings section missing: $sec";; esac
 done
 check "Settings scrolled"
@@ -115,6 +118,11 @@ adb shell input keyevent 4
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity
 check "Relaunch"
+# The same screens in light mode, for the screenshots.
+adb shell cmd uimode night no || true
+adb shell am force-stop $PKG; adb shell am start -W -n $PKG/.MainActivity; sleep 5; shot light_home
+tap "Settings"; sleep 3; shot light_settings
+tap "Notes"; sleep 3; shot light_notes
 note "Device log: $(adb logcat -d -s CORINTEST:I | grep CORINTEST | sed 's/.*CORINTEST: //' | tr '\n' '|' | cut -c1-700)"
 note "All steps passed: $PASSED"
 echo "SMOKE PASSED"

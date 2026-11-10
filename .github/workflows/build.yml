@@ -87,6 +87,15 @@ jobs:
             adb logcat -d -s CORINTEST:I > corintest.log || true
             adb uninstall com.jondude.anzu || true
             bash ci/smoke.sh
+      - name: Publish screenshots
+        if: always()
+        run: |
+          [ -d shots ] && [ -n "$(ls shots)" ] || exit 0
+          cd shots
+          for f in *.png; do python3 -c "import sys; from PIL import Image; im=Image.open(sys.argv[1]); im.thumbnail((540,1200)); im.save(sys.argv[1])" "$f" 2>/dev/null || true; done
+          git init -q && git checkout -q -b ci-screenshots && git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "screenshots for $GITHUB_SHA"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-screenshots
       - name: Device test summary
         if: always()
         run: |

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_bg">#1B3327</color>
-    <color name="window_bg">#F2F2F7</color>
+    <color name="window_bg">#EEF2EE</color>
     <style name="Theme.Corin" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_bg</item>
         <item name="android:statusBarColor">@color/window_bg</item>

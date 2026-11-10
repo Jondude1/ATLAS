@@ -72,6 +72,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -106,42 +113,51 @@ import java.util.Locale
 /** Follows the phone's light or dark setting. */
 private var isDark by mutableStateOf(true)
 
+// Corin's palette: a forest at dusk in dark mode, sage paper in light mode.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = if (isDark) Color(0xFFE5B94E) else Color(0xFF9A6B00)
-private val Cream: Color get() = if (isDark) Color(0xFFF5F5F7) else Color(0xFF1D1D1F)
-private val Muted: Color get() = if (isDark) Color(0xFF98989F) else Color(0xFF6E6E73)
-private val Fill: Color get() = if (isDark) Color(0xFF2C2C2E) else Color(0xFFEFEFF4)
-private val Hairline: Color get() = if (isDark) Color(0xFF38383A) else Color(0xFFD1D1D6)
-private val SystemGreen = Color(0xFF34C759)
+private val Gold: Color get() = if (isDark) Color(0xFFE3B655) else Color(0xFF1F5D45)
+private val OnGold: Color get() = if (isDark) Color(0xFF1B1405) else Color(0xFFFFFFFF)
+private val Cream: Color get() = if (isDark) Color(0xFFF1ECDF) else Color(0xFF13201A)
+private val Muted: Color get() = if (isDark) Color(0xFF8FA397) else Color(0xFF5E7067)
+private val Ground: Color get() = if (isDark) Color(0xFF0C1512) else Color(0xFFEEF2EE)
+private val Panel: Color get() = if (isDark) Color(0xFF16231D) else Color(0xFFFFFFFF)
+private val Fill: Color get() = if (isDark) Color(0xFF213529) else Color(0xFFE3EAE4)
+private val Hairline: Color get() = if (isDark) Color(0xFF26392F) else Color(0xFFD5DED7)
+
+/** The display face (Bricolage Grotesque) for titles and Corin's own words. */
+private val Display = FontFamily(
+    Font(R.font.bricolage_bold, FontWeight.Bold),
+    Font(R.font.bricolage_medium, FontWeight.Medium)
+)
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFE5B94E),
-    onPrimary = Color(0xFF1D1D1F),
-    secondary = Color(0xFF98989F),
-    onSecondary = Color(0xFF1D1D1F),
-    background = Color(0xFF000000),
-    onBackground = Color(0xFFF5F5F7),
-    surface = Color(0xFF1C1C1E),
-    onSurface = Color(0xFFF5F5F7),
-    surfaceVariant = Color(0xFF2C2C2E),
-    onSurfaceVariant = Color(0xFF98989F),
-    outline = Color(0xFF48484A),
-    error = Color(0xFFFF6961)
+    primary = Color(0xFFE3B655),
+    onPrimary = Color(0xFF1B1405),
+    secondary = Color(0xFF8FA397),
+    onSecondary = Color(0xFF0C1512),
+    background = Color(0xFF0C1512),
+    onBackground = Color(0xFFF1ECDF),
+    surface = Color(0xFF16231D),
+    onSurface = Color(0xFFF1ECDF),
+    surfaceVariant = Color(0xFF213529),
+    onSurfaceVariant = Color(0xFF8FA397),
+    outline = Color(0xFF3A5246),
+    error = Color(0xFFFF8A73)
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF9A6B00),
+    primary = Color(0xFF1F5D45),
     onPrimary = Color(0xFFFFFFFF),
-    secondary = Color(0xFF6E6E73),
+    secondary = Color(0xFF5E7067),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFF2F2F7),
-    onBackground = Color(0xFF1D1D1F),
+    background = Color(0xFFEEF2EE),
+    onBackground = Color(0xFF13201A),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF1D1D1F),
-    surfaceVariant = Color(0xFFEFEFF4),
-    onSurfaceVariant = Color(0xFF6E6E73),
-    outline = Color(0xFFC7C7CC),
-    error = Color(0xFFD70015)
+    onSurface = Color(0xFF13201A),
+    surfaceVariant = Color(0xFFE3EAE4),
+    onSurfaceVariant = Color(0xFF5E7067),
+    outline = Color(0xFFB9C6BD),
+    error = Color(0xFFB3261E)
 )
 
 /** A quiet secondary button: tinted fill, no outline. */
@@ -200,29 +216,39 @@ fun AppRoot(resumes: Int) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            Column {
-            HorizontalDivider(color = Hairline, thickness = 0.5.dp)
-            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                val items = listOf(
-                    "Corin" to Icons.Filled.Home,
-                    "Notes" to Icons.Filled.Create,
-                    "Whisper" to Icons.Filled.Notifications,
-                    "Settings" to Icons.Filled.Settings
-                )
-                items.forEachIndexed { i, (label, icon) ->
-                    NavigationBarItem(
-                        selected = tab == i,
-                        onClick = { tab = i },
-                        icon = { Icon(icon, contentDescription = null) },
-                        label = { Text(label, fontSize = 11.sp) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Gold, selectedTextColor = Gold,
-                            unselectedIconColor = Muted, unselectedTextColor = Muted,
-                            indicatorColor = Color.Transparent
-                        )
-                    )
+            // A floating bar: the selected tab opens into a labelled pill.
+            val items = listOf(
+                "Corin" to Icons.Filled.Home,
+                "Notes" to Icons.Filled.Create,
+                "Whisper" to Icons.Filled.Notifications,
+                "Settings" to Icons.Filled.Settings
+            )
+            Box(Modifier.fillMaxWidth().background(Ground).padding(start = 20.dp, end = 20.dp, bottom = 14.dp, top = 6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Panel).padding(6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items.forEachIndexed { i, (label, icon) ->
+                        val selected = tab == i
+                        Row(
+                            Modifier.clip(RoundedCornerShape(26.dp))
+                                .background(if (selected) Gold else Color.Transparent)
+                                .clickable { tab = i }
+                                .padding(horizontal = if (selected) 18.dp else 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                icon, contentDescription = if (selected) null else label,
+                                tint = if (selected) OnGold else Muted, modifier = Modifier.size(22.dp)
+                            )
+                            if (selected) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(label, color = OnGold, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            }
+                        }
+                    }
                 }
-            }
             }
         }
     ) { pad ->
@@ -231,7 +257,7 @@ fun AppRoot(resumes: Int) {
             if (rel != null && !dismissed) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = Gold.copy(alpha = 0.14f))
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -257,34 +283,43 @@ fun AppRoot(resumes: Int) {
     }
 }
 
-/** A big left-aligned screen title. */
+/** The screen title, set in the display face. */
 @Composable
 fun LargeTitle(text: String) {
     Text(
-        text, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Cream,
-        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
+        text, fontFamily = Display, fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Cream,
+        letterSpacing = (-0.5).sp, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp)
     )
 }
 
-/** A grouped card with a small caption above it. */
+/** A titled group of related controls on one rounded panel. */
 @Composable
 fun Section(title: String, content: @Composable () -> Unit) {
     Column {
         Text(
-            title.uppercase(), color = Muted, fontSize = 13.sp, letterSpacing = 0.4.sp,
-            modifier = Modifier.padding(start = 16.dp, bottom = 6.dp, top = 4.dp)
+            title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp,
+            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp, top = 6.dp)
         )
         Card(
             Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(26.dp),
+            colors = CardDefaults.cardColors(containerColor = Panel),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 content()
             }
         }
     }
+}
+
+/** One cell of the home screen's grid. */
+@Composable
+fun Tile(modifier: Modifier, tint: Color = Panel, content: @Composable () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(26.dp)).background(tint).padding(16.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) { content() }
 }
 
 @Composable
@@ -298,8 +333,8 @@ fun ToggleRow(label: String, hint: String? = null, initial: Boolean, onChange: (
         Switch(
             checked = v, onCheckedChange = { v = it; onChange(it) },
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White, checkedTrackColor = SystemGreen,
-                uncheckedThumbColor = Color.White, uncheckedTrackColor = Fill, uncheckedBorderColor = Color.Transparent
+                checkedThumbColor = OnGold, checkedTrackColor = Gold,
+                uncheckedThumbColor = Muted, uncheckedTrackColor = Fill, uncheckedBorderColor = Color.Transparent
             )
         )
     }
@@ -315,7 +350,7 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
         singleLine = lines == 1,
         minLines = lines,
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = OutlinedTextFieldDefaults.colors(
             unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
             unfocusedContainerColor = Fill, focusedContainerColor = Fill,
@@ -325,42 +360,41 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
     )
 }
 
-/** Corin's presence: a soft glowing sphere that breathes slowly, and quickens when listening or thinking. */
+/** Corin's presence: a sphere of gold light over deep green that breathes, and quickens when listening or thinking. */
 @Composable
-fun Orb(state: String) {
+fun Orb(state: String, diameter: Dp = 148.dp) {
     val period = when (state) {
         "listening" -> 700
         "thinking" -> 450
         "speaking" -> 1000
-        else -> 2800
+        else -> 3000
     }
-    val inner = when (state) {
-        "listening" -> Color(0xFF7BE0A4)
-        "thinking" -> Color(0xFFFFD979)
-        "speaking" -> Color(0xFFFFF1CC)
-        else -> Color(0xFFE5B94E)
+    val light = when (state) {
+        "listening" -> Color(0xFFB9F2C9)
+        "speaking" -> Color(0xFFFFF4D6)
+        else -> Color(0xFFF4D488)
     }
-    val outer = when (state) {
-        "listening" -> Color(0xFF1E8E5A)
-        "thinking" -> Color(0xFFB8860B)
-        "speaking" -> Color(0xFFD9A426)
-        else -> Color(0xFF7A5200)
+    val body = when (state) {
+        "listening" -> Color(0xFF2FA36B)
+        "thinking" -> Color(0xFFE3B655)
+        else -> Color(0xFFC9952B)
     }
+    val deep = if (state == "listening") Color(0xFF0F3B2A) else Color(0xFF1F5D45)
     key(period) {
         val transition = rememberInfiniteTransition(label = "orb")
         val pulse by transition.animateFloat(
-            initialValue = 0.86f, targetValue = 1f,
+            initialValue = 0.88f, targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "pulse"
         )
-        Canvas(Modifier.size(148.dp)) {
+        Canvas(Modifier.size(diameter)) {
             val r = size.minDimension / 2
             val c = Offset(size.width / 2, size.height / 2)
-            // halo
-            drawCircle(Brush.radialGradient(listOf(inner.copy(alpha = 0.32f), Color.Transparent), c, r * pulse), r * pulse, c)
-            // sphere, lit from the upper left
-            val core = r * 0.56f * pulse
+            // a wide, faint glow that spills past the sphere
+            drawCircle(Brush.radialGradient(listOf(body.copy(alpha = 0.34f), body.copy(alpha = 0.08f), Color.Transparent), c, r * pulse), r * pulse, c)
+            // the sphere: bright where the light falls, deep green in its shadow
+            val core = r * 0.6f * pulse
             drawCircle(
-                Brush.radialGradient(listOf(inner, outer), Offset(c.x - core * 0.3f, c.y - core * 0.35f), core * 1.5f),
+                Brush.radialGradient(listOf(light, body, deep), Offset(c.x - core * 0.35f, c.y - core * 0.4f), core * 1.7f),
                 core, c
             )
         }
@@ -418,17 +452,51 @@ fun HomeScreen(resumes: Int) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        LargeTitle(Prefs.name)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { LargeTitle(Prefs.name) }
+            Text(
+                state, color = if (state == "idle") Muted else OnGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                    .background(if (state == "idle") Panel else Gold).padding(horizontal = 14.dp, vertical = 7.dp)
+            )
+        }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Orb(state)
-            Text(state.uppercase(), color = Muted, fontSize = 12.sp, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(10.dp))
-            if (heard.isNotBlank()) Text("You: $heard", color = Muted, fontSize = 15.sp, textAlign = TextAlign.Center)
+            Orb(state, 220.dp)
             Text(
                 if (said.isBlank()) "Nothing said yet." else said,
-                fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.Medium, color = Cream,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                fontFamily = Display, fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.Medium, color = Cream,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 8.dp)
             )
+            if (heard.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text("You: $heard", color = Muted, fontSize = 15.sp, textAlign = TextAlign.Center)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Tile(Modifier.weight(1.5f).height(118.dp)) {
+                Text("Wearing", color = Muted, fontSize = 13.sp)
+                Column {
+                    Text(
+                        when {
+                            !connected -> "Nothing"
+                            activeWear == "buddie" -> "Earbuds"
+                            else -> "Glasses"
+                        },
+                        fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream
+                    )
+                    Text(
+                        if (!connected) "Put them on and I'm there" else if (activeWear == "buddie") "Private, hands-free" else "Open-ear, discreet",
+                        color = Muted, fontSize = 13.sp
+                    )
+                }
+            }
+            Tile(Modifier.weight(1f).height(118.dp), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
+                Text("Battery", color = Muted, fontSize = 13.sp)
+                Text(
+                    if (connected && battery >= 0) "$battery%" else "–",
+                    fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 34.sp, color = Cream
+                )
+            }
         }
         Section("Talk") {
             OutlinedTextField(
@@ -436,7 +504,7 @@ fun HomeScreen(resumes: Int) {
                 onValueChange = { typed = it },
                 label = { Text("Type to ${Prefs.name}") },
                 singleLine = true, // so Enter on a hardware or wrist keyboard sends
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
                     unfocusedContainerColor = Fill, focusedContainerColor = Fill,
@@ -601,7 +669,7 @@ fun NotesScreen() {
     ) {
         item {
             LargeTitle("Notes")
-            Text("Notes and ideas", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text("Notes and ideas", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = draft, onValueChange = { draft = it },
@@ -626,7 +694,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("Checklists", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text("Checklists", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
             if (lists.isEmpty()) Text("Say \"add milk to my grocery list\" or \"what's my next step?\"", color = Muted)
             lists.forEach { (name, listItems) ->
                 Card(
@@ -650,7 +718,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("What ${Prefs.name} remembers", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text("What ${Prefs.name} remembers", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
             if (memory.isEmpty()) Text("Nothing yet. It builds up as you talk.", color = Muted)
         }
         items(memory.size) { i ->
@@ -661,7 +729,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("Done on its own", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text("Done on its own", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
             if (actions.isEmpty()) Text("Nothing yet.", color = Muted)
         }
         items(actions.take(30)) { a ->
@@ -698,7 +766,7 @@ fun WhisperScreen() {
                 Text("Whether the message itself is read out is set per wearable in Settings, under Glasses and earbuds.", color = Muted, fontSize = 12.sp)
             }
             Spacer(Modifier.height(8.dp))
-            Text("APPS ALLOWED TO REACH YOUR EARS", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 16.dp))
+            Text("Apps allowed to reach your ears", fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
         }
         items(apps, key = { it.second }) { (label, pkg) ->
             Row(verticalAlignment = Alignment.CenterVertically) {

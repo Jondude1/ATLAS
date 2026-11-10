@@ -192,10 +192,10 @@ class AssistActivity : ComponentActivity() {
             val said by Glasses.lastSaid.collectAsState()
             val heard by Glasses.lastHeard.collectAsState()
             val dark = androidx.compose.foundation.isSystemInDarkTheme()
-            val sheet = if (dark) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)
-            val text = if (dark) Color(0xFFF5F5F7) else Color(0xFF1D1D1F)
-            val muted = if (dark) Color(0xFF98989F) else Color(0xFF6E6E73)
-            val accent = if (dark) Color(0xFFE5B94E) else Color(0xFF9A6B00)
+            val sheet = if (dark) Color(0xFF16231D) else Color(0xFFFFFFFF)
+            val text = if (dark) Color(0xFFF1ECDF) else Color(0xFF13201A)
+            val muted = if (dark) Color(0xFF8FA397) else Color(0xFF5E7067)
+            val accent = if (dark) Color(0xFFE3B655) else Color(0xFF1F5D45)
             Box(
                 Modifier.fillMaxSize().clickable {
                     Speaker.stop()
