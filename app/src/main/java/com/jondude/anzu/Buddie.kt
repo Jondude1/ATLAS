@@ -287,6 +287,8 @@ object BuddieStats {
     var lost = 0L
     @Volatile
     var drops = 0
+    @Volatile
+    var note = ""
 
     fun total(): Long = compressed + opus + statusPackets
 
@@ -323,6 +325,7 @@ object BuddieStats {
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
             append(link())
+            if (note.isNotBlank()) append(" · $note")
         }
     }
 }
@@ -454,23 +457,32 @@ object BuddieLink {
     fun captureAndShare(ctx: Context, seconds: Int = 8) {
         if (capture != null) return
         val app = ctx.applicationContext
+        android.widget.Toast.makeText(app, "Recording earbud data for $seconds seconds. Talk normally.", android.widget.Toast.LENGTH_LONG).show()
         capture = java.io.ByteArrayOutputStream()
         main.postDelayed({
             val data = capture?.toByteArray() ?: ByteArray(0)
             capture = null
             try {
-                val dir = File(app.cacheDir, "share").apply { mkdirs() }
-                val file = File(dir, "buddie_capture.bin")
-                file.writeBytes(data)
-                val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.updates", file)
-                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
-                    .setType("application/octet-stream")
-                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                app.startActivity(
-                    android.content.Intent.createChooser(send, "Share earbud capture (${data.size / 1024} KB)")
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
+                // Zip it (chat apps accept zips more readily than raw .bin) and put it in Downloads.
+                val zipped = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(zipped).use { z ->
+                    z.putNextEntry(java.util.zip.ZipEntry("buddie_capture.bin"))
+                    z.write(data)
+                    z.closeEntry()
+                }
+                val name = "buddie_capture_" + SimpleDateFormat("HHmmss", Locale.US).format(Date()) + ".zip"
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/zip")
+                }
+                val uri = app.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("couldn't create the file")
+                app.contentResolver.openOutputStream(uri)?.use { it.write(zipped.toByteArray()) }
+                val msg = "Saved $name to Downloads (${data.size / 1024} KB of earbud data)"
+                BuddieStats.lastProblem = ""
+                BuddieStats.note = msg
+                BuddieStats.publish()
+                android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 BuddieStats.lastProblem = "capture failed: ${e.message}"
                 BuddieStats.publish()
