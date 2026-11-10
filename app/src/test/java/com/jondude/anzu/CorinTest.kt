@@ -232,6 +232,27 @@ class CorinTest {
         assertNull(Wake.extract("I ate corn on the cob", "Corin"))
         assertNull(Wake.extract("let's go to the store", "Corin"))
         assertEquals("status", Wake.extract("Sage, status", "Sage"))
+        // spellings the on-phone recognizer produced for real earbud audio
+        assertEquals("what time is it?", Wake.extract("Corinne, what time is it?", "Corin"))
+        assertEquals("what time is it?", Wake.extract("Corey, what time is it?", "Corin"))
+        assertNull(Wake.extract("or what kind of switch", "Corin"))
+    }
+
+    @Test
+    fun speechModelInputIsCleanedUp() {
+        // a loud 30 Hz rumble under a quiet 1 kHz tone: the rumble should go, the level should come up
+        val pcm = ShortArray(16000) { (6000 * sin(2 * PI * 30 * it / 16000.0) + 300 * sin(2 * PI * 1000 * it / 16000.0)).toInt().toShort() }
+        val out = Whisperer.prepare(pcm)
+        val tail = out.copyOfRange(8000, 16000)
+        assertEquals(0.7f, out.maxOf { Math.abs(it) }, 0.01f)
+        var low = 0.0; var high = 0.0
+        for (i in tail.indices) {
+            low += tail[i] * sin(2 * PI * 30 * (i + 8000) / 16000.0)
+            high += tail[i] * sin(2 * PI * 1000 * (i + 8000) / 16000.0)
+        }
+        assertTrue("rumble $low vs tone $high", Math.abs(low) < Math.abs(high))
+        assertEquals("what time is it", Whisperer.clean(" [BLANK_AUDIO] what time  is it (music) "))
+        assertEquals("", Whisperer.clean("[Music]"))
     }
 
     // ---------- checklists ----------

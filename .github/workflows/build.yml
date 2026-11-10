@@ -17,6 +17,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Fetch libraries
+        run: bash ci/fetch-deps.sh
       - name: Unit tests
         run: gradle testReleaseUnitTest --no-daemon --stacktrace
       - name: Test summary
@@ -75,8 +77,11 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_6
+          ram-size: 4096M
+          disk-size: 6000M
           disable-animations: true
           script: |
+            bash ci/fetch-deps.sh
             adb logcat -c
             gradle connectedDebugAndroidTest --no-daemon || echo "DEVICE_TESTS_FAILED" > device-tests-failed
             adb logcat -d -s CORINTEST:I > corintest.log || true

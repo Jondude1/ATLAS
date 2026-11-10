@@ -827,6 +827,20 @@ fun SettingsScreen() {
                 } catch (_: Exception) {
                 }
             }) { Text("Play what the earbuds last heard") }
+            val model by Whisperer.status.collectAsState()
+            val modelReady = remember(model) { Whisperer.downloaded(ctx) }
+            Text(
+                "Speech model: " + when {
+                    modelReady -> "ready"
+                    model.isBlank() -> "not downloaded yet (300 MB, one time)"
+                    else -> model
+                },
+                color = if (modelReady) Muted else Gold, fontSize = 14.sp
+            )
+            if (!modelReady && !model.startsWith("downloading")) {
+                OutlinedButton(onClick = { Whisperer.ensure(ctx, force = true) }) { Text("Download speech model now") }
+            }
+            Text("The earbuds send heavily compressed audio. ${Prefs.name} uses its own on-phone speech model to understand it, so nothing you say through them leaves the phone to be transcribed.", color = Muted, fontSize = 12.sp)
             ToggleRow("Experimental: faster link", "May fix choppy audio. Turn it off again if the earbuds start disconnecting. Re-seat the buds after changing.", Prefs.buddieFastLink) { Prefs.buddieFastLink = it }
             OutlinedButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data") }
             val captureStatus by BuddieLink.captureStatus.collectAsState()

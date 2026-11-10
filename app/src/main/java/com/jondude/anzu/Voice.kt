@@ -363,6 +363,19 @@ object Transcriber {
     suspend fun transcribe(ctx: Context, pcm: ShortArray): String? {
         val app = ctx.applicationContext
         lastProblem = ""
+        // The on-phone Whisper model is the one that understands the earbuds' compressed audio.
+        if (Whisperer.downloaded(app)) {
+            val heard = Whisperer.transcribe(app, pcm)
+            if (heard != null) {
+                if (heard.isBlank()) lastProblem = "no words in that segment"
+                return heard.ifBlank { null }
+            }
+            lastProblem = "speech model ${Whisperer.status.value}"
+        } else {
+            Whisperer.ensure(app)
+            lastProblem = "speech model not ready (${Whisperer.status.value.ifBlank { "not downloaded" }})"
+            return null
+        }
         val text = android(app, pcm) ?: obelisk(pcm)
         if (text == null && lastProblem.isBlank()) lastProblem = "the phone's speech recognizer returned nothing"
         return text

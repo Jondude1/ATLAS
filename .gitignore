@@ -5,3 +5,4 @@ local.properties
 .idea/
 # Local secrets written by `elevenlabs onboard`
 /.env.local
+app/libs/

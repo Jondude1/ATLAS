@@ -176,7 +176,11 @@ object AudioMath {
 object Wake {
     private fun variants(name: String): List<String> {
         val n = name.trim().lowercase()
-        val extra = if (n == "corin") listOf("corrin", "coren", "corinne", "koren", "korin", "corrine", "cor in") else emptyList()
+        // How speech recognizers tend to spell "Corin" when the audio is rough.
+        val extra = if (n == "corin") listOf(
+            "corrin", "coren", "corinne", "koren", "korin", "corrine", "cor in", "corey", "cory", "corine",
+            "coryn", "korrin", "corwin", "corinn", "karin", "koryn", "coreen", "korine"
+        ) else emptyList()
         return (listOf(n) + extra).filter { it.isNotBlank() }
     }
 
@@ -547,6 +551,7 @@ object BuddieLink {
         appCtx = app
         if (!Prefs.buddieListen) return
         if (!app.has(Manifest.permission.BLUETOOTH_CONNECT)) return
+        Whisperer.ensure(app) // one-time speech model download, on Wi-Fi
         if (gatts.isEmpty()) BuddieStats.reset()
         // Wait for every earbud we've seen before, and look for ones we haven't (the other bud).
         for (address in known()) if (address !in gatts) connect(address)
@@ -579,6 +584,7 @@ object BuddieLink {
         }
         gatts.clear()
         linked.clear()
+        Whisperer.release()
         lastAudioCount = -1
         lastSeq = -1
         worker.execute {
