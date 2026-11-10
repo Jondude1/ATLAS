@@ -61,7 +61,8 @@ has "reach a model" || fail "typed message got no reply: $(texts)"
 check "Typed message answered"
 
 # Unprompted speech: the Speak up button should produce a line.
-tap "Speak up" || fail "Speak up button not found"
+has "Speak up" || { adb shell input keyevent 4; sleep 2; }   # close the on-screen keyboard
+tap "Speak up" || fail "Speak up button not found: $(texts)"
 sleep 8
 has "reach a model" && fail "Speak up produced nothing new: $(texts)"
 check "Spoke up on its own"
@@ -81,10 +82,30 @@ adb shell cmd notification allow_listener $PKG/$PKG.NotifyListener || true
 adb shell cmd notification post -t "Smoke" smoke "hello from the smoke test" || true
 check "Notification listener"
 
-# Scroll the settings screen top to bottom.
+# Scroll the settings screen top to bottom, checking each section is there.
 tap "Settings"; sleep 2
-for i in 1 2 3 4 5 6; do adb shell input swipe 500 1500 500 400 200; sleep 1; done
+seen=""
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  dump
+  for sec in Brain Identity Presence Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+    case "$seen" in *"[$sec]"*) ;; *) grep -q "text=\"$sec\"" ui.xml && seen="$seen[$sec]";; esac
+  done
+  adb shell input swipe 500 1500 500 500 300; sleep 1
+done
+note "Settings sections found: $seen"
+for sec in Brain Identity Presence Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+  case "$seen" in *"[$sec]"*) ;; *) fail "Settings section missing: $sec";; esac
+done
 check "Settings scrolled"
+
+# Voice picker: open the phone voice list from the Voice section.
+tap "Corin"; sleep 1; tap "Settings"; sleep 2
+for i in 1 2 3 4 5 6; do has "Choose voice" && break; adb shell input swipe 500 1400 500 900 300; sleep 1; done
+tap "Choose voice" || fail "voice picker button not found: $(texts)"
+sleep 3
+has "Voices (tap to hear)" || fail "voice picker did not open: $(texts)"
+check "Voice picker"
+adb shell input keyevent 4; sleep 1
 
 # The glasses-gesture entry point.
 adb shell am start -W -a android.intent.action.VOICE_COMMAND -n $PKG/.assist.AssistActivity || fail "assistant entry point failed"
