@@ -1,0 +1,603 @@
+package com.jondude.anzu
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothManager
+import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import com.jondude.anzu.assist.AssistActivity
+import com.jondude.anzu.assist.Brain
+import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.update.Updater
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private val Gold = Color(0xFFD4AF37)
+private val Cream = Color(0xFFF2EBDD)
+private val Muted = Color(0xFFA9B5A6)
+
+private val CorinColors = darkColorScheme(
+    primary = Gold,
+    onPrimary = Color(0xFF2A2110),
+    secondary = Color(0xFF8B6B43),
+    onSecondary = Cream,
+    background = Color(0xFF14261D),
+    onBackground = Cream,
+    surface = Color(0xFF1B3327),
+    onSurface = Cream,
+    surfaceVariant = Color(0xFF3A3122),
+    onSurfaceVariant = Color(0xFFD9CDB4),
+    outline = Color(0xFF6E7F6F),
+    error = Color(0xFFE08A6B)
+)
+
+val REQUESTED = arrayOf(
+    Manifest.permission.BLUETOOTH_CONNECT,
+    Manifest.permission.RECORD_AUDIO,
+    Manifest.permission.POST_NOTIFICATIONS,
+    Manifest.permission.ACCESS_FINE_LOCATION,
+    Manifest.permission.READ_CALENDAR
+)
+
+class MainActivity : ComponentActivity() {
+    private val resumes = mutableIntStateOf(0)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme(colorScheme = CorinColors) {
+                AppRoot(resumes.intValue)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumes.intValue++
+        // Starting from a visible activity arms the reply microphone.
+        GlassesService.start(this, true)
+    }
+}
+
+@Composable
+fun AppRoot(resumes: Int) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var tab by remember { mutableIntStateOf(0) }
+    val update by Updater.available.collectAsState()
+    val progress by Updater.progress.collectAsState()
+    var dismissed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(resumes) { Updater.check() }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                val items = listOf(
+                    "Corin" to Icons.Filled.Home,
+                    "Notes" to Icons.Filled.Create,
+                    "Whisper" to Icons.Filled.Notifications,
+                    "Settings" to Icons.Filled.Settings
+                )
+                items.forEachIndexed { i, (label, icon) ->
+                    NavigationBarItem(
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        icon = { Icon(icon, contentDescription = label) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            val rel = update
+            if (rel != null && !dismissed) {
+                Card(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Update available: ${rel.tag}", fontWeight = FontWeight.Bold)
+                        if (progress >= 0f) {
+                            LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                        } else {
+                            Row {
+                                TextButton(onClick = { scope.launch { Updater.downloadAndInstall(ctx, rel) } }) { Text("Update") }
+                                TextButton(onClick = { dismissed = true }) { Text("Later") }
+                            }
+                        }
+                    }
+                }
+            }
+            when (tab) {
+                0 -> HomeScreen(resumes)
+                1 -> NotesScreen()
+                2 -> WhisperScreen()
+                else -> SettingsScreen()
+            }
+        }
+    }
+}
+
+@Composable
+fun Section(title: String, content: @Composable () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, color = Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            content()
+        }
+    }
+}
+
+@Composable
+fun ToggleRow(label: String, hint: String? = null, initial: Boolean, onChange: (Boolean) -> Unit) {
+    var v by remember { mutableStateOf(initial) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label)
+            if (hint != null) Text(hint, color = Muted, fontSize = 12.sp)
+        }
+        Switch(checked = v, onCheckedChange = { v = it; onChange(it) })
+    }
+}
+
+@Composable
+fun PrefField(label: String, initial: String, secret: Boolean = false, lines: Int = 1, onChange: (String) -> Unit) {
+    var v by remember { mutableStateOf(initial) }
+    OutlinedTextField(
+        value = v,
+        onValueChange = { v = it; onChange(it) },
+        label = { Text(label) },
+        singleLine = lines == 1,
+        minLines = lines,
+        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+private fun timeAgo(t: Long): String {
+    if (t <= 0) return "never"
+    return SimpleDateFormat("EEE MMM d, h:mm a", Locale.US).format(Date(t))
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+fun HomeScreen(resumes: Int) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val connected by Glasses.connected.collectAsState()
+    val battery by Glasses.battery.collectAsState()
+    val armed by Glasses.micArmed.collectAsState()
+    val state by Glasses.corinState.collectAsState()
+    val said by Glasses.lastSaid.collectAsState()
+    val heard by Glasses.lastHeard.collectAsState()
+    var typed by remember { mutableStateOf("") }
+    var quietUntil by remember(resumes) { mutableStateOf(Prefs.quietUntil) }
+    var deviceName by remember(resumes) { mutableStateOf(Prefs.deviceName) }
+    var picking by remember { mutableStateOf(false) }
+    var awake by remember(resumes) { mutableStateOf(Prefs.identity.isNotBlank()) }
+    var waking by remember { mutableStateOf(false) }
+
+    val missing = remember(resumes) { REQUESTED.filter { !ctx.has(it) } }
+    val listenerOn = remember(resumes) {
+        NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        GlassesService.start(ctx, true)
+    }
+
+    fun send() {
+        val t = typed.trim()
+        if (t.isNotEmpty()) {
+            Corin.typed(ctx, t)
+            typed = ""
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Section("${Prefs.name} · $state") {
+            if (heard.isNotBlank()) Text("You: $heard", color = Muted, fontSize = 14.sp)
+            Text(if (said.isBlank()) "Nothing said yet." else said, fontSize = 17.sp)
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                label = { Text("Type to ${Prefs.name}") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() })
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }) { Text("Talk") }
+                OutlinedButton(onClick = { send() }) { Text("Send") }
+                OutlinedButton(onClick = {
+                    GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW)
+                }) { Text("Speak up") }
+            }
+            val quiet = quietUntil > System.currentTimeMillis()
+            OutlinedButton(onClick = {
+                Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
+                quietUntil = Prefs.quietUntil
+            }) { Text(if (quiet) "Quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))} · resume" else "Quiet for an hour") }
+            if (!awake && Prefs.apiKey.isNotBlank()) {
+                Button(enabled = !waking, onClick = {
+                    waking = true
+                    scope.launch {
+                        val first = Brain.awaken()
+                        waking = false
+                        awake = Prefs.identity.isNotBlank()
+                        if (first != null) Corin.announce(first)
+                    }
+                }) { Text(if (waking) "Coming online…" else "Wake ${Prefs.name} for the first time") }
+            }
+        }
+
+        Section("Glasses") {
+            Text(
+                if (connected) "Connected" + (if (battery >= 0) " · battery $battery%" else "") +
+                    " · worn ${Glasses.wornMinutes()} min"
+                else "Not connected"
+            )
+            Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else deviceName, color = Muted, fontSize = 13.sp)
+            Text(
+                if (armed) "Conversation window armed: ${Prefs.name} can listen after speaking up."
+                else "Conversation window not armed. Opening this app arms it until the phone restarts.",
+                color = Muted, fontSize = 13.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { picking = true }) { Text("Choose glasses") }
+                OutlinedButton(onClick = {
+                    try {
+                        ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                            .startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 3000)
+                    } catch (_: Exception) {
+                    }
+                }) { Text("Ping") }
+            }
+            Text("Last seen: ${timeAgo(Prefs.lastSeenTime)}", color = Muted, fontSize = 13.sp)
+            if (Prefs.lastSeenLat.isNotBlank()) {
+                OutlinedButton(onClick = {
+                    val q = "${Prefs.lastSeenLat},${Prefs.lastSeenLon}"
+                    try {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$q?q=$q(Glasses)")))
+                    } catch (_: Exception) {
+                    }
+                }) { Text("Where I last had them") }
+            }
+        }
+
+        if (missing.isNotEmpty() || !listenerOn || Prefs.apiKey.isBlank()) {
+            Section("Setup") {
+                if (missing.isNotEmpty()) {
+                    Text("Bluetooth, microphone, notifications, location (find my glasses) and calendar access.")
+                    Button(onClick = { launcher.launch(REQUESTED) }) { Text("Grant permissions") }
+                }
+                if (!listenerOn) {
+                    Text("Notification access lets ${Prefs.name} read messages to you.")
+                    Button(onClick = {
+                        ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    }) { Text("Allow notification access") }
+                }
+                if (Prefs.apiKey.isBlank()) Text("Add your Anthropic API key in Settings so ${Prefs.name} can think.")
+            }
+        }
+
+        Section("Talking from the glasses") {
+            Text(
+                "Use the Anzu voice-assistant gesture and pick ${Prefs.name} when Android asks which app to use " +
+                    "(or set it under Settings → Apps → Default apps → Digital assistant app).",
+                color = Muted, fontSize = 13.sp
+            )
+        }
+    }
+
+    if (picking) {
+        val devices: List<Pair<String, String>> = remember {
+            val out = ArrayList<Pair<String, String>>()
+            try {
+                if (ctx.has(Manifest.permission.BLUETOOTH_CONNECT)) {
+                    val adapter = (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+                    adapter?.bondedDevices?.forEach { d -> out.add((d.name ?: d.address) to d.address) }
+                }
+            } catch (_: Exception) {
+            }
+            out
+        }
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = { TextButton(onClick = { picking = false }) { Text("Close") } },
+            title = { Text("Paired devices") },
+            text = {
+                Column {
+                    if (devices.isEmpty()) Text("No paired devices found. Pair the glasses in Bluetooth settings first.")
+                    devices.forEach { (name, address) ->
+                        TextButton(onClick = {
+                            Prefs.deviceName = name
+                            Prefs.deviceAddress = address
+                            deviceName = name
+                            picking = false
+                        }) { Text(name) }
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun NotesScreen() {
+    val notes by Store.notes.collectAsState()
+    val memory by Store.memory.collectAsState()
+    val actions by Store.actions.collectAsState()
+    var draft by remember { mutableStateOf("") }
+    LazyColumn(
+        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Notes and ideas", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = draft, onValueChange = { draft = it },
+                    label = { Text("New note") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { Store.addNote(draft); draft = "" }) { Text("Add") }
+            }
+        }
+        if (notes.isEmpty()) item { Text("Say \"note that…\" or \"save this idea\" and it lands here.", color = Muted) }
+        items(notes.size) { i ->
+            val n = notes[i]
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(n.text)
+                        Text(timeAgo(n.time), color = Muted, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = { Store.removeNote(i) }) { Text("Delete") }
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("What ${Prefs.name} remembers", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            if (memory.isEmpty()) Text("Nothing yet. It builds up as you talk.", color = Muted)
+        }
+        items(memory.size) { i ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(memory[i], Modifier.weight(1f))
+                TextButton(onClick = { Store.removeMemory(i) }) { Text("Forget") }
+            }
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Done on its own", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            if (actions.isEmpty()) Text("Nothing yet.", color = Muted)
+        }
+        items(actions.take(30)) { a ->
+            Text("${timeAgo(a.time)} · ${a.text}", fontSize = 13.sp, color = Muted)
+        }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun WhisperScreen() {
+    val ctx = LocalContext.current
+    var apps by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var allowed by remember { mutableStateOf(Prefs.allowedApps) }
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.IO) {
+            try {
+                val pm = ctx.packageManager
+                pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                    .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+                    .distinctBy { it.second }
+                    .sortedWith(compareByDescending<Pair<String, String>> { it.second in allowed }.thenBy { it.first.lowercase() })
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item {
+            Spacer(Modifier.height(12.dp))
+            Section("Notification whisper") {
+                ToggleRow("Read notifications to me", "Only while the glasses are on", Prefs.readNotifications) { Prefs.readNotifications = it }
+                ToggleRow("Triage", "Messages, calls and reminders now; everything else waits until you ask \"what did I miss?\"", Prefs.triage) { Prefs.triage = it }
+                ToggleRow("Sender only", "Say who it's from, not what it says", Prefs.senderOnly) { Prefs.senderOnly = it }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Apps allowed to reach your ears", color = Gold, fontWeight = FontWeight.Bold)
+        }
+        items(apps, key = { it.second }) { (label, pkg) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = pkg in allowed, onCheckedChange = { on ->
+                    allowed = if (on) allowed + pkg else allowed - pkg
+                    Prefs.allowedApps = allowed
+                })
+                Text(label)
+            }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun SettingsScreen() {
+    val scope = rememberCoroutineScope()
+    val status by Updater.status.collectAsState()
+    var chat by remember { mutableStateOf(Prefs.chattiness.toFloat()) }
+    var rate by remember { mutableStateOf(Prefs.speechRate.toFloat()) }
+    var mode by remember { mutableIntStateOf(Prefs.listenMode) }
+    var identity by remember { mutableStateOf(Prefs.identity) }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Section("Brain") {
+            PrefField("Anthropic API key", Prefs.apiKey, secret = true) { Prefs.apiKey = it.trim() }
+            PrefField("Model", Prefs.model) { Prefs.model = it.trim() }
+            PrefField("About you (things it should know from day one)", Prefs.aboutMe, lines = 3) { Prefs.aboutMe = it }
+        }
+
+        Section("Identity") {
+            PrefField("Name", Prefs.name) { Prefs.name = it.trim().ifBlank { "Corin" } }
+            Text(
+                if (identity.isBlank()) "Not awake yet. On first connection it writes its own personality and picks its own voice, and keeps them."
+                else identity,
+                color = Muted, fontSize = 13.sp
+            )
+            if (Prefs.drift.isNotBlank()) Text("Lately: ${Prefs.drift}", color = Muted, fontSize = 13.sp)
+            if (Prefs.voiceName.isNotBlank()) Text("Voice: ${Prefs.voiceName}", color = Muted, fontSize = 13.sp)
+            if (identity.isNotBlank()) {
+                TextButton(onClick = {
+                    Prefs.identity = ""; Prefs.drift = ""; Prefs.voiceName = ""
+                    identity = ""
+                }) { Text("Reset identity (it will choose again)") }
+            }
+        }
+
+        Section("Presence") {
+            ToggleRow("Speak up on its own", "Random check-ins, thoughts and questions through the day", Prefs.proactive) { Prefs.proactive = it }
+            Text("How often: " + listOf("now and then (about every 2 hours)", "regularly (about every 50 minutes)", "chatty (about every 20 minutes)")[chat.toInt().coerceIn(0, 2)])
+            Slider(value = chat, onValueChange = { chat = it; Prefs.chattiness = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    PrefField("Active from (hour)", Prefs.activeStart.toString()) { s -> s.toIntOrNull()?.let { Prefs.activeStart = it.coerceIn(0, 23) } }
+                }
+                Column(Modifier.weight(1f)) {
+                    PrefField("Until (hour)", Prefs.activeEnd.toString()) { s -> s.toIntOrNull()?.let { Prefs.activeEnd = it.coerceIn(0, 24) } }
+                }
+            }
+            ToggleRow("Talk over music and podcasts", null, Prefs.talkOverMedia) { Prefs.talkOverMedia = it }
+            ToggleRow("Evening wrap-up", "Asks how the day went, then writes a journal entry", Prefs.journal) { Prefs.journal = it }
+            PrefField("Wrap-up hour", Prefs.journalHour.toString()) { s -> s.toIntOrNull()?.let { Prefs.journalHour = it.coerceIn(0, 23) } }
+            ToggleRow("20-20-20 eye breaks", "Every 20 minutes of wear", Prefs.eyeBreaks) { Prefs.eyeBreaks = it }
+            ToggleRow("Calendar heads-ups", "Ten minutes before events", Prefs.calendarHeadsUp) { Prefs.calendarHeadsUp = it }
+        }
+
+        Section("Listening") {
+            Text(listOf(
+                "Off: never opens the microphone. Type instead.",
+                "Tap to talk: listens only when you use the glasses gesture or the Talk button.",
+                "Conversation window: also listens for your reply right after it speaks."
+            )[mode.coerceIn(0, 2)], color = Muted, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Off", "Tap", "Window").forEachIndexed { i, label ->
+                    if (mode == i) Button(onClick = {}) { Text(label) }
+                    else OutlinedButton(onClick = { mode = i; Prefs.listenMode = i }) { Text(label) }
+                }
+            }
+            ToggleRow("Use the glasses microphone", "Off uses the phone's mic", Prefs.useGlassesMic) { Prefs.useGlassesMic = it }
+            ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
+            Text("Speaking speed")
+            Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
+        }
+
+        Section("Home Assistant") {
+            PrefField("URL (e.g. your Tailscale address, port 8123)", Prefs.haUrl) { Prefs.haUrl = it.trim() }
+            PrefField("Long-lived access token", Prefs.haToken, secret = true) { Prefs.haToken = it.trim() }
+            PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
+            PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }
+        }
+
+        Section("Obelisk and local models") {
+            PrefField("Corin server URL on Obelisk (optional)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
+            Text("Sends every exchange to your Obsidian vault and lets recall search it. Server file is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
+            PrefField("Ollama URL (optional)", Prefs.ollamaUrl) { Prefs.ollamaUrl = it.trim() }
+            PrefField("Ollama model", Prefs.ollamaModel) { Prefs.ollamaModel = it.trim() }
+            ToggleRow("Use the local model for small talk", "Unprompted remarks cost nothing; falls back to Claude if the node is unreachable", Prefs.localSmallTalk) { Prefs.localSmallTalk = it }
+        }
+
+        Section("App") {
+            Text("Version ${BuildConfig.VERSION_NAME}")
+            if (status.isNotBlank()) Text(status, color = Muted, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
+                OutlinedButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}

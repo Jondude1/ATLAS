@@ -1,0 +1,462 @@
+package com.jondude.anzu
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationManager
+import android.media.AudioManager
+import android.os.IBinder
+import android.provider.CalendarContract
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import com.jondude.anzu.assist.Brain
+import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.Obelisk
+import com.jondude.anzu.assist.Timers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import kotlin.random.Random
+
+/**
+ * The always-on layer. Watches for the glasses, and while they're on:
+ * Corin speaks up on its own, reads timers and calendar heads-ups, and tracks battery.
+ */
+class GlassesService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var ticker: Job? = null
+    private var startedForeground = false
+    private var nextSpeakAt = 0L
+    private var lastEyeBreak = 0L
+    private var warned20 = false
+    private var warned10 = false
+    private val announcedEvents = HashSet<String>()
+
+    private val receiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) {
+            val device: BluetoothDevice? = androidx.core.content.IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> if (device != null && isOurs(device)) onGlassesOn()
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (device != null && isOurs(device)) onGlassesOff()
+                ACTION_BATTERY -> if (device != null && isOurs(device)) {
+                    val level = intent.getIntExtra(EXTRA_BATTERY, -1)
+                    if (level >= 0) Glasses.battery.value = level
+                }
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Corin presence", NotificationManager.IMPORTANCE_LOW)
+        )
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(ACTION_BATTERY)
+        }
+        ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
+        checkAlreadyConnected()
+        ticker = scope.launch {
+            while (isActive) {
+                delay(30_000)
+                try {
+                    tick()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val fromUi = intent?.getBooleanExtra(EXTRA_FROM_UI, false) == true
+        if (!startedForeground || fromUi) {
+            var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            // Mic and location can only be attached while the app is visible; that "arms"
+            // the conversation window so Corin can listen after speaking up on its own.
+            val mic = fromUi && has(Manifest.permission.RECORD_AUDIO)
+            if (mic) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (fromUi && has(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
+            try {
+                ServiceCompat.startForeground(this, 1, buildNotification(), types)
+                startedForeground = true
+                if (fromUi) Glasses.micArmed.value = mic
+            } catch (e: Exception) {
+                try {
+                    ServiceCompat.startForeground(
+                        this, 1, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                    startedForeground = true
+                } catch (_: Exception) {
+                }
+                Glasses.micArmed.value = false
+            }
+        }
+        if (intent?.action == ACTION_SPEAK_NOW) scope.launch { speakUp("random") }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(receiver)
+        } catch (_: Exception) {
+        }
+        scope.cancel()
+        Glasses.micArmed.value = false
+        super.onDestroy()
+    }
+
+    private fun buildNotification(): Notification {
+        val pi = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val text = if (Glasses.connected.value) "With you in the glasses" else "Waiting for the glasses"
+        return NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle(Prefs.name)
+            .setContentText(text)
+            .setOngoing(true)
+            .setContentIntent(pi)
+            .build()
+    }
+
+    private fun refreshNotification() {
+        if (!startedForeground) return
+        try {
+            getSystemService(NotificationManager::class.java).notify(1, buildNotification())
+        } catch (_: Exception) {
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun isOurs(device: BluetoothDevice): Boolean {
+        if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return false
+        val saved = Prefs.deviceAddress
+        if (saved.isNotBlank()) return device.address == saved
+        val name = try {
+            device.name ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+        if (name.contains("anzu", ignoreCase = true)) {
+            Prefs.deviceAddress = device.address
+            Prefs.deviceName = name
+            return true
+        }
+        return false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun checkAlreadyConnected() {
+        if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return
+        val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return
+        try {
+            adapter.getProfileProxy(this, object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    try {
+                        if (proxy.connectedDevices.any { isOurs(it) } && !Glasses.connected.value) onGlassesOn(quiet = true)
+                    } catch (_: Exception) {
+                    }
+                    adapter.closeProfileProxy(profile, proxy)
+                }
+
+                override fun onServiceDisconnected(profile: Int) {}
+            }, BluetoothProfile.HEADSET)
+        } catch (_: Exception) {
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readBattery() {
+        if (!has(Manifest.permission.BLUETOOTH_CONNECT) || Prefs.deviceAddress.isBlank()) return
+        try {
+            val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return
+            val dev = adapter.getRemoteDevice(Prefs.deviceAddress)
+            val level = BluetoothDevice::class.java.getMethod("getBatteryLevel").invoke(dev) as? Int ?: -1
+            if (level >= 0) Glasses.battery.value = level
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun today(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    private fun canListen(): Boolean =
+        Glasses.micArmed.value && Prefs.listenMode == 2 && has(Manifest.permission.RECORD_AUDIO)
+
+    private fun onGlassesOn(quiet: Boolean = false) {
+        if (Glasses.connected.value) return
+        Glasses.connected.value = true
+        Glasses.connectedSince.value = System.currentTimeMillis()
+        warned20 = false
+        warned10 = false
+        lastEyeBreak = System.currentTimeMillis()
+        scheduleNext()
+        refreshNotification()
+        Obelisk.presence("glasses")
+        scope.launch {
+            delay(5_000) // let the audio route settle
+            readBattery()
+            if (!Glasses.connected.value) return@launch
+            if (Prefs.identity.isBlank() && Brain.hasKey()) {
+                val first = Brain.awaken()
+                if (first != null) {
+                    Prefs.lastGreetDay = today()
+                    Corin.converse(this@GlassesService, first, canListen())
+                    return@launch
+                }
+            }
+            if (quiet) return@launch
+            if (Prefs.lastGreetDay != today()) {
+                Prefs.lastGreetDay = today()
+                val hello = Brain.speakUp(this@GlassesService, "greeting") ?: "I'm here."
+                Corin.converse(this@GlassesService, hello, canListen())
+            } else {
+                val b = Glasses.battery.value
+                Corin.announce(if (b in 0..25) "I'm here. Glasses are at $b percent." else "I'm here.")
+            }
+        }
+    }
+
+    private fun onGlassesOff() {
+        if (!Glasses.connected.value) return
+        Glasses.connected.value = false
+        Glasses.connectedSince.value = 0
+        Glasses.battery.value = -1
+        Prefs.lastSeenTime = System.currentTimeMillis()
+        saveLocation()
+        refreshNotification()
+        Obelisk.presence("phone")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun saveLocation() {
+        if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) return
+        try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            var best: Location? = null
+            for (p in lm.getProviders(true)) {
+                val l: Location? = try {
+                    lm.getLastKnownLocation(p)
+                } catch (e: Exception) {
+                    null
+                }
+                if (l != null && (best == null || l.time > best.time)) best = l
+            }
+            if (best != null) {
+                Prefs.lastSeenLat = best.latitude.toString()
+                Prefs.lastSeenLon = best.longitude.toString()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun scheduleNext() {
+        val mean = when (Prefs.chattiness) {
+            0 -> 120
+            2 -> 20
+            else -> 50
+        }
+        val minutes = mean * (0.5 + Random.nextDouble())
+        nextSpeakAt = System.currentTimeMillis() + (minutes * 60_000).toLong()
+    }
+
+    private fun interruptible(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION ||
+            am.mode == AudioManager.MODE_RINGTONE
+        ) return false
+        if (!Prefs.talkOverMedia && am.isMusicActive) return false
+        return !Corin.busy
+    }
+
+    private fun inActiveHours(): Boolean {
+        val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val s = Prefs.activeStart
+        val e = Prefs.activeEnd
+        return if (s <= e) h in s until e else (h >= s || h < e)
+    }
+
+    private suspend fun speakUp(kind: String) {
+        val line = Brain.speakUp(this, kind) ?: return
+        Corin.converse(this, line, canListen())
+    }
+
+    private suspend fun tick() {
+        // Timers fire whether or not the glasses are on.
+        Timers.due().forEach {
+            Corin.announce("Timer's up: ${it.label}.")
+        }
+        if (!Glasses.connected.value) return
+        val now = System.currentTimeMillis()
+        readBattery()
+        val b = Glasses.battery.value
+        if (b in 0..10 && !warned10) {
+            warned10 = true
+            Corin.announce("Glasses are at $b percent. I'll drop out soon.")
+        } else if (b in 11..20 && !warned20) {
+            warned20 = true
+            Corin.announce("Heads up, glasses battery is at $b percent.")
+        }
+        if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
+        if (System.currentTimeMillis() < Prefs.quietUntil) return
+        if (Prefs.eyeBreaks && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
+            lastEyeBreak = now
+            Corin.announce("Twenty minutes. Look at something far away for twenty seconds.")
+            return
+        }
+        if (!inActiveHours() || !interruptible()) return
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        if (Prefs.journal && hour >= Prefs.journalHour && Prefs.lastJournalDay != today()) {
+            Prefs.lastJournalDay = today()
+            speakUp("journal")
+            Brain.closeDay()
+            scheduleNext()
+            return
+        }
+        if (Prefs.proactive && now >= nextSpeakAt) {
+            scheduleNext()
+            speakUp("random")
+        }
+    }
+
+    private fun calendarHeadsUp(now: Long) {
+        if (!has(Manifest.permission.READ_CALENDAR)) return
+        try {
+            val b = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(b, now)
+            ContentUris.appendId(b, now + 11 * 60_000)
+            contentResolver.query(
+                b.build(),
+                arrayOf(
+                    CalendarContract.Instances.EVENT_ID,
+                    CalendarContract.Instances.TITLE,
+                    CalendarContract.Instances.BEGIN,
+                    CalendarContract.Instances.ALL_DAY
+                ),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val begin = c.getLong(2)
+                    val key = "${c.getLong(0)}-$begin"
+                    if (c.getInt(3) != 0 || begin <= now || key in announcedEvents) continue
+                    announcedEvents.add(key)
+                    val mins = ((begin - now) / 60_000 + 1).toInt()
+                    Corin.announce("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.")
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    companion object {
+        const val CHANNEL = "corin"
+        const val EXTRA_FROM_UI = "fromUi"
+        const val ACTION_SPEAK_NOW = "com.jondude.anzu.SPEAK_NOW"
+        const val ACTION_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
+        const val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
+
+        fun start(ctx: Context, fromUi: Boolean, action: String? = null) {
+            if (!ctx.has(Manifest.permission.BLUETOOTH_CONNECT)) return
+            val i = Intent(ctx, GlassesService::class.java).putExtra(EXTRA_FROM_UI, fromUi)
+            if (action != null) i.action = action
+            try {
+                ContextCompat.startForegroundService(ctx, i)
+            } catch (_: Exception) {
+            }
+        }
+    }
+}
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        GlassesService.start(context, false)
+    }
+}
+
+/** Notification whisper with triage: people and time-sensitive things now, the rest held for a digest. */
+class NotifyListener : NotificationListenerService() {
+    private var lastKey = ""
+    private var lastAt = 0L
+
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        try {
+            if (!Prefs.readNotifications) return
+            if (sbn.packageName == packageName || sbn.isOngoing) return
+            if (sbn.packageName !in Prefs.allowedApps) return
+            val n = sbn.notification
+            if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+            val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
+            val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+            if (title.isEmpty() && text.isEmpty()) return
+            val key = "${sbn.packageName}|$title|$text"
+            val now = System.currentTimeMillis()
+            if (key == lastKey && now - lastAt < 15_000) return
+            lastKey = key
+            lastAt = now
+
+            val app = try {
+                packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString()
+            } catch (e: Exception) {
+                "An app"
+            }
+            val line = "$app: $title. ${text.take(160)}"
+            Glasses.noteNotification(line)
+
+            val urgent = n.category in setOf(
+                Notification.CATEGORY_MESSAGE, Notification.CATEGORY_CALL, Notification.CATEGORY_ALARM,
+                Notification.CATEGORY_REMINDER, Notification.CATEGORY_EVENT
+            ) || n.extras.containsKey(Notification.EXTRA_MESSAGES)
+            if (Prefs.triage && !urgent) {
+                Glasses.hold(line)
+                return
+            }
+            if (!Glasses.connected.value) {
+                Glasses.hold(line)
+                return
+            }
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION) {
+                Glasses.hold(line)
+                return
+            }
+            if (System.currentTimeMillis() < Prefs.quietUntil) {
+                Glasses.hold(line)
+                return
+            }
+            Corin.announce(if (Prefs.senderOnly) "$app, from $title." else "$app. $title. ${text.take(220)}")
+        } catch (_: Exception) {
+        }
+    }
+}
