@@ -174,7 +174,7 @@ object Wake {
 }
 
 /** Opus to PCM using the platform decoder. */
-private class OpusDec {
+internal class OpusDec {
     private val codec: MediaCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
     private val info = MediaCodec.BufferInfo()
     private var outRate = 48000

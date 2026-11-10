@@ -45,3 +45,17 @@ Keep it on Tailscale only; it has no login.
 - **Weather** in the morning hello and on request.
 - **Companion screen** with a live orb, today's conversation, and Talk / Quiet buttons on the notification.
 - **Mic test** and a daily token meter in Settings.
+
+## Buddie earbuds
+
+Corin treats the Buddie earbuds as a second wearable. When they connect it also opens their always-on audio stream (Bluetooth LE service `ae00`, Opus at 16 kHz, per the open-source Buddie app) and uses it for:
+
+- **Wake word**: say "Corin" and then what you want. For 30 seconds after Corin speaks you can just answer.
+- **Only your voice by default**: the earbuds flag when the wearer is speaking, and nothing else is transcribed unless you turn on Ambient context.
+- **Meeting notes**: "Corin, start meeting notes" / "Corin, stop", or the earbuds' own meeting mode. The transcript is summarized into your notes.
+
+Older Buddie firmware uses a different audio format (244-byte packets) that is not supported yet; the Wearables card says so if that is what yours sends.
+
+## Verification
+
+Every push runs unit tests for the decision logic, then installs the app on an Android emulator, runs on-device audio tests, opens every screen and fails the build on any crash. Bluetooth hardware, real speech recognition and the model API are not covered by that and need a real wear test.

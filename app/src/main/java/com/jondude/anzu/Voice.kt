@@ -95,6 +95,7 @@ object Speaker : TextToSpeech.OnInitListener {
     suspend fun say(text: String, volume: Float = 1f) {
         val t = tts ?: return
         if (text.isBlank()) return
+        Glasses.lastSaid.value = text // shown on screen even if the speech engine is unavailable
         var waited = 0
         while (!ready && waited < 40) {
             delay(100)
@@ -104,7 +105,6 @@ object Speaker : TextToSpeech.OnInitListener {
         val id = UUID.randomUUID().toString()
         val done = CompletableDeferred<Unit>()
         waiters[id] = done
-        Glasses.lastSaid.value = text
         try {
             am.requestAudioFocus(focus)
             t.setSpeechRate(Prefs.speechRate / 100f)

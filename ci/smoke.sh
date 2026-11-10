@@ -14,13 +14,32 @@ adb logcat -c
 
 alive() { adb shell pidof $PKG >/dev/null 2>&1; }
 crashed() { adb logcat -d -s AndroidRuntime:E | grep -q "Process: $PKG"; }
-texts() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml | grep -o 'text="[^"]*"' | sed 's/text="//;s/"$//' | grep -v '^$' | tr '\n' '|' | cut -c1-900; }
-tap() { # tap the centre of the element whose text is $1
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
-  local b; b=$(adb shell cat /sdcard/ui.xml | grep -o "text=\"$1\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" | head -1 | grep -o '\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]')
-  [ -z "$b" ] && return 1
-  local n; n=($(echo "$b" | grep -o '[0-9]*'))
-  adb shell input tap $(( (n[0]+n[2])/2 )) $(( (n[1]+n[3])/2 ))
+dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml > ui.xml; }
+texts() { dump; python3 - <<'PY'
+import re, html
+x = open('ui.xml', encoding='utf-8', errors='ignore').read()
+t = [html.unescape(m) for m in re.findall(r'text="([^"]*)"', x) if m]
+print('|'.join(t)[:900])
+PY
+}
+has() { dump; python3 - "$1" <<'PY'
+import sys, re, html
+x = html.unescape(open('ui.xml', encoding='utf-8', errors='ignore').read())
+sys.exit(0 if sys.argv[1] in x else 1)
+PY
+}
+tap() { # tap the centre of the LAST element whose text is $1 (the nav bar sits last)
+  dump
+  local xy; xy=$(python3 - "$1" <<'PY'
+import sys, re
+x = open('ui.xml', encoding='utf-8', errors='ignore').read()
+m = re.findall(r'text="%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % re.escape(sys.argv[1]), x)
+if m:
+    a, b, c, d = map(int, m[-1]); print((a + c) // 2, (b + d) // 2)
+PY
+)
+  [ -z "$xy" ] && return 1
+  adb shell input tap $xy
 }
 check() { sleep 4; alive || fail "process died: $1"; crashed && fail "crash: $1"; note "$1 OK: $(texts)"; }
 
@@ -33,9 +52,33 @@ for tab in Notes Whisper Settings Corin; do
   check "$tab tab"
 done
 
-# Type a message with no API key: should answer with the "need a key" line, not crash.
-tap "Type to Corin" && adb shell input text "hello" && adb shell input keyevent 66
-check "Typed message"
+# Type a message with no API key: Corin should answer honestly instead of crashing.
+tap "Type to Corin" || fail "message box not found"
+adb shell input text "hello"; adb shell input keyevent 66
+sleep 6
+has "reach a model" || fail "typed message got no reply: $(texts)"
+check "Typed message answered"
+
+# Unprompted speech: the Speak up button should produce a line.
+tap "Speak up" || fail "Speak up button not found"
+sleep 8
+has "reach a model" && fail "Speak up produced nothing new: $(texts)"
+check "Spoke up on its own"
+adb shell am force-stop $PKG; adb shell am start -W -n $PKG/.MainActivity; sleep 3
+
+# Add a note through the UI.
+tap "Notes"; sleep 2
+tap "New note" || fail "note box not found"
+adb shell input text "buy%sbelt"; adb shell input keyevent 4; sleep 1
+tap "Add" || fail "Add button not found"
+sleep 2
+has "buy belt" || fail "note did not appear: $(texts)"
+check "Note added"
+
+# Notification access on, then a notification arrives: the listener must not crash.
+adb shell cmd notification allow_listener $PKG/$PKG.NotifyListener || true
+adb shell cmd notification post -t "Smoke" smoke "hello from the smoke test" || true
+check "Notification listener"
 
 # Scroll the settings screen top to bottom.
 tap "Settings"; sleep 2
@@ -51,4 +94,5 @@ adb shell input keyevent 4
 adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity
 check "Relaunch"
+note "Device log: $(adb logcat -d -s CORINTEST:I | grep CORINTEST | sed 's/.*CORINTEST: //' | tr '\n' '|' | cut -c1-700)"
 echo "SMOKE PASSED"
