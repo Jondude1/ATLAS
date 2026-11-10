@@ -50,6 +50,7 @@ adb shell dumpsys activity services $PKG | grep -q GlassesService && note "Backg
 for tab in Notes Whisper Settings Corin; do
   tap "$tab" || fail "tab $tab not found"
   check "$tab tab"
+  [ "$tab" = Notes ] && note "Notes hint nodes in raw dump: $(grep -c 'lands here' ui.xml) / $(grep -o 'text="Say[^>]\{0,60\}' ui.xml | head -2 | tr '\n' ' ')"
 done
 
 # Type a message with no API key: Corin should answer honestly instead of crashing.

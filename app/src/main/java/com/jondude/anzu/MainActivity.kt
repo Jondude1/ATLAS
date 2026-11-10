@@ -329,6 +329,7 @@ fun HomeScreen(resumes: Int) {
                 value = typed,
                 onValueChange = { typed = it },
                 label = { Text("Type to ${Prefs.name}") },
+                singleLine = true, // so Enter on a hardware or wrist keyboard sends
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() })
