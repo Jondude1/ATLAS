@@ -83,6 +83,14 @@ object Prefs {
     var homeOpenMinutes by IntPref("homeOpenMinutes", 10)
     var homeIgnore by StrPref("homeIgnore", "jon")
     var activityAware by BoolPref("activityAware", true)
+    var buddieListen by BoolPref("buddieListen", true)
+    var buddieAmbient by BoolPref("buddieAmbient", false)
+    var buddieBleAddress by StrPref("buddieBleAddress", "")
+    var wakeWord by BoolPref("wakeWord", true)
+    var commuteAlerts by BoolPref("commuteAlerts", true)
+    var houseSpeaker by BoolPref("houseSpeaker", false)
+    var haSpeaker by StrPref("haSpeaker", "")
+    var haTtsService by StrPref("haTtsService", "tts.google_translate_say")
     var aboutMe by StrPref("aboutMe", "")
     var haUrl by StrPref("haUrl", "")
     var haToken by StrPref("haToken", "")
@@ -152,6 +160,8 @@ object Store {
     fun init(c: Context) {
         dir = c.filesDir
         File(dir, "log").mkdirs()
+        history.clear()
+        lists.value = emptyMap()
         try {
             val o = JSONObject(File(dir, "lists.json").readText())
             val m = LinkedHashMap<String, List<Item>>()
@@ -236,10 +246,19 @@ object Store {
     }
 
     /** Resolve a spoken list name to an existing list where possible. */
+    private fun stem(w: String): String = when {
+        w.endsWith("ies") -> w.dropLast(3) + "y"
+        w.endsWith("s") -> w.dropLast(1)
+        else -> w
+    }
+
     private fun listKey(name: String): String {
-        val n = name.trim().lowercase().removeSuffix(" list").ifBlank { "list" }
+        val n = name.trim().lowercase().removePrefix("my ").removeSuffix(" list").ifBlank { "list" }
         val keys = lists.value.keys
-        return keys.firstOrNull { it == n } ?: keys.firstOrNull { it.contains(n) || n.contains(it) } ?: n
+        return keys.firstOrNull { it == n }
+            ?: keys.firstOrNull { stem(it) == stem(n) }
+            ?: keys.firstOrNull { it.contains(n) || n.contains(it) }
+            ?: n
     }
 
     @Synchronized
@@ -380,6 +399,22 @@ object Glasses {
     val corinState = MutableStateFlow("idle")
     val lastSaid = MutableStateFlow("")
     val lastHeard = MutableStateFlow("")
+    /** What he's wearing right now: "glasses", "Buddie earbuds", both, or empty. */
+    val wearing = MutableStateFlow("")
+    /** Status of the Buddie always-listening stream, for the UI and status checks. */
+    val buddieStream = MutableStateFlow("off")
+    val meeting = MutableStateFlow(false)
+
+    private val ambient = ArrayDeque<String>()
+
+    @Synchronized
+    fun noteAmbient(line: String) {
+        ambient.addLast(line)
+        while (ambient.size > 15) ambient.removeFirst()
+    }
+
+    @Synchronized
+    fun recentAmbient(): List<String> = ambient.toList()
 
     private val recent = ArrayDeque<String>()
     private val held = ArrayList<String>()

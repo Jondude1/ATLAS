@@ -90,10 +90,12 @@ class GlassesService : Service() {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, intent: Intent) {
             val device: BluetoothDevice? = androidx.core.content.IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            // The Buddie data link is Bluetooth LE and manages itself; only audio (classic) links count as "worn".
+            val le = intent.getIntExtra("android.bluetooth.device.extra.TRANSPORT", 0) == BluetoothDevice.TRANSPORT_LE
             when (intent.action) {
-                BluetoothDevice.ACTION_ACL_CONNECTED -> if (device != null && isOurs(device)) onGlassesOn()
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (device != null && isOurs(device)) onGlassesOff()
-                ACTION_BATTERY -> if (device != null && isOurs(device)) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> if (device != null && !le) wearableOn(device)
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (device != null && !le) wearableOff(device)
+                ACTION_BATTERY -> if (device != null && kind(device) != null) {
                     val level = intent.getIntExtra(EXTRA_BATTERY, -1)
                     if (level >= 0) Glasses.battery.value = level
                 }
@@ -218,22 +220,54 @@ class GlassesService : Service() {
         }
     }
 
+    /** Addresses of the wearables connected right now, mapped to what they are. */
+    private val worn = HashMap<String, String>()
+
+    /** "glasses", "buddie", or null for any other Bluetooth device. */
     @SuppressLint("MissingPermission")
-    private fun isOurs(device: BluetoothDevice): Boolean {
-        if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return false
-        val saved = Prefs.deviceAddress
-        if (saved.isNotBlank()) return device.address == saved
+    private fun kind(device: BluetoothDevice): String? {
+        if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return null
         val name = try {
             device.name ?: ""
         } catch (e: Exception) {
             ""
         }
-        if (name.contains("anzu", ignoreCase = true)) {
-            Prefs.deviceAddress = device.address
-            Prefs.deviceName = name
-            return true
+        return wearableKind(name, device.address, Prefs.deviceAddress)?.also {
+            if (it == "glasses" && Prefs.deviceAddress.isBlank()) {
+                Prefs.deviceAddress = device.address
+                Prefs.deviceName = name
+            }
         }
-        return false
+    }
+
+    private fun updateWearing() {
+        val kinds = synchronized(worn) { worn.values.toSet() }
+        Glasses.wearing.value = listOfNotNull(
+            "glasses".takeIf { it in kinds }, "Buddie earbuds".takeIf { "buddie" in kinds }
+        ).joinToString(" and ")
+    }
+
+    private fun wearableOn(device: BluetoothDevice, quiet: Boolean = false) {
+        val k = kind(device) ?: return
+        val first = synchronized(worn) {
+            val wasEmpty = worn.isEmpty()
+            worn[device.address] = k
+            wasEmpty
+        }
+        updateWearing()
+        if (k == "buddie") BuddieLink.start(this)
+        if (first) onGlassesOn(quiet)
+    }
+
+    private fun wearableOff(device: BluetoothDevice) {
+        val (k, empty) = synchronized(worn) {
+            val removed = worn.remove(device.address)
+            removed to worn.isEmpty()
+        }
+        if (k == null) return
+        updateWearing()
+        if (k == "buddie") BuddieLink.stop()
+        if (empty) onGlassesOff()
     }
 
     @SuppressLint("MissingPermission")
@@ -244,7 +278,7 @@ class GlassesService : Service() {
             adapter.getProfileProxy(this, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                     try {
-                        if (proxy.connectedDevices.any { isOurs(it) } && !Glasses.connected.value) onGlassesOn(quiet = true)
+                        proxy.connectedDevices.forEach { wearableOn(it, quiet = true) }
                     } catch (_: Exception) {
                     }
                     adapter.closeProfileProxy(profile, proxy)
@@ -258,10 +292,11 @@ class GlassesService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun readBattery() {
-        if (!has(Manifest.permission.BLUETOOTH_CONNECT) || Prefs.deviceAddress.isBlank()) return
+        val address = synchronized(worn) { worn.keys.firstOrNull() } ?: return
+        if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return
         try {
             val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return
-            val dev = adapter.getRemoteDevice(Prefs.deviceAddress)
+            val dev = adapter.getRemoteDevice(address)
             val level = BluetoothDevice::class.java.getMethod("getBatteryLevel").invoke(dev) as? Int ?: -1
             if (level >= 0) Glasses.battery.value = level
         } catch (_: Throwable) {
@@ -284,7 +319,7 @@ class GlassesService : Service() {
         refreshNotification()
         updateWakeLock()
         Motion.start(this)
-        Obelisk.presence("glasses")
+        Obelisk.presence(if (Glasses.wearing.value.startsWith("Buddie")) "earbuds" else "glasses")
         scope.launch {
             delay(5_000) // let the audio route settle
             readBattery()
@@ -319,6 +354,7 @@ class GlassesService : Service() {
         refreshNotification()
         updateWakeLock()
         Motion.stop()
+        BuddieLink.stop()
         Obelisk.presence("phone")
     }
 
@@ -400,6 +436,8 @@ class GlassesService : Service() {
         if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
         Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Corin.announce(it) } }
         ticks++
+        if (Glasses.meeting.value) return // stay out of the way while taking notes
+        if (Prefs.commuteAlerts && ticks % 10 == 0) commuteCheck(now)
         val quietNow = System.currentTimeMillis() < Prefs.quietUntil
         // House check every three minutes: only things that need him.
         if (Prefs.homeAlerts && HomeAssistant.configured() && ticks % 6 == 0) {
@@ -438,6 +476,61 @@ class GlassesService : Service() {
             scheduleNext()
             speakUp("random")
         }
+    }
+
+    private val commuteTold = HashSet<String>()
+    private val geocoded = HashMap<String, Pair<Double, Double>?>()
+
+    /** "Leave now" alerts for calendar events that have a location, using the current drive time. */
+    private suspend fun commuteCheck(now: Long) {
+        if (!has(Manifest.permission.READ_CALENDAR)) return
+        val here = Motion.fresh(10 * 60_000) ?: return
+        val lines = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val out = ArrayList<String>()
+            try {
+                val b = CalendarContract.Instances.CONTENT_URI.buildUpon()
+                ContentUris.appendId(b, now)
+                ContentUris.appendId(b, now + 3 * 60 * 60_000)
+                contentResolver.query(
+                    b.build(),
+                    arrayOf(
+                        CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE,
+                        CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY,
+                        CalendarContract.Instances.EVENT_LOCATION
+                    ),
+                    null, null, null
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val begin = c.getLong(2)
+                        val where = c.getString(4)?.trim().orEmpty()
+                        val key = "${c.getLong(0)}-$begin"
+                        if (c.getInt(3) != 0 || begin <= now || where.isEmpty() || key in commuteTold) continue
+                        val dest = geocoded.getOrPut(where) {
+                            try {
+                                android.location.Geocoder(this@GlassesService).getFromLocationName(where, 1)
+                                    ?.firstOrNull()?.let { it.latitude to it.longitude }
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } ?: continue
+                        val d = FloatArray(1)
+                        Location.distanceBetween(here.latitude, here.longitude, dest.first, dest.second, d)
+                        if (d[0] < 400f) continue // already there
+                        val secs = com.jondude.anzu.assist.Routing.driveSeconds(
+                            here.latitude, here.longitude, dest.first, dest.second
+                        ) ?: continue
+                        val line = com.jondude.anzu.assist.Routing.leaveLine(c.getString(1) ?: "your event", begin, secs, now)
+                        if (line != null) {
+                            commuteTold.add(key)
+                            out.add(line)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            out
+        }
+        lines.forEach { Corin.announce(it) }
     }
 
     private fun calendarHeadsUp(now: Long) {
@@ -533,7 +626,7 @@ class NotifyListener : NotificationListenerService() {
                 Glasses.hold(line)
                 return
             }
-            if (!Glasses.connected.value) {
+            if (!Glasses.connected.value || Glasses.meeting.value) {
                 Glasses.hold(line)
                 return
             }
@@ -550,4 +643,12 @@ class NotifyListener : NotificationListenerService() {
         } catch (_: Exception) {
         }
     }
+}
+
+/** Classifies a Bluetooth device by name and address: "glasses", "buddie", or null. */
+fun wearableKind(name: String, address: String, savedGlassesAddress: String): String? = when {
+    savedGlassesAddress.isNotBlank() && address == savedGlassesAddress -> "glasses"
+    name.contains("buddie", ignoreCase = true) -> "buddie"
+    savedGlassesAddress.isBlank() && name.contains("anzu", ignoreCase = true) -> "glasses"
+    else -> null
 }

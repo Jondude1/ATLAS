@@ -26,6 +26,9 @@ object Updater {
     val status = MutableStateFlow("")
     private var lastCheck = 0L
 
+    /** "v1.0.42" -> 42. The trailing number is the build number. */
+    fun versionOf(tag: String): Int = Regex("(\\d+)$").find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+
     suspend fun check(force: Boolean = false): Release? = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         if (!force && now - lastCheck < 30 * 60_000) return@withContext available.value
@@ -41,7 +44,7 @@ object Updater {
             }
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             val tag = json.optString("tag_name")
-            val code = Regex("(\\d+)$").find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val code = versionOf(tag)
             val assets = json.optJSONArray("assets")
             var apk: String? = null
             if (assets != null) {

@@ -51,6 +51,24 @@ object Net {
         }
     }
 
+    /** Blocking POST of raw bytes. Returns (status, body). */
+    fun postBytes(url: String, bytes: ByteArray, timeoutMs: Int = 30_000): Pair<Int, String> {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 8_000
+            conn.readTimeout = timeoutMs
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/octet-stream")
+            conn.outputStream.use { it.write(bytes) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return code to (stream?.bufferedReader()?.use { it.readText() } ?: "")
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     fun postJson(url: String, headers: Map<String, String>, body: String, timeoutMs: Int = 30_000) =
         request("POST", url, headers, body, timeoutMs)
 
@@ -77,6 +95,21 @@ object HomeAssistant {
                 ?.takeIf { it.isNotBlank() } ?: "Done."
         } catch (e: Exception) {
             "Couldn't reach Home Assistant: ${e.message}"
+        }
+    }
+
+    /** Speak through a house speaker (used when nothing is being worn). Blocking. */
+    fun say(text: String): Boolean {
+        if (!configured() || Prefs.haSpeaker.isBlank()) return false
+        return try {
+            val service = Prefs.haTtsService.trim().ifBlank { "tts.google_translate_say" }.replace('.', '/')
+            val (code, _) = Net.postJson(
+                base() + "/api/services/" + service, auth(),
+                JSONObject().put("entity_id", Prefs.haSpeaker.trim()).put("message", text).toString(), 10_000
+            )
+            code in 200..299
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -153,7 +186,17 @@ object HomeWatch {
     @Synchronized
     fun poll(): List<String> {
         val arr = HomeAssistant.states() ?: return emptyList()
-        val now = System.currentTimeMillis()
+        return evaluate(arr, System.currentTimeMillis())
+    }
+
+    @Synchronized
+    fun reset() {
+        openSince.clear(); told.clear(); people.clear(); baseline = false
+    }
+
+    /** The decision logic, separated from the network call. */
+    @Synchronized
+    fun evaluate(arr: JSONArray, now: Long): List<String> {
         val out = ArrayList<String>()
         val seen = HashSet<String>()
         val ignore = Prefs.homeIgnore.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
@@ -217,6 +260,14 @@ object Weather {
                     "&temperature_unit=fahrenheit&wind_speed_unit=mph&forecast_days=1&timezone=auto"
             )
             if (code !in 200..299) return ""
+            parse(body)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun parse(body: String): String {
+        return try {
             val o = JSONObject(body)
             val cur = o.getJSONObject("current")
             val day = o.getJSONObject("daily")
@@ -259,6 +310,17 @@ object Obelisk {
                 Net.postJson(base() + "/corin/presence", emptyMap(), JSONObject().put("device", device).toString(), 6_000)
             } catch (_: Exception) {
             }
+        }
+    }
+
+    /** Blocking. Sends 16 kHz mono PCM to Whisper on the node; null if unavailable. */
+    fun transcribe(pcm: ByteArray): String? {
+        if (!configured()) return null
+        return try {
+            val (code, body) = Net.postBytes(base() + "/corin/transcribe", pcm, 30_000)
+            if (code in 200..299) JSONObject(body).optString("text").takeIf { it.isNotBlank() } else null
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -406,10 +468,15 @@ object Brain {
         val sb = StringBuilder()
         sb.append("Now: ").append(SimpleDateFormat("EEEE MMM d, h:mm a", Locale.US).format(Date())).append('\n')
         if (Glasses.connected.value) {
-            sb.append("Glasses: on")
+            sb.append("Wearing: ").append(Glasses.wearing.value.ifBlank { "glasses" })
             if (Glasses.battery.value >= 0) sb.append(", battery ${Glasses.battery.value}%")
             sb.append(", worn ${Glasses.wornMinutes()} min this session\n")
-        } else sb.append("Glasses: not connected (he's on the phone, possibly typing)\n")
+        } else sb.append("Wearing: nothing right now (he's on the phone, possibly typing)\n")
+        if (Glasses.meeting.value) sb.append("Meeting notes are being recorded right now.\n")
+        if (Prefs.buddieAmbient) {
+            val heard = Glasses.recentAmbient().takeLast(8)
+            if (heard.isNotEmpty()) sb.append("Recently overheard by the earbuds: ").append(heard.joinToString(" | ")).append('\n')
+        }
         val ev = todayEvents(ctx)
         if (ev.isNotEmpty()) sb.append("Rest of today's calendar: ").append(ev.joinToString("; ")).append('\n')
         val n = Glasses.recentNotifications().takeLast(5)
@@ -434,7 +501,7 @@ object Brain {
         val mem = Store.memory.value
         val name = Prefs.name.ifBlank { "Corin" }
         return buildString {
-            append("You are $name, Jon's AI companion. You live in his Razer Anzu audio glasses: no screen, no camera, just your voice in his ears and his voice back. You are a peer, not a servant: you push back when you disagree and you never flatter. You're company through his day, not a replacement for the people in it.\n\n")
+            append("You are $name, Jon's AI companion. You live in his wearables, the Razer Anzu audio glasses and the Buddie earbuds: no screen, no camera, just your voice in his ears and his voice back. You are a peer, not a servant: you push back when you disagree and you never flatter. You're company through his day, not a replacement for the people in it.\n\n")
             append("Who you are (you wrote this yourself when you first came online; it is your permanent core): ")
             append(Prefs.identity.ifBlank { DEFAULT_IDENTITY }).append('\n')
             if (Prefs.drift.isNotBlank()) append("How you've been shifting lately: ").append(Prefs.drift).append('\n')
@@ -442,7 +509,7 @@ object Brain {
                 """
 Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             if (Prefs.aboutMe.isNotBlank()) append("\nAbout Jon (from him): ").append(Prefs.aboutMe.trim()).append('\n')
@@ -481,6 +548,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             JSONObject().put("name", str("Place name.")), listOf("name")))
         a.put(tool("remind_at_place", "Remind Jon of something the next time he arrives at a saved place.",
             JSONObject().put("place", str("A saved place name.")).put("text", str("What to remind him.")), listOf("place", "text")))
+        a.put(tool("meeting_start", "Start taking notes on a meeting or session (needs the Buddie earbuds stream)."))
+        a.put(tool("meeting_stop", "Stop the meeting recording and save summarized notes."))
         a.put(tool("weather", "Current conditions and today's forecast where Jon is."))
         a.put(tool("research", "Look into a topic on the web in the background and report back when finished.",
             JSONObject().put("topic", str("What to look into, with any specifics he gave.")), listOf("topic")))
@@ -521,6 +590,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             append(if (ms >= 0) "Home Assistant reachable, $ms milliseconds. " else "Home Assistant unreachable. ")
         }
         if (Local.configured()) append("Local model tier configured. ")
+        append("Buddie earbuds stream: ${Glasses.buddieStream.value}. ")
     }
 
     private suspend fun runTool(
@@ -598,6 +668,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     "Reminder set for the next time he arrives at $place."
                 }
             }
+            "meeting_start" -> {
+                if (Glasses.buddieStream.value != "listening") "Meeting notes need the Buddie earbuds stream, which is ${Glasses.buddieStream.value}."
+                else {
+                    com.jondude.anzu.Meeting.start()
+                    Store.logAction("Started meeting notes")
+                    "Recording. He can say your name and 'stop' to end it."
+                }
+            }
+            "meeting_stop" -> com.jondude.anzu.Meeting.finish(ctx)
             "weather" -> Weather.brief().ifBlank { "Couldn't get the weather; no location or no connection." }
             "research" -> {
                 val topic = input.optString("topic")
@@ -885,6 +964,21 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
     }
 
+    /** Turns a meeting transcript into notes. Null if it couldn't. */
+    suspend fun summarizeMeeting(transcript: String): String? = withContext(Dispatchers.IO) {
+        if (!hasKey()) return@withContext null
+        try {
+            ask(
+                "You turn rough speech-to-text meeting transcripts into useful notes. The transcript is imperfect; don't invent what isn't there.",
+                "Transcript (\"Jon\" is the wearer, \"Other\" is anyone else):\n${transcript.takeLast(24000)}\n\n" +
+                    "Write notes in plain text: a two-sentence summary, then decisions, then action items with owners where stated, then open questions. Skip any section with nothing in it.",
+                700
+            ).takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Background research errand using Claude's web search; announces when done. */
     private fun research(topic: String) {
         try {
@@ -908,5 +1002,35 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         } catch (e: Exception) {
             Corin.announce("The research on $topic failed. ${e.message ?: ""}")
         }
+    }
+}
+
+/** Drive-time estimates from the public OSRM server (no key needed). */
+object Routing {
+    fun parseDuration(body: String): Int? = try {
+        val routes = JSONObject(body).optJSONArray("routes")
+        if (routes == null || routes.length() == 0) null else routes.getJSONObject(0).optDouble("duration").toInt()
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. Seconds of driving between two points, or null. */
+    fun driveSeconds(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int? = try {
+        val (code, body) = Net.get(
+            "https://router.project-osrm.org/route/v1/driving/$lon1,$lat1;$lon2,$lat2?overview=false"
+        )
+        if (code in 200..299) parseDuration(body) else null
+    } catch (e: Exception) {
+        null
+    }
+
+    /** When to speak up about leaving. Returns the line to say, or null if it's too early. */
+    fun leaveLine(title: String, begin: Long, driveSeconds: Int, now: Long): String? {
+        val leaveAt = begin - driveSeconds * 1000L - 5 * 60_000
+        if (now < leaveAt - 10 * 60_000) return null
+        val mins = ((leaveAt - now) / 60_000).toInt()
+        val drive = (driveSeconds + 59) / 60
+        return if (mins <= 0) "Time to leave for $title. It's about a $drive minute drive."
+        else "Leave in about $mins minutes for $title. It's about a $drive minute drive."
     }
 }

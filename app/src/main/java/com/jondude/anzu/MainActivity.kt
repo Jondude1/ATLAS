@@ -113,6 +113,7 @@ private val CorinColors = darkColorScheme(
 
 val REQUESTED = arrayOf(
     Manifest.permission.BLUETOOTH_CONNECT,
+    Manifest.permission.BLUETOOTH_SCAN,
     Manifest.permission.RECORD_AUDIO,
     Manifest.permission.POST_NOTIFICATIONS,
     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -284,6 +285,9 @@ fun HomeScreen(resumes: Int) {
     val connected by Glasses.connected.collectAsState()
     val battery by Glasses.battery.collectAsState()
     val armed by Glasses.micArmed.collectAsState()
+    val wearing by Glasses.wearing.collectAsState()
+    val buddie by Glasses.buddieStream.collectAsState()
+    val meeting by Glasses.meeting.collectAsState()
     val state by Glasses.corinState.collectAsState()
     val said by Glasses.lastSaid.collectAsState()
     val heard by Glasses.lastHeard.collectAsState()
@@ -364,13 +368,15 @@ fun HomeScreen(resumes: Int) {
             }
         }
 
-        Section("Glasses") {
+        Section("Wearables") {
+            if (meeting) Text("Taking meeting notes", color = Gold, fontWeight = FontWeight.Bold)
             Text(
-                if (connected) "Connected" + (if (battery >= 0) " · battery $battery%" else "") +
+                if (connected) "Wearing ${wearing.ifBlank { "glasses" }}" + (if (battery >= 0) " · battery $battery%" else "") +
                     " · worn ${Glasses.wornMinutes()} min"
                 else "Not connected"
             )
-            Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else deviceName, color = Muted, fontSize = 13.sp)
+            Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else "Glasses: $deviceName", color = Muted, fontSize = 13.sp)
+            Text("Buddie earbuds stream: $buddie", color = Muted, fontSize = 13.sp)
             Text(
                 if (armed) "Conversation window armed: ${Prefs.name} can listen after speaking up."
                 else "Conversation window not armed. Opening this app arms it until the phone restarts.",
@@ -647,6 +653,7 @@ fun SettingsScreen() {
             ToggleRow("Activity aware", "No unprompted chatter while driving; opens a conversation when you head out on a walk", Prefs.activityAware) { Prefs.activityAware = it }
             ToggleRow("20-20-20 eye breaks", "Every 20 minutes of wear", Prefs.eyeBreaks) { Prefs.eyeBreaks = it }
             ToggleRow("Calendar heads-ups", "Ten minutes before events", Prefs.calendarHeadsUp) { Prefs.calendarHeadsUp = it }
+            ToggleRow("Leave-now alerts", "For calendar events with a location, based on the current drive time", Prefs.commuteAlerts) { Prefs.commuteAlerts = it }
         }
 
         Section("Listening") {
@@ -668,12 +675,23 @@ fun SettingsScreen() {
             OutlinedButton(onClick = { Corin.micTest(ctx) }) { Text("Test voice and microphone") }
         }
 
+        Section("Buddie earbuds") {
+            Text("Buddie earbuds stream their always-on microphone to the phone, so ${Prefs.name} can hear you without a gesture. Anything named Buddie is picked up automatically.", color = Muted, fontSize = 13.sp)
+            ToggleRow("Listen through Buddie", "Connect to the earbuds' audio stream when you put them in", Prefs.buddieListen) { Prefs.buddieListen = it }
+            ToggleRow("Wake word", "Say \"${Prefs.name}\" and then what you want. For 30 seconds after it speaks, you can just answer.", Prefs.wakeWord) { Prefs.wakeWord = it }
+            ToggleRow("Ambient context", "Also transcribe other people nearby so ${Prefs.name} knows what's going on. Off means only your own voice is ever transcribed.", Prefs.buddieAmbient) { Prefs.buddieAmbient = it }
+            TextButton(onClick = { Prefs.buddieBleAddress = ""; BuddieLink.stop() }) { Text("Forget earbuds and search again next time") }
+        }
+
         Section("Home Assistant") {
             PrefField("URL (e.g. your Tailscale address, port 8123)", Prefs.haUrl) { Prefs.haUrl = it.trim() }
             PrefField("Long-lived access token", Prefs.haToken, secret = true) { Prefs.haToken = it.trim() }
             ToggleRow("House alerts", "Tells you when something is left open or unlocked, and when people come and go", Prefs.homeAlerts) { Prefs.homeAlerts = it }
             PrefField("Alert after open for (minutes)", Prefs.homeOpenMinutes.toString()) { s -> s.toIntOrNull()?.let { Prefs.homeOpenMinutes = it.coerceIn(1, 240) } }
             PrefField("Don't announce comings and goings for", Prefs.homeIgnore) { Prefs.homeIgnore = it }
+            ToggleRow("Use a house speaker when I'm not wearing anything", "Timers and alerts go to the speaker below", Prefs.houseSpeaker) { Prefs.houseSpeaker = it }
+            PrefField("Speaker entity (e.g. media_player.office)", Prefs.haSpeaker) { Prefs.haSpeaker = it.trim() }
+            PrefField("Speech service", Prefs.haTtsService) { Prefs.haTtsService = it.trim() }
             PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
             PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }
         }

@@ -17,13 +17,56 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Unit tests
+        run: gradle testReleaseUnitTest --no-daemon --stacktrace
+      - name: Test summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          t=f=0; bad=[]
+          for p in glob.glob('app/build/test-results/**/*.xml', recursive=True):
+              r=ET.parse(p).getroot()
+              t+=int(r.get('tests',0)); f+=int(r.get('failures',0))+int(r.get('errors',0))
+              for c in r.iter('testcase'):
+                  for x in list(c.findall('failure'))+list(c.findall('error')):
+                      bad.append(c.get('name')+': '+(x.get('message') or '')[:300].replace('\n',' '))
+          print(f"::notice title=Unit tests::{t} run, {f} failed")
+          for b in bad: print(f"::error title=Test failed::{b}")
+          PY
       - name: Build
         run: gradle assembleRelease --no-daemon --stacktrace
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk AnzuOne-v1.0.${{ github.run_number }}.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: AnzuOne-v1.0.${{ github.run_number }}.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Anzu One v1.0.${{ github.run_number }}
           files: AnzuOne-v1.0.${{ github.run_number }}.apk
           make_latest: true
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: bash ci/smoke.sh

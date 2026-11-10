@@ -40,6 +40,10 @@ object Corin {
     private val mutex = Mutex()
     val busy: Boolean get() = mutex.isLocked
 
+    /** After Corin speaks, replies heard by the Buddie earbuds count without the wake word until this time. */
+    @Volatile
+    var windowUntil = 0L
+
     private val enders = Regex("^(never ?mind|stop|that'?s all|that is all|nothing|no thanks|cancel|goodbye|bye)\\W*$", RegexOption.IGNORE_CASE)
     private val yes = Regex("\\b(yes|yeah|yep|yup|sure|okay|ok|do it|go ahead|please do|confirm)\\b", RegexOption.IGNORE_CASE)
 
@@ -54,6 +58,7 @@ object Corin {
                 if (!opening.isNullOrBlank()) {
                     Glasses.corinState.value = "speaking"
                     Speaker.say(opening)
+                    windowUntil = System.currentTimeMillis() + 30_000
                 }
                 if (!canListen || Prefs.listenMode == 0) return
                 repeat(maxTurns) {
@@ -75,9 +80,39 @@ object Corin {
                     }
                     Glasses.corinState.value = "speaking"
                     Speaker.say(answer, volume)
+                    windowUntil = System.currentTimeMillis() + 30_000
                 }
             } finally {
                 Glasses.corinState.value = "idle"
+            }
+        }
+    }
+
+    /** Something Jon said to Corin, already transcribed (the Buddie wake-word path). */
+    fun heard(ctx: Context, text: String) {
+        val app = ctx.applicationContext
+        scope.launch {
+            mutex.withLock {
+                try {
+                    if (text.isBlank()) {
+                        Glasses.corinState.value = "speaking"
+                        Speaker.say("Yeah?")
+                    } else {
+                        Glasses.lastHeard.value = text
+                        if (enders.matches(text.trim())) {
+                            windowUntil = 0
+                            return@withLock
+                        }
+                        Glasses.corinState.value = "thinking"
+                        Ears.earcon("think")
+                        val answer = Brain.reply(app, text)
+                        Glasses.corinState.value = "speaking"
+                        Speaker.say(answer)
+                    }
+                    windowUntil = System.currentTimeMillis() + 30_000
+                } finally {
+                    Glasses.corinState.value = "idle"
+                }
             }
         }
     }
@@ -132,7 +167,10 @@ object Corin {
             mutex.withLock {
                 try {
                     Glasses.corinState.value = "speaking"
-                    Speaker.say(text)
+                    // Nothing worn: hand off to a house speaker if one is set up.
+                    val handedOff = !Glasses.connected.value && Prefs.houseSpeaker &&
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(text) }
+                    if (!handedOff) Speaker.say(text)
                 } finally {
                     Glasses.corinState.value = "idle"
                 }

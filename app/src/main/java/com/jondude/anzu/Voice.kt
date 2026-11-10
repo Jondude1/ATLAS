@@ -17,6 +17,8 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -164,7 +166,7 @@ object Ears {
         try {
             earcon("listen")
             delay(200)
-            withTimeoutOrNull(20_000) { recognizeOnce(app) }
+            recognizer.withLock { withTimeoutOrNull(20_000) { recognizeOnce(app) } }
         } finally {
             if (routed) {
                 try {
@@ -176,8 +178,15 @@ object Ears {
         }
     }
 
-    private suspend fun recognizeOnce(app: Context): Heard? = suspendCancellableCoroutine { cont ->
-        val sr = SpeechRecognizer.createSpeechRecognizer(app)
+    /** Only one recognizer session at a time, microphone or file. */
+    val recognizer = Mutex()
+
+    suspend fun recognizeOnce(
+        app: Context, onDevice: Boolean = false, configure: (Intent) -> Unit = {}
+    ): Heard? = suspendCancellableCoroutine { cont ->
+        val sr = if (onDevice && SpeechRecognizer.isOnDeviceRecognitionAvailable(app)) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(app)
+        } else SpeechRecognizer.createSpeechRecognizer(app)
         var finished = false
         var peak = -10f
         fun finish(v: Heard?) {
@@ -211,6 +220,7 @@ object Ears {
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, app.packageName)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
+        configure(intent)
         try {
             sr.startListening(intent)
         } catch (e: Exception) {
@@ -228,5 +238,53 @@ object Ears {
                 }
             }
         }
+    }
+}
+
+/** Turns a recorded utterance (16 kHz mono) into text. Used for the Buddie earbud stream. */
+object Transcriber {
+    suspend fun transcribe(ctx: Context, pcm: ShortArray): String? {
+        val app = ctx.applicationContext
+        return android(app, pcm) ?: obelisk(pcm)
+    }
+
+    /** Android's own recognizer, fed from memory instead of a microphone (Android 13+). */
+    private suspend fun android(app: Context, pcm: ShortArray): String? {
+        if (android.os.Build.VERSION.SDK_INT < 33) return null
+        if (!app.has(Manifest.permission.RECORD_AUDIO) || !SpeechRecognizer.isRecognitionAvailable(app)) return null
+        return try {
+            val pipe = android.os.ParcelFileDescriptor.createPipe()
+            val bytes = AudioMath.toBytes(pcm)
+            Thread {
+                try {
+                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { it.write(bytes) }
+                } catch (_: Exception) {
+                }
+            }.start()
+            val heard = Ears.recognizer.withLock {
+                withContext(Dispatchers.Main) {
+                    withTimeoutOrNull(15_000) {
+                        Ears.recognizeOnce(app, onDevice = true) { intent ->
+                            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
+                            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, 16000)
+                        }
+                    }
+                }
+            }
+            try {
+                pipe[0].close()
+            } catch (_: Exception) {
+            }
+            heard?.text
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Fallback: Whisper on Obelisk, if the Corin server is linked and has it installed. */
+    private suspend fun obelisk(pcm: ShortArray): String? = withContext(Dispatchers.IO) {
+        com.jondude.anzu.assist.Obelisk.transcribe(AudioMath.toBytes(pcm))
     }
 }
