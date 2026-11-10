@@ -20,6 +20,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.media.AudioManager
 import android.os.IBinder
+import android.os.PowerManager
 import android.provider.CalendarContract
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -57,6 +58,29 @@ class GlassesService : Service() {
     private var warned20 = false
     private var warned10 = false
     private val announcedEvents = HashSet<String>()
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * Keep the CPU awake while the glasses are on (or a timer is pending), so Corin
+     * still speaks up with the phone asleep in a pocket.
+     */
+    @Synchronized
+    private fun updateWakeLock() {
+        val want = Glasses.connected.value || Timers.pending()
+        try {
+            if (want) {
+                if (wakeLock == null) {
+                    wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "corin:presence")
+                        .apply { setReferenceCounted(false) }
+                }
+                if (wakeLock?.isHeld != true) wakeLock?.acquire(12 * 60 * 60_000L)
+            } else if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, intent: Intent) {
@@ -125,6 +149,7 @@ class GlassesService : Service() {
             }
         }
         if (intent?.action == ACTION_SPEAK_NOW) scope.launch { speakUp("random") }
+        updateWakeLock()
         return START_STICKY
     }
 
@@ -134,6 +159,10 @@ class GlassesService : Service() {
         } catch (_: Exception) {
         }
         scope.cancel()
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {
+        }
         Glasses.micArmed.value = false
         super.onDestroy()
     }
@@ -224,6 +253,7 @@ class GlassesService : Service() {
         lastEyeBreak = System.currentTimeMillis()
         scheduleNext()
         refreshNotification()
+        updateWakeLock()
         Obelisk.presence("glasses")
         scope.launch {
             delay(5_000) // let the audio route settle
@@ -257,6 +287,7 @@ class GlassesService : Service() {
         Prefs.lastSeenTime = System.currentTimeMillis()
         saveLocation()
         refreshNotification()
+        updateWakeLock()
         Obelisk.presence("phone")
     }
 
@@ -318,6 +349,7 @@ class GlassesService : Service() {
         Timers.due().forEach {
             Corin.announce("Timer's up: ${it.label}.")
         }
+        updateWakeLock()
         if (!Glasses.connected.value) return
         val now = System.currentTimeMillis()
         readBattery()
@@ -384,6 +416,7 @@ class GlassesService : Service() {
         const val CHANNEL = "corin"
         const val EXTRA_FROM_UI = "fromUi"
         const val ACTION_SPEAK_NOW = "com.jondude.anzu.SPEAK_NOW"
+        const val ACTION_POKE = "com.jondude.anzu.POKE"
         const val ACTION_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
 

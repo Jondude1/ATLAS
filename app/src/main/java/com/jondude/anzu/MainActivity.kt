@@ -9,6 +9,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -258,6 +259,9 @@ fun HomeScreen(resumes: Int) {
     val listenerOn = remember(resumes) {
         NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
     }
+    val unrestricted = remember(resumes) {
+        (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         GlassesService.start(ctx, true)
     }
@@ -344,7 +348,7 @@ fun HomeScreen(resumes: Int) {
             }
         }
 
-        if (missing.isNotEmpty() || !listenerOn || Prefs.apiKey.isBlank()) {
+        if (missing.isNotEmpty() || !listenerOn || !unrestricted || Prefs.apiKey.isBlank()) {
             Section("Setup") {
                 if (missing.isNotEmpty()) {
                     Text("Bluetooth, microphone, notifications, location (find my glasses) and calendar access.")
@@ -355,6 +359,17 @@ fun HomeScreen(resumes: Int) {
                     Button(onClick = {
                         ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }) { Text("Allow notification access") }
+                }
+                if (!unrestricted) {
+                    Text("Turn off battery optimization so ${Prefs.name} keeps talking while the phone is in your pocket.")
+                    Button(onClick = {
+                        try {
+                            ctx.startActivity(
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+                            )
+                        } catch (_: Exception) {
+                        }
+                    }) { Text("Allow background running") }
                 }
                 if (Prefs.apiKey.isBlank()) Text("Add your Anthropic API key in Settings so ${Prefs.name} can think.")
             }

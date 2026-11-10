@@ -206,24 +206,58 @@ object Timers {
     data class T(val at: Long, val label: String)
 
     private val list = ArrayList<T>()
+    private var loaded = false
+
+    private fun load() {
+        if (loaded) return
+        loaded = true
+        try {
+            val a = JSONArray(Prefs.sp.getString("timers", "[]"))
+            for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                list.add(T(o.getLong("at"), o.optString("label")))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun save() {
+        val a = JSONArray()
+        list.forEach { a.put(JSONObject().put("at", it.at).put("label", it.label)) }
+        Prefs.sp.edit().putString("timers", a.toString()).apply()
+    }
 
     @Synchronized
     fun add(minutes: Double, label: String): T {
+        load()
         val t = T(System.currentTimeMillis() + (minutes * 60_000).toLong(), label)
         list.add(t)
+        save()
         return t
     }
 
     @Synchronized
     fun cancel(t: T) {
+        load()
         list.remove(t)
+        save()
+    }
+
+    @Synchronized
+    fun pending(): Boolean {
+        load()
+        return list.isNotEmpty()
     }
 
     @Synchronized
     fun due(): List<T> {
+        load()
         val now = System.currentTimeMillis()
         val d = list.filter { it.at <= now }
-        list.removeAll(d.toSet())
+        if (d.isNotEmpty()) {
+            list.removeAll(d.toSet())
+            save()
+        }
         return d
     }
 }
@@ -413,6 +447,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val label = input.optString("label", "timer")
                 val t = Timers.add(input.optDouble("minutes", 1.0), label)
                 Store.logAction("Set a timer: $label")
+                com.jondude.anzu.GlassesService.start(ctx, false, com.jondude.anzu.GlassesService.ACTION_POKE)
                 lastUndo = { Timers.cancel(t); "Timer cancelled." }
                 "Timer set."
             }
