@@ -1,0 +1,34 @@
+name: Publish speech model
+# Copies the offline speech-recognition model into this repo's releases so the app can download it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/models.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and unpack
+        run: |
+          curl -sfL -o m.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-distil-small.en.tar.bz2
+          tar xjf m.tar.bz2
+          cd sherpa-onnx-whisper-distil-small.en
+          ls -la
+          sha256sum distil-small.en-encoder.int8.onnx distil-small.en-decoder.int8.onnx distil-small.en-tokens.txt
+          cp test_wavs/0.wav ../sample.wav
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: models-v1
+          name: Speech model (distil-small.en)
+          body: |
+            Offline speech recognition model the app downloads for the Buddie earbud stream.
+            Whisper distil-small.en, int8 ONNX export from the sherpa-onnx project. Not an app release.
+          make_latest: false
+          files: |
+            sherpa-onnx-whisper-distil-small.en/distil-small.en-encoder.int8.onnx
+            sherpa-onnx-whisper-distil-small.en/distil-small.en-decoder.int8.onnx
+            sherpa-onnx-whisper-distil-small.en/distil-small.en-tokens.txt
+            sample.wav
