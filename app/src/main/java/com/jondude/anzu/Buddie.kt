@@ -44,14 +44,22 @@ class BuddiePacket(val mic: ByteArray?, val selfSpeaking: Boolean, val meeting: 
         const val SIZE = 84
         const val LEGACY_SIZE = 244
 
+        private fun part(v: ByteArray, from: Int): ByteArray? =
+            v.copyOfRange(from, from + 40).takeIf { m -> m.any { it != 0.toByte() } }
+
+        /**
+         * Two layouts exist in the wild. The published firmware puts a speaking flag first and the
+         * microphone frame at byte 1; the published app expects the frame at byte 0 with flags at
+         * 80 and 81. A real Opus frame never starts with 0 or 1, which tells them apart.
+         */
         fun parse(v: ByteArray): BuddiePacket? {
             if (v.size != SIZE) return null
-            val mic = v.copyOfRange(0, 40)
-            return BuddiePacket(
-                mic.takeIf { m -> m.any { it != 0.toByte() } },
-                v[80] == 1.toByte(),
-                v[81] == 0xFE.toByte()
-            )
+            val first = v[0].toInt() and 0xFF
+            return if (first <= 1) {
+                BuddiePacket(part(v, 1), first == 1, false)
+            } else {
+                BuddiePacket(part(v, 0), v[80] == 1.toByte(), v[81] == 0xFE.toByte())
+            }
         }
     }
 }
@@ -250,16 +258,36 @@ object BuddieStats {
     @Volatile
     var lastProblem = ""
     val summary = kotlinx.coroutines.flow.MutableStateFlow("No audio received yet.")
+    /** What the earbuds offer and what was asked of them, e.g. "channels ae01 ae02 ae03 ae04". */
+    @Volatile
+    var channels = ""
+    @Volatile
+    var subscriptions = ""
+    @Volatile
+    var mtu = 0
+    @Volatile
+    var statusPackets = 0L
+
+    fun total(): Long = compressed + opus + statusPackets
 
     fun reset() {
-        compressed = 0; opus = 0; otherSize = 0; segments = 0; recognized = 0
-        sensorSeen = false; lastHeard = ""; lastProblem = ""
+        compressed = 0; opus = 0; otherSize = 0; segments = 0; recognized = 0; statusPackets = 0
+        sensorSeen = false; lastHeard = ""; lastProblem = ""; channels = ""; subscriptions = ""; mtu = 0
         publish()
+    }
+
+    private fun link(): String = buildString {
+        if (channels.isNotBlank()) append(" · earbud channels: $channels")
+        if (subscriptions.isNotBlank()) append(" · subscribed: $subscriptions")
+        if (mtu > 0) append(" · packet limit: $mtu")
     }
 
     fun publish() {
         val total = compressed + opus
-        summary.value = if (total == 0L && otherSize == 0) "No audio received yet." else buildString {
+        summary.value = if (total == 0L && otherSize == 0) {
+            "No audio received yet." + (if (statusPackets > 0) " ($statusPackets status packets)" else "") + link() +
+                (if (lastProblem.isNotBlank()) " · problem: $lastProblem" else "")
+        } else buildString {
             append("Audio packets: $total")
             append(when {
                 compressed > 0 -> " (compressed format)"
@@ -270,6 +298,7 @@ object BuddieStats {
             append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
+            append(link())
         }
     }
 }
@@ -485,11 +514,36 @@ object BuddieLink {
         try {
             val dev = adapter()?.getRemoteDevice(address) ?: return
             Glasses.buddieStream.value = "connecting"
-            BuddieStats.reset()
             gatt = dev.connectGatt(app, true, callback, BluetoothDevice.TRANSPORT_LE)
         } catch (e: Exception) {
             Glasses.buddieStream.value = "connection failed"
         }
+    }
+
+    val COMPRESSED: UUID = UUID.fromString("0000ae03-0000-1000-8000-00805f9b34fb")
+
+    private fun short(u: UUID): String = u.toString().substring(4, 8)
+
+    /** Ask the earbuds to start notifying on one channel. The result arrives in onDescriptorWrite. */
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private fun subscribe(g: BluetoothGatt, uuid: UUID): Boolean {
+        val ch = g.getService(SERVICE)?.getCharacteristic(uuid) ?: return false
+        g.setCharacteristicNotification(ch, true)
+        val d = ch.getDescriptor(CCCD)
+        if (d == null) {
+            BuddieStats.subscriptions += "${short(uuid)}:no-switch "
+            return false
+        }
+        val started = if (Build.VERSION.SDK_INT >= 33) {
+            g.writeDescriptor(d, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == 0
+        } else {
+            d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            g.writeDescriptor(d)
+        }
+        if (!started) BuddieStats.subscriptions += "${short(uuid)}:refused "
+        BuddieStats.publish()
+        return started
     }
 
     private val callback = object : BluetoothGattCallback() {
@@ -497,6 +551,7 @@ object BuddieLink {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Glasses.buddieStream.value = "connected"
+                BuddieStats.reset()
                 if (!g.requestMtu(247)) g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Glasses.buddieStream.value = "waiting for earbuds"
@@ -505,26 +560,47 @@ object BuddieLink {
 
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            BuddieStats.mtu = mtu
             g.discoverServices()
         }
 
-        @Suppress("DEPRECATION")
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            val ch = g.getService(SERVICE)?.getCharacteristic(AUDIO)
-            if (ch == null) {
+            val service = g.getService(SERVICE)
+            if (service == null) {
                 Glasses.buddieStream.value = "connected, but no audio channel found"
+                BuddieStats.channels = g.services.joinToString(" ") { short(it.uuid) }.ifBlank { "none" } + " (services)"
+                BuddieStats.publish()
                 return
             }
-            g.setCharacteristicNotification(ch, true)
-            val d = ch.getDescriptor(CCCD) ?: return
-            if (Build.VERSION.SDK_INT >= 33) {
-                g.writeDescriptor(d, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            } else {
-                d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                g.writeDescriptor(d)
+            BuddieStats.channels = service.characteristics.joinToString(" ") { short(it.uuid) }
+            // Newer firmware streams Opus on ae04 and the compressed format on ae03; older units
+            // may only have one of them. Try ae04 first, then ae03 if nothing arrives.
+            val hasOpus = service.getCharacteristic(AUDIO) != null
+            if (!subscribe(g, if (hasOpus) AUDIO else COMPRESSED)) {
+                Glasses.buddieStream.value = "connected, but couldn't subscribe to audio"
+                return
             }
             Glasses.buddieStream.value = "listening"
+            if (hasOpus) main.postDelayed({
+                if (gatt === g && BuddieStats.compressed + BuddieStats.opus == 0L) {
+                    try {
+                        subscribe(g, COMPRESSED)
+                    } catch (_: Exception) {
+                    }
+                }
+            }, 5_000)
+            main.postDelayed({
+                if (gatt === g && BuddieStats.compressed + BuddieStats.opus == 0L) {
+                    BuddieStats.lastProblem = "the earbuds accepted the connection but aren't sending audio"
+                    BuddieStats.publish()
+                }
+            }, 12_000)
+        }
+
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            BuddieStats.subscriptions += "${short(descriptor.characteristic.uuid)}:${if (status == 0) "ok" else "error $status"} "
+            BuddieStats.publish()
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
@@ -542,7 +618,11 @@ object BuddieLink {
         worker.execute {
             try {
                 handle(v)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // A bad frame can leave the decoder unusable; start it fresh next time.
+                decoder?.release()
+                decoder = null
+                BuddieStats.lastProblem = "audio decoding failed: ${e.javaClass.simpleName}"
             }
         }
     }
@@ -560,6 +640,7 @@ object BuddieLink {
                 if (header == 0x00 || header == 0x01) {
                     // a status packet from the speaking (bone conduction) sensor, no audio
                     BuddieStats.sensorSeen = true
+                    BuddieStats.statusPackets++
                     if (header == 0x01) selfUntil = now + 2_000
                     return
                 }
@@ -587,7 +668,16 @@ object BuddieLink {
                 } else ShortArray(320) // 20 ms of silence keeps the segmenter's clock running
                 segmenter.feed(pcm, now < selfUntil)?.let { onUtterance(it) }
             }
-            else -> BuddieStats.otherSize = v.size
+            else -> {
+                // On the compressed channel the earbuds also send short packets that only carry
+                // the speaking flag in their first byte.
+                val first = if (v.isEmpty()) 255 else v[0].toInt() and 0xFF
+                if (first <= 1) {
+                    BuddieStats.sensorSeen = true
+                    BuddieStats.statusPackets++
+                    if (first == 1) selfUntil = now + 2_000
+                } else BuddieStats.otherSize = v.size
+            }
         }
     }
 

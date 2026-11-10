@@ -61,17 +61,34 @@ class CorinTest {
     // ---------- Buddie packets ----------
     @Test
     fun buddiePacketsParse() {
-        val v = ByteArray(84)
         assertNull(BuddiePacket.parse(ByteArray(20)))
-        val silent = BuddiePacket.parse(v)!!
+        val silent = BuddiePacket.parse(ByteArray(84))!!
         assertNull(silent.mic)
         assertFalse(silent.selfSpeaking)
         assertFalse(silent.meeting)
-        v[3] = 7; v[80] = 1; v[81] = 0xFE.toByte()
-        val p = BuddiePacket.parse(v)!!
-        assertEquals(40, p.mic!!.size)
-        assertTrue(p.selfSpeaking)
-        assertTrue(p.meeting)
+
+        // Layout from the published app: Opus frame first (it never starts with 0 or 1), flags at 80 and 81.
+        val a = ByteArray(84)
+        a[0] = 0x48; a[5] = 7; a[80] = 1; a[81] = 0xFE.toByte()
+        val pa = BuddiePacket.parse(a)!!
+        assertEquals(0x48.toByte(), pa.mic!![0])
+        assertTrue(pa.selfSpeaking)
+        assertTrue(pa.meeting)
+
+        // Layout from the published firmware: speaking flag first, Opus frame from byte 1, counter at 81.
+        val b = ByteArray(84)
+        b[0] = 1; b[1] = 0x48; b[6] = 7; b[81] = 0xFE.toByte()
+        val pb = BuddiePacket.parse(b)!!
+        assertEquals(40, pb.mic!!.size)
+        assertEquals(0x48.toByte(), pb.mic!![0])
+        assertTrue(pb.selfSpeaking)
+        assertFalse(pb.meeting)                 // byte 81 is only a counter here
+
+        // Speaking flag set but no audio in the frame.
+        val c = ByteArray(84); c[0] = 1
+        val pc = BuddiePacket.parse(c)!!
+        assertNull(pc.mic)
+        assertTrue(pc.selfSpeaking)
     }
 
     /** The firmware's encoder for one 16 ms frame (fft_and_pca.c), used to check our decoder against it. */
