@@ -657,6 +657,107 @@ fun SettingsScreen() {
             ToggleRow("Leave-now alerts", "For calendar events with a location, based on the current drive time", Prefs.commuteAlerts) { Prefs.commuteAlerts = it }
         }
 
+        Section("Voice") {
+            var provider by remember { mutableIntStateOf(Prefs.voiceProvider) }
+            var pick by remember { mutableStateOf("") }
+            var options by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+            var chosen by remember { mutableStateOf(Prefs.voiceName) }
+            var eleven by remember { mutableStateOf(Prefs.elevenVoiceName) }
+            var voiceNote by remember { mutableStateOf("") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Phone", "ElevenLabs", "Custom").forEachIndexed { i, label ->
+                    if (provider == i) Button(onClick = {}) { Text(label) }
+                    else OutlinedButton(onClick = { provider = i; Prefs.voiceProvider = i }) { Text(label) }
+                }
+            }
+            when (provider) {
+                0 -> {
+                    Text("Voices built into the phone. Higher-quality ones are listed first.", color = Muted, fontSize = 13.sp)
+                    Text("Voice: ${chosen.ifBlank { "engine default" }}", fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { options = Speaker.allVoices(); pick = "voice" }) { Text("Choose voice") }
+                        OutlinedButton(onClick = { options = Speaker.engines().map { it.second to it.first }; pick = "engine" }) { Text("Engine") }
+                    }
+                    OutlinedButton(onClick = {
+                        try {
+                            ctx.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } catch (_: Exception) {
+                        }
+                    }) { Text("Download more voices") }
+                    Text("Any speech engine app you install shows up under Engine.", color = Muted, fontSize = 12.sp)
+                }
+                1 -> {
+                    Text("Neural voices from your ElevenLabs account, including ones you design or clone there. Uses your ElevenLabs credits.", color = Muted, fontSize = 13.sp)
+                    PrefField("ElevenLabs API key", Prefs.elevenKey, secret = true) { Prefs.elevenKey = it.trim() }
+                    Text("Voice: ${eleven.ifBlank { "none chosen" }}", fontSize = 14.sp)
+                    OutlinedButton(onClick = {
+                        voiceNote = "Loading…"
+                        scope.launch {
+                            val list = withContext(Dispatchers.IO) { CloudVoice.elevenVoices() }
+                            voiceNote = if (list.isEmpty()) "Couldn't load voices. Check the key." else ""
+                            if (list.isNotEmpty()) {
+                                options = list
+                                pick = "eleven"
+                            }
+                        }
+                    }) { Text("Load my voices") }
+                    PrefField("Model", Prefs.elevenModel) { Prefs.elevenModel = it.trim() }
+                }
+                else -> {
+                    Text("Any server with an OpenAI-style speech endpoint: OpenAI itself, or a Kokoro or Piper server on Obelisk.", color = Muted, fontSize = 13.sp)
+                    PrefField("Base URL", Prefs.speechUrl) { Prefs.speechUrl = it.trim() }
+                    PrefField("API key (leave empty for a local server)", Prefs.speechKey, secret = true) { Prefs.speechKey = it.trim() }
+                    PrefField("Model", Prefs.speechModel) { Prefs.speechModel = it.trim() }
+                    PrefField("Voice", Prefs.speechVoice) { Prefs.speechVoice = it.trim() }
+                }
+            }
+            if (voiceNote.isNotBlank()) Text(voiceNote, color = Muted, fontSize = 13.sp)
+            OutlinedButton(onClick = {
+                voiceNote = ""
+                Corin.announce("This is how I sound now. Not bad, or should we keep looking?")
+                scope.launch {
+                    kotlinx.coroutines.delay(6000)
+                    if (provider != 0 && Speaker.lastCloudError.isNotBlank()) {
+                        voiceNote = "Fell back to the phone voice. ${Speaker.lastCloudError}"
+                    }
+                }
+            }) { Text("Preview") }
+            if (provider != 0) Text("If the voice service can't be reached, ${Prefs.name} falls back to the phone voice.", color = Muted, fontSize = 12.sp)
+
+            if (pick.isNotBlank()) {
+                AlertDialog(
+                    onDismissRequest = { pick = "" },
+                    confirmButton = { TextButton(onClick = { pick = "" }) { Text("Close") } },
+                    title = { Text(if (pick == "engine") "Speech engine" else "Voices (tap to hear)") },
+                    text = {
+                        LazyColumn(Modifier.height(380.dp)) {
+                            if (options.isEmpty()) item { Text("Nothing found.") }
+                            items(options) { (id, label) ->
+                                TextButton(onClick = {
+                                    when (pick) {
+                                        "voice" -> {
+                                            Prefs.voiceName = id; chosen = id
+                                            Speaker.applyVoice()
+                                            Corin.announce("This is how I sound now.")
+                                        }
+                                        "engine" -> {
+                                            Prefs.ttsEngine = id; Prefs.voiceName = ""; chosen = ""
+                                            Speaker.restart()
+                                            pick = ""
+                                        }
+                                        else -> {
+                                            Prefs.elevenVoiceId = id; Prefs.elevenVoiceName = label; eleven = label
+                                            Corin.announce("This is how I sound now.")
+                                        }
+                                    }
+                                }) { Text(label) }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
         Section("Listening") {
             Text(listOf(
                 "Off: never opens the microphone. Type instead.",

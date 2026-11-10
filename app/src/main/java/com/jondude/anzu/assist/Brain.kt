@@ -51,6 +51,29 @@ object Net {
         }
     }
 
+    /** Blocking request that returns the raw response bytes (for audio). */
+    fun requestBytes(
+        method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int = 30_000
+    ): Pair<Int, ByteArray> {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = method
+            conn.connectTimeout = 8_000
+            conn.readTimeout = timeoutMs
+            headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body.toByteArray()) }
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return code to (stream?.use { it.readBytes() } ?: ByteArray(0))
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** Blocking POST of raw bytes. Returns (status, body). */
     fun postBytes(url: String, bytes: ByteArray, timeoutMs: Int = 30_000): Pair<Int, String> {
         val conn = URL(url).openConnection() as HttpURLConnection

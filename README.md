@@ -59,3 +59,13 @@ Older Buddie firmware uses a different audio format (244-byte packets) that is n
 ## Verification
 
 Every push runs unit tests for the decision logic, then installs the app on an Android emulator, runs on-device audio tests, opens every screen and fails the build on any crash. Bluetooth hardware, real speech recognition and the model API are not covered by that and need a real wear test.
+
+## Voices
+
+Settings → Voice has three sources:
+
+- **Phone**: every English voice from the phone's speech engine, best quality first, tap to hear. You can switch engines and download more voices.
+- **ElevenLabs**: paste your API key, load your voices (including designed or cloned ones) and pick one.
+- **Custom**: any server with an OpenAI-style `/audio/speech` endpoint, such as OpenAI or a Kokoro or Piper server on Obelisk.
+
+If a premium voice can't be reached, Corin falls back to the phone voice.

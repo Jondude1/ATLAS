@@ -267,6 +267,30 @@ class CorinTest {
         assertTrue(Routing.leaveLine("Dentist", begin, drive, begin - 29 * 60_000)!!.startsWith("Time to leave"))
     }
 
+    // ---------- voices ----------
+    @Test
+    fun premiumVoiceRequestsAreBuilt() {
+        val voices = CloudVoice.parseVoices("""{"voices":[{"voice_id":"abc","name":"Rachel","category":"premade"},{"voice_id":"","name":"x"}]}""")
+        assertEquals(listOf("abc" to "Rachel · premade"), voices)
+        assertTrue(CloudVoice.parseVoices("nope").isEmpty())
+
+        assertNull(CloudVoice.request("hi"))                 // phone voice: no cloud request
+        Prefs.voiceProvider = 1
+        assertNull(CloudVoice.request("hi"))                 // ElevenLabs without key or voice
+        Prefs.elevenKey = "k"; Prefs.elevenVoiceId = "abc"
+        val e = CloudVoice.request("hi")!!
+        assertTrue(e.first.startsWith("https://api.elevenlabs.io/v1/text-to-speech/abc"))
+        assertEquals("k", e.second["xi-api-key"])
+        assertEquals("eleven_flash_v2_5", JSONObject(e.third).getString("model_id"))
+
+        Prefs.voiceProvider = 2
+        Prefs.speechUrl = "http://obelisk:8880/v1/"
+        val c = CloudVoice.request("hello there")!!
+        assertEquals("http://obelisk:8880/v1/audio/speech", c.first)
+        assertTrue(c.second.isEmpty())                       // no key for a local server
+        assertEquals("hello there", JSONObject(c.third).getString("input"))
+    }
+
     // ---------- updater / usage ----------
     @Test
     fun updaterReadsBuildNumbers() {
