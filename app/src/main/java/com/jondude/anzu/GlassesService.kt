@@ -189,8 +189,9 @@ class GlassesService : Service() {
         )
         val quiet = Prefs.quietUntil > System.currentTimeMillis()
         val text = when {
-            !Glasses.connected.value -> "Waiting for the glasses"
+            !Glasses.connected.value -> "Waiting for the glasses or earbuds"
             quiet -> "With you, staying quiet"
+            Wear.onBuds() -> "With you in the earbuds"
             else -> "With you in the glasses"
         }
         val talk = PendingIntent.getActivity(
@@ -221,7 +222,7 @@ class GlassesService : Service() {
     }
 
     /** Addresses of the wearables connected right now, mapped to what they are. */
-    private val worn = HashMap<String, String>()
+    private val worn = LinkedHashMap<String, String>()
 
     /** "glasses", "buddie", or null for any other Bluetooth device. */
     @SuppressLint("MissingPermission")
@@ -242,6 +243,18 @@ class GlassesService : Service() {
 
     private fun updateWearing() {
         val kinds = synchronized(worn) { worn.values.toSet() }
+        // The most recently connected wearable is the one audio goes to.
+        val nowActive = synchronized(worn) { worn.values.lastOrNull() ?: "" }
+        val before = Glasses.active.value
+        Glasses.active.value = nowActive
+        if (before.isNotBlank() && nowActive.isNotBlank() && before != nowActive) {
+            scheduleNext()
+            refreshNotification()
+            if (Prefs.announceSwitch) scope.launch {
+                delay(3_000) // let audio move to the new device
+                Corin.announce(Wear.switchLine())
+            }
+        }
         Glasses.wearing.value = listOfNotNull(
             "glasses".takeIf { it in kinds }, "Buddie earbuds".takeIf { "buddie" in kinds }
         ).joinToString(" and ")
@@ -251,6 +264,7 @@ class GlassesService : Service() {
         val k = kind(device) ?: return
         val first = synchronized(worn) {
             val wasEmpty = worn.isEmpty()
+            worn.remove(device.address) // re-insert so the newest connection is last
             worn[device.address] = k
             wasEmpty
         }
@@ -292,7 +306,7 @@ class GlassesService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun readBattery() {
-        val address = synchronized(worn) { worn.keys.firstOrNull() } ?: return
+        val address = synchronized(worn) { worn.keys.lastOrNull() } ?: return
         if (!has(Manifest.permission.BLUETOOTH_CONNECT)) return
         try {
             val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return
@@ -306,7 +320,8 @@ class GlassesService : Service() {
     private fun today(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
     private fun canListen(): Boolean =
-        Glasses.micArmed.value && Prefs.listenMode == 2 && has(Manifest.permission.RECORD_AUDIO)
+        Glasses.micArmed.value && Prefs.listenMode == 2 && has(Manifest.permission.RECORD_AUDIO) &&
+            !Wear.repliesViaStream() // on the buds, replies arrive through their own stream
 
     private fun onGlassesOn(quiet: Boolean = false) {
         if (Glasses.connected.value) return
@@ -386,7 +401,7 @@ class GlassesService : Service() {
     }
 
     private fun scheduleNext() {
-        val mean = when (Prefs.chattiness) {
+        val mean = when (Wear.chattiness()) {
             0 -> 120
             2 -> 20
             else -> 50
@@ -458,7 +473,7 @@ class GlassesService : Service() {
             return
         }
         wasWalking = walking
-        if (Prefs.eyeBreaks && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
+        if (Prefs.eyeBreaks && Wear.eyeBreaks() && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
             lastEyeBreak = now
             Corin.announce("Twenty minutes. Look at something far away for twenty seconds.")
             return
@@ -639,7 +654,7 @@ class NotifyListener : NotificationListenerService() {
                 Glasses.hold(line)
                 return
             }
-            Corin.announce(if (Prefs.senderOnly) "$app, from $title." else "$app. $title. ${text.take(220)}")
+            Corin.announce(if (Wear.senderOnly()) "$app, from $title." else "$app. $title. ${text.take(220)}")
         } catch (_: Exception) {
         }
     }

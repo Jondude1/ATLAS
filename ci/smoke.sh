@@ -87,13 +87,13 @@ tap "Settings"; sleep 2
 seen=""
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
   dump
-  for sec in Brain Identity Presence Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+  for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
     case "$seen" in *"[$sec]"*) ;; *) grep -q "text=\"$sec\"" ui.xml && seen="$seen[$sec]";; esac
   done
   adb shell input swipe 500 1500 500 500 300; sleep 1
 done
 note "Settings sections found: $seen"
-for sec in Brain Identity Presence Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
   case "$seen" in *"[$sec]"*) ;; *) fail "Settings section missing: $sec";; esac
 done
 check "Settings scrolled"

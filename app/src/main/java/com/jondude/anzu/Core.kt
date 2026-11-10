@@ -117,7 +117,14 @@ object Prefs {
     var useGlassesMic by BoolPref("useGlassesMic", true)
 
     var readNotifications by BoolPref("readNotifications", true)
-    var senderOnly by BoolPref("senderOnly", false)
+    // Per-wearable behavior. The glasses are open-ear (people nearby can hear); the buds are private.
+    var senderOnlyGlasses by BoolPref("senderOnlyGlasses", true)
+    var senderOnlyBuds by BoolPref("senderOnlyBuds", false)
+    var chattinessBuds by IntPref("chattinessBuds", 1)
+    var volumeGlasses by IntPref("volumeGlasses", 85)
+    var volumeBuds by IntPref("volumeBuds", 100)
+    var discreetGlasses by BoolPref("discreetGlasses", true)
+    var announceSwitch by BoolPref("announceSwitch", true)
     var eyeBreaks by BoolPref("eyeBreaks", false)
     var calendarHeadsUp by BoolPref("calendarHeadsUp", true)
     var speechRate by IntPref("speechRate", 105)
@@ -136,6 +143,49 @@ object Prefs {
 data class Note(val text: String, val time: Long)
 
 data class Item(val text: String, val done: Boolean)
+
+/** How Corin behaves depending on which wearable it's in. */
+object Wear {
+    fun onBuds(): Boolean = Glasses.active.value == "buddie"
+    fun onGlasses(): Boolean = Glasses.active.value == "glasses"
+
+    /** Unprompted-speech frequency for the active wearable (0 to 2). */
+    fun chattiness(): Int = (if (onBuds()) Prefs.chattinessBuds else Prefs.chattiness).coerceIn(0, 2)
+
+    /** Whether notifications are read as sender only. */
+    fun senderOnly(): Boolean = if (onBuds()) Prefs.senderOnlyBuds else Prefs.senderOnlyGlasses
+
+    /** Speaking volume multiplier. */
+    fun volume(): Float = when {
+        onBuds() -> Prefs.volumeBuds / 100f
+        onGlasses() -> Prefs.volumeGlasses / 100f
+        else -> 1f
+    }.coerceIn(0.2f, 1f)
+
+    /** With the buds' always-on stream running, replies come through it instead of opening a call-style mic. */
+    fun repliesViaStream(): Boolean = onBuds() && Glasses.buddieStream.value == "listening"
+
+    /** Eye-break nudges only make sense with the screen glasses on. */
+    fun eyeBreaks(): Boolean = onGlasses()
+
+    fun label(): String = when {
+        onBuds() -> "earbuds: private"
+        onGlasses() -> if (Prefs.discreetGlasses) "glasses: open-ear, discreet" else "glasses: open-ear"
+        else -> ""
+    }
+
+    /** What the model is told about the situation. */
+    fun promptLine(): String = when {
+        onBuds() -> "You're in his Buddie earbuds right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. He can talk to you hands-free by saying your name, and he may be out and about."
+        onGlasses() -> "You're in his Razer Anzu glasses right now. They are open-ear speakers, so people near him can hear you" +
+            (if (Prefs.discreetGlasses) ": keep it to one or two short sentences, and don't say private details out loud (money, health, personal messages, anything about other people); say there's something private and offer to save it for the earbuds or his phone instead." else ": keep it to one or two short sentences.") +
+            " These are his screen glasses, so he's most likely at a desk."
+        else -> ""
+    }
+
+    /** The line Corin says when he swaps wearables mid-session. */
+    fun switchLine(): String = if (onBuds()) "Earbuds. It's just us now." else "Glasses on. I'll keep it discreet."
+}
 
 /** Rough daily token meter so API spend stays visible. */
 object Usage {
@@ -410,6 +460,9 @@ object Glasses {
     val corinState = MutableStateFlow("idle")
     val lastSaid = MutableStateFlow("")
     val lastHeard = MutableStateFlow("")
+    /** The wearable Corin is speaking through: "glasses", "buddie", or empty. The most recently connected wins. */
+    val active = MutableStateFlow("")
+
     /** What he's wearing right now: "glasses", "Buddie earbuds", both, or empty. */
     val wearing = MutableStateFlow("")
     /** Status of the Buddie always-listening stream, for the UI and status checks. */

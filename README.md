@@ -69,3 +69,18 @@ Settings → Voice has three sources:
 - **Custom**: any server with an OpenAI-style `/audio/speech` endpoint, such as OpenAI or a Kokoro or Piper server on Obelisk.
 
 If a premium voice can't be reached, Corin falls back to the phone voice.
+
+## Glasses vs earbuds
+
+Corin notices which wearable you put on (the most recent one wins if both are connected) and behaves differently in each:
+
+| | Glasses (open-ear) | Earbuds (private) |
+|---|---|---|
+| Replies | One or two short sentences | More room when it's worth it |
+| Private details | Not said out loud when Discreet is on | Fine |
+| Notifications | Sender only by default | Whole message by default |
+| Talking back | Gesture, or the conversation window | Hands-free through the earbuds' own stream |
+| Eye-break nudges | Yes | No |
+| Volume and how often it speaks | Own settings | Own settings |
+
+It says a short line when you switch.

@@ -494,6 +494,7 @@ object Brain {
             sb.append("Wearing: ").append(Glasses.wearing.value.ifBlank { "glasses" })
             if (Glasses.battery.value >= 0) sb.append(", battery ${Glasses.battery.value}%")
             sb.append(", worn ${Glasses.wornMinutes()} min this session\n")
+            com.jondude.anzu.Wear.promptLine().takeIf { it.isNotBlank() }?.let { sb.append(it).append('\n') }
         } else sb.append("Wearing: nothing right now (he's on the phone, possibly typing)\n")
         if (Glasses.meeting.value) sb.append("Meeting notes are being recorded right now.\n")
         if (Prefs.buddieAmbient) {
@@ -888,6 +889,13 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
      */
     suspend fun speakUp(ctx: Context, kind: String = "random"): String? = withContext(Dispatchers.IO) {
         val options = ArrayList(directives)
+        if (com.jondude.anzu.Wear.onBuds()) {
+            // Private and mobile: drop the desk nudge, lean into real conversation.
+            options.removeAll { it.startsWith("Nudge him to stretch") }
+            options.add("He has the earbuds in, so this is private. Bring up something more personal, or go deeper on a thread you two have going.")
+        } else if (com.jondude.anzu.Wear.onGlasses()) {
+            options.add("He's probably been at the screen a while. Say something brief that gets him to look up for a second.")
+        }
         if (Store.notes.value.isNotEmpty()) {
             options.add("Bring one of his saved ideas back up and ask whether he wants to do anything with it.")
         }

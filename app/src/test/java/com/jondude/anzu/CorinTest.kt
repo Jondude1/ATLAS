@@ -267,6 +267,39 @@ class CorinTest {
         assertTrue(Routing.leaveLine("Dentist", begin, drive, begin - 29 * 60_000)!!.startsWith("Time to leave"))
     }
 
+    // ---------- glasses vs earbuds ----------
+    @Test
+    fun behaviorDiffersByWearable() {
+        Glasses.buddieStream.value = "off"
+        Glasses.active.value = "glasses"
+        assertTrue(Wear.senderOnly())                      // open-ear: don't read messages aloud
+        assertEquals(0.85f, Wear.volume(), 0.001f)
+        assertTrue(Wear.eyeBreaks())
+        assertFalse(Wear.repliesViaStream())
+        assertTrue(Wear.promptLine().contains("open-ear"))
+        assertTrue(Wear.promptLine().contains("don't say private details"))
+        Prefs.discreetGlasses = false
+        assertFalse(Wear.promptLine().contains("don't say private details"))
+
+        Prefs.chattiness = 0; Prefs.chattinessBuds = 2
+        assertEquals(0, Wear.chattiness())
+        Glasses.active.value = "buddie"
+        assertEquals(2, Wear.chattiness())
+        assertFalse(Wear.senderOnly())                     // private: read the whole message
+        assertEquals(1f, Wear.volume(), 0.001f)
+        assertFalse(Wear.eyeBreaks())
+        assertTrue(Wear.promptLine().contains("Only he can hear you"))
+        assertFalse(Wear.repliesViaStream())               // stream not running yet
+        Glasses.buddieStream.value = "listening"
+        assertTrue(Wear.repliesViaStream())
+        assertTrue(Wear.switchLine().startsWith("Earbuds"))
+
+        Glasses.active.value = ""
+        Glasses.buddieStream.value = "off"
+        assertEquals("", Wear.promptLine())
+        assertEquals(1f, Wear.volume(), 0.001f)
+    }
+
     // ---------- voices ----------
     @Test
     fun premiumVoiceRequestsAreBuilt() {

@@ -174,8 +174,9 @@ object Speaker : TextToSpeech.OnInitListener {
         }
     }
 
-    suspend fun say(text: String, volume: Float = 1f) {
+    suspend fun say(text: String, requested: Float = 1f) {
         if (text.isBlank()) return
+        val volume = requested * Wear.volume()
         Glasses.lastSaid.value = text // shown on screen even if the speech engine is unavailable
         if (Prefs.voiceProvider != 0 && sayCloud(text, volume)) return
         val t = tts ?: return

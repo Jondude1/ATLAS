@@ -286,6 +286,7 @@ fun HomeScreen(resumes: Int) {
     val battery by Glasses.battery.collectAsState()
     val armed by Glasses.micArmed.collectAsState()
     val wearing by Glasses.wearing.collectAsState()
+    val activeWear by Glasses.active.collectAsState()
     val buddie by Glasses.buddieStream.collectAsState()
     val meeting by Glasses.meeting.collectAsState()
     val state by Glasses.corinState.collectAsState()
@@ -377,6 +378,7 @@ fun HomeScreen(resumes: Int) {
                 else "Not connected"
             )
             Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else "Glasses: $deviceName", color = Muted, fontSize = 13.sp)
+            if (connected && activeWear.isNotBlank()) Text("Mode: ${Wear.label()}", color = Gold, fontSize = 13.sp)
             Text("Buddie earbuds stream: $buddie", color = Muted, fontSize = 13.sp)
             Text(
                 if (armed) "Conversation window armed: ${Prefs.name} can listen after speaking up."
@@ -581,7 +583,7 @@ fun WhisperScreen() {
             Section("Notification whisper") {
                 ToggleRow("Read notifications to me", "Only while the glasses are on", Prefs.readNotifications) { Prefs.readNotifications = it }
                 ToggleRow("Triage", "Messages, calls and reminders now; everything else waits until you ask \"what did I miss?\"", Prefs.triage) { Prefs.triage = it }
-                ToggleRow("Sender only", "Say who it's from, not what it says", Prefs.senderOnly) { Prefs.senderOnly = it }
+                Text("Whether the message itself is read out is set per wearable in Settings, under Glasses and earbuds.", color = Muted, fontSize = 12.sp)
             }
             Spacer(Modifier.height(8.dp))
             Text("Apps allowed to reach your ears", color = Gold, fontWeight = FontWeight.Bold)
@@ -638,8 +640,7 @@ fun SettingsScreen() {
 
         Section("Presence") {
             ToggleRow("Speak up on its own", "Random check-ins, thoughts and questions through the day", Prefs.proactive) { Prefs.proactive = it }
-            Text("How often: " + listOf("now and then (about every 2 hours)", "regularly (about every 50 minutes)", "chatty (about every 20 minutes)")[chat.toInt().coerceIn(0, 2)])
-            Slider(value = chat, onValueChange = { chat = it; Prefs.chattiness = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
+            Text("How often it speaks is set per wearable below.", color = Muted, fontSize = 12.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     PrefField("Active from (hour)", Prefs.activeStart.toString()) { s -> s.toIntOrNull()?.let { Prefs.activeStart = it.coerceIn(0, 23) } }
@@ -655,6 +656,32 @@ fun SettingsScreen() {
             ToggleRow("20-20-20 eye breaks", "Every 20 minutes of wear", Prefs.eyeBreaks) { Prefs.eyeBreaks = it }
             ToggleRow("Calendar heads-ups", "Ten minutes before events", Prefs.calendarHeadsUp) { Prefs.calendarHeadsUp = it }
             ToggleRow("Leave-now alerts", "For calendar events with a location, based on the current drive time", Prefs.commuteAlerts) { Prefs.commuteAlerts = it }
+        }
+
+        Section("Glasses and earbuds") {
+            val often = listOf("now and then (about every 2 hours)", "regularly (about every 50 minutes)", "chatty (about every 20 minutes)")
+            var chatBuds by remember { mutableStateOf(Prefs.chattinessBuds.toFloat()) }
+            var volGlasses by remember { mutableStateOf(Prefs.volumeGlasses.toFloat()) }
+            var volBuds by remember { mutableStateOf(Prefs.volumeBuds.toFloat()) }
+            Text("${Prefs.name} notices which one you put on and behaves differently in each. If both are connected, the one you put on last wins.", color = Muted, fontSize = 13.sp)
+
+            Text("In the glasses (open-ear)", fontWeight = FontWeight.Bold)
+            Text("Speaks up " + often[chat.toInt().coerceIn(0, 2)])
+            Slider(value = chat, onValueChange = { chat = it; Prefs.chattiness = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
+            Text("Volume ${volGlasses.toInt()}%")
+            Slider(value = volGlasses, onValueChange = { volGlasses = it; Prefs.volumeGlasses = it.toInt() }, valueRange = 30f..100f)
+            ToggleRow("Discreet", "People nearby can hear open-ear speakers: short replies, and nothing private said out loud", Prefs.discreetGlasses) { Prefs.discreetGlasses = it }
+            ToggleRow("Notifications: sender only", "Say who it's from, not what it says", Prefs.senderOnlyGlasses) { Prefs.senderOnlyGlasses = it }
+
+            Text("In the earbuds (private)", fontWeight = FontWeight.Bold)
+            Text("Speaks up " + often[chatBuds.toInt().coerceIn(0, 2)])
+            Slider(value = chatBuds, onValueChange = { chatBuds = it; Prefs.chattinessBuds = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
+            Text("Volume ${volBuds.toInt()}%")
+            Slider(value = volBuds, onValueChange = { volBuds = it; Prefs.volumeBuds = it.toInt() }, valueRange = 30f..100f)
+            ToggleRow("Notifications: sender only", "Off reads the whole message, since only you can hear", Prefs.senderOnlyBuds) { Prefs.senderOnlyBuds = it }
+
+            ToggleRow("Say so when I switch", "A short line when you swap between them", Prefs.announceSwitch) { Prefs.announceSwitch = it }
+            Text("Also different by design: eye-break nudges only happen in the glasses, and in the earbuds you answer hands-free through their own microphone stream.", color = Muted, fontSize = 12.sp)
         }
 
         Section("Voice") {
