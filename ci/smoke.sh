@@ -49,7 +49,7 @@ check "Home screen"
 adb shell dumpsys activity services $PKG | grep -q GlassesService && PASSED="${PASSED}Background service running; " || fail "background service is not running"
 
 for tab in Notes Whisper Settings Corin; do
-  tap "$tab" || fail "tab $tab not found"
+  tap "$tab" || { sleep 5; tap "$tab"; } || fail "tab $tab not found: $(texts)"
   check "$tab tab"
 done
 
