@@ -743,7 +743,7 @@ object BuddieLink {
         capture?.let { c ->
             // record: 2-byte length, 2-byte milliseconds, then the packet exactly as received
             c.write(v.size and 0xFF); c.write((v.size shr 8) and 0xFF)
-            c.write((now and 0xFF).toInt()); c.write(((now shr 8) and 0xFF).toInt())
+            c.write((now and 0xFFL).toInt()); c.write(((now shr 8) and 0xFFL).toInt())
             c.write(v)
         }
         packets++
