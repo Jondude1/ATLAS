@@ -74,6 +74,91 @@ class CorinTest {
         assertTrue(p.meeting)
     }
 
+    /** The firmware's encoder for one 16 ms frame (fft_and_pca.c), used to check our decoder against it. */
+    private fun firmwareEncode(w: FloatArray, frame: DoubleArray): ByteArray {
+        val n = 257
+        val f = 0.5 * Math.sqrt(2.0 / 256)
+        val x = frame.copyOf()
+        x[0] = Math.rint(x[0] * Math.sqrt(2.0)); x[n - 1] = Math.rint(x[n - 1] * Math.sqrt(2.0))
+        val out = ByteArray(80)
+        val mag = DoubleArray(n)
+        for (k in 0 until n) {
+            var acc = x[0] + (if (k % 2 == 0) x[n - 1] else -x[n - 1])
+            for (i in 1 until n - 1) acc += 2 * x[i] * Math.cos(PI * k * i / 256.0)
+            var v = (f * acc).toInt().toDouble() // the firmware stores it as a 16-bit integer
+            if (v < 0) {
+                v = -v
+                out[47 + k / 8] = (out[47 + k / 8] + (1 shl (k % 8))).toByte()
+            }
+            mag[k] = v
+        }
+        for (i in 0 until 47) {
+            var r = 0.0
+            for (k in 0 until n) r += mag[k] / 256.0 * w[i * n + k]
+            out[i] = Math.rint(r).coerceIn(-128.0, 127.0).toInt().toByte()
+        }
+        return out
+    }
+
+    @Test
+    fun compressedBuddieAudioSurvivesTheRoundTrip() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val bytes = ctx.assets.open("buddie_pca.bin").use { it.readBytes() }
+        assertEquals(47 * 257 * 4, bytes.size)
+        val w = FloatArray(47 * 257)
+        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(w)
+        val codec = PcaCodec.fromBytes(bytes)
+
+        // A speech-like signal: a 140 Hz voice with two formants and syllable-rate loudness.
+        val total = 16000
+        val sig = DoubleArray(total)
+        var phase = 0.0
+        for (i in 0 until total) {
+            val t = i / 16000.0
+            phase += 2 * PI * 140 * (1 + 0.05 * sin(2 * PI * 3 * t)) / 16000
+            var v = 0.0
+            for (h in 1 until 40) {
+                val hz = h * 140.0
+                val e1 = Math.exp(-((hz - 600) / 400) * ((hz - 600) / 400))
+                val e2 = 0.5 * Math.exp(-((hz - 1800) / 500) * ((hz - 1800) / 500))
+                v += (e1 + e2) * sin(h * phase)
+            }
+            val s4 = sin(2 * PI * 4 * t)
+            sig[i] = v * (0.5 + 0.5 * s4 * s4)
+        }
+        val peak = sig.maxOf { Math.abs(it) }
+        for (i in sig.indices) sig[i] = Math.rint(sig[i] / peak * 9000)
+
+        val decoded = ArrayList<Short>()
+        var prev = 0.0
+        var i = 0
+        while (i + 256 <= total) {
+            val frame = DoubleArray(257)
+            frame[0] = prev
+            for (j in 0 until 256) frame[j + 1] = sig[i + j]
+            prev = sig[i + 255]
+            val packetBlock = firmwareEncode(w, frame)
+            decoded.addAll(codec.decodeBlock(packetBlock, 0).toList())
+            i += 256
+        }
+        // correlation between what went in and what came out
+        var sxy = 0.0; var sxx = 0.0; var syy = 0.0
+        for (k in decoded.indices) {
+            val a = sig[k]; val b = decoded[k].toDouble()
+            sxy += a * b; sxx += a * a; syy += b * b
+        }
+        val corr = sxy / Math.sqrt(sxx * syy)
+        assertTrue("correlation $corr", corr > 0.88)
+        assertTrue("level ${Math.sqrt(syy / decoded.size)}", Math.sqrt(syy / decoded.size) > 1000)
+
+        // and the decoded audio is loud enough for the utterance cutter to pick up
+        val seg = Segmenter()
+        var u: Utterance? = null
+        decoded.chunked(256).forEach { u = u ?: seg.feed(it.toShortArray(), true) }
+        repeat(80) { u = u ?: seg.feed(ShortArray(256), false) }
+        assertNotNull(u)
+    }
+
     @Test
     fun opusHeaderIsWellFormed() {
         val h = AudioMath.opusHead()

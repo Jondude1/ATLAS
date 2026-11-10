@@ -331,15 +331,32 @@ object Ears {
 
 /** Turns a recorded utterance (16 kHz mono) into text. Used for the Buddie earbud stream. */
 object Transcriber {
+    /** Why the last attempt produced nothing, for the diagnostics readout. */
+    @Volatile
+    var lastProblem = ""
+
     suspend fun transcribe(ctx: Context, pcm: ShortArray): String? {
         val app = ctx.applicationContext
-        return android(app, pcm) ?: obelisk(pcm)
+        lastProblem = ""
+        val text = android(app, pcm) ?: obelisk(pcm)
+        if (text == null && lastProblem.isBlank()) lastProblem = "the phone's speech recognizer returned nothing"
+        return text
     }
 
     /** Android's own recognizer, fed from memory instead of a microphone (Android 13+). */
     private suspend fun android(app: Context, pcm: ShortArray): String? {
-        if (android.os.Build.VERSION.SDK_INT < 33) return null
-        if (!app.has(Manifest.permission.RECORD_AUDIO) || !SpeechRecognizer.isRecognitionAvailable(app)) return null
+        if (android.os.Build.VERSION.SDK_INT < 33) {
+            lastProblem = "needs Android 13 or newer"
+            return null
+        }
+        if (!app.has(Manifest.permission.RECORD_AUDIO)) {
+            lastProblem = "microphone permission is missing"
+            return null
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(app)) {
+            lastProblem = "no speech recognizer on this phone"
+            return null
+        }
         return try {
             val pipe = android.os.ParcelFileDescriptor.createPipe()
             val bytes = AudioMath.toBytes(pcm)

@@ -288,6 +288,7 @@ fun HomeScreen(resumes: Int) {
     val wearing by Glasses.wearing.collectAsState()
     val activeWear by Glasses.active.collectAsState()
     val buddie by Glasses.buddieStream.collectAsState()
+    val buddieStats by BuddieStats.summary.collectAsState()
     val meeting by Glasses.meeting.collectAsState()
     val state by Glasses.corinState.collectAsState()
     val said by Glasses.lastSaid.collectAsState()
@@ -380,6 +381,7 @@ fun HomeScreen(resumes: Int) {
             Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else "Glasses: $deviceName", color = Muted, fontSize = 13.sp)
             if (connected && activeWear.isNotBlank()) Text("Mode: ${Wear.label()}", color = Gold, fontSize = 13.sp)
             Text("Buddie earbuds stream: $buddie", color = Muted, fontSize = 13.sp)
+            if (buddie != "off") Text(buddieStats, color = Muted, fontSize = 12.sp)
             Text(
                 if (armed) "Conversation window armed: ${Prefs.name} can listen after speaking up."
                 else "Conversation window not armed. Opening this app arms it until the phone restarts.",
@@ -809,6 +811,10 @@ fun SettingsScreen() {
             ToggleRow("Listen through Buddie", "Connect to the earbuds' audio stream when you put them in", Prefs.buddieListen) { Prefs.buddieListen = it }
             ToggleRow("Wake word", "Say \"${Prefs.name}\" and then what you want. For 30 seconds after it speaks, you can just answer.", Prefs.wakeWord) { Prefs.wakeWord = it }
             ToggleRow("Ambient context", "Also transcribe other people nearby so ${Prefs.name} knows what's going on. Off means only your own voice is ever transcribed.", Prefs.buddieAmbient) { Prefs.buddieAmbient = it }
+            ToggleRow("Take notes on phone calls", "Off means call audio from the earbuds is never transcribed. Only turn this on where recording calls is allowed and the other person knows.", Prefs.callNotes) { Prefs.callNotes = it }
+            val stats by BuddieStats.summary.collectAsState()
+            Text("Diagnostics: $stats", color = Muted, fontSize = 12.sp)
+            Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { Prefs.buddieBleAddress = ""; BuddieLink.stop() }) { Text("Forget earbuds and search again next time") }
         }
 

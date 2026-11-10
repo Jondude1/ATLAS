@@ -54,7 +54,7 @@ Corin treats the Buddie earbuds as a second wearable. When they connect it also 
 - **Only your voice by default**: the earbuds flag when the wearer is speaking, and nothing else is transcribed unless you turn on Ambient context.
 - **Meeting notes**: "Corin, start meeting notes" / "Corin, stop", or the earbuds' own meeting mode. The transcript is summarized into your notes.
 
-Older Buddie firmware uses a different audio format (244-byte packets) that is not supported yet; the Wearables card says so if that is what yours sends.
+Both Buddie audio formats are decoded: the default compressed-spectrum stream (244-byte packets, decoder derived from the MIT-licensed Buddie firmware, whose PCA table is bundled as `buddie_pca.bin`) and the Opus stream (84-byte packets). Call audio is dropped unless "Take notes on phone calls" is on. Settings → Buddie earbuds shows a diagnostics line with packets received, speech segments, and what was last understood.
 
 ## Verification
 

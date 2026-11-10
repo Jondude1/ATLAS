@@ -173,6 +173,107 @@ object Wake {
     }
 }
 
+/**
+ * Decoder for Buddie's default "compressed spectrum" stream (244-byte packets), derived from the
+ * open-source Buddie firmware (MIT licence, github.com/Buddie-AI/Buddie, fft_and_pca.c).
+ * Each 80-byte block is one 16 ms frame: 47 signed bytes of a PCA-compressed magnitude spectrum
+ * followed by 257 sign bits. Decoding undoes the PCA (its rows are orthonormal, so the inverse is
+ * the transpose), restores the signs, and runs the inverse of the firmware's DCT.
+ */
+class PcaCodec(private val w: FloatArray) {
+    private val cosT = FloatArray(512) { Math.cos(Math.PI * it / 256.0).toFloat() }
+    private val spec = FloatArray(N)
+
+    /** Decodes the block starting at [offset] into 256 samples of 16 kHz audio. */
+    fun decodeBlock(v: ByteArray, offset: Int): ShortArray {
+        // magnitude[k] = max(0, 256 * sum_i c[i] * W[i][k])
+        java.util.Arrays.fill(spec, 0f)
+        for (i in 0 until PCA) {
+            val c = v[offset + i].toFloat()
+            if (c == 0f) continue
+            val row = i * N
+            for (k in 0 until N) spec[k] += c * w[row + k]
+        }
+        for (k in 0 until N) {
+            var m = spec[k] * 256f
+            if (m < 0f) m = 0f
+            val negative = (v[offset + PCA + (k shr 3)].toInt() shr (k and 7)) and 1 == 1
+            spec[k] = (if (negative) -m else m) / F
+        }
+        // inverse DCT-I; sample 0 is the overlap sample and is dropped
+        val out = ShortArray(HOP)
+        for (n in 1 until N) {
+            var acc = spec[0] + (if (n and 1 == 0) spec[N - 1] else -spec[N - 1])
+            var idx = 0
+            for (k in 1 until N - 1) {
+                idx = (idx + n) and 511
+                acc += 2f * spec[k] * cosT[idx]
+            }
+            var x = acc / (2f * (N - 1))
+            if (n == N - 1) x /= SQRT2
+            out[n - 1] = x.coerceIn(-32768f, 32767f).toInt().toShort()
+        }
+        return out
+    }
+
+    companion object {
+        const val N = 257
+        const val PCA = 47
+        const val HOP = 256
+        const val BLOCK = 80
+        const val SQRT2 = 1.41421356f
+        /** The firmware's output scale: 0.5 * sqrt(2 / (N - 1)). */
+        const val F = 0.0441941738f
+
+        fun fromBytes(bytes: ByteArray): PcaCodec {
+            val fb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+            val w = FloatArray(PCA * N)
+            fb.get(w)
+            return PcaCodec(w)
+        }
+
+        fun load(ctx: Context): PcaCodec = fromBytes(ctx.assets.open("buddie_pca.bin").use { it.readBytes() })
+    }
+}
+
+/** What the earbud stream is actually doing, so problems can be read off the screen. */
+object BuddieStats {
+    var compressed = 0L
+    var opus = 0L
+    var otherSize = 0
+    var segments = 0
+    var recognized = 0
+    @Volatile
+    var sensorSeen = false
+    @Volatile
+    var lastHeard = ""
+    @Volatile
+    var lastProblem = ""
+    val summary = kotlinx.coroutines.flow.MutableStateFlow("No audio received yet.")
+
+    fun reset() {
+        compressed = 0; opus = 0; otherSize = 0; segments = 0; recognized = 0
+        sensorSeen = false; lastHeard = ""; lastProblem = ""
+        publish()
+    }
+
+    fun publish() {
+        val total = compressed + opus
+        summary.value = if (total == 0L && otherSize == 0) "No audio received yet." else buildString {
+            append("Audio packets: $total")
+            append(when {
+                compressed > 0 -> " (compressed format)"
+                opus > 0 -> " (Opus format)"
+                else -> " (unrecognized size $otherSize)"
+            })
+            append(" · speech segments: $segments · understood: $recognized")
+            append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
+            if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
+            if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
+        }
+    }
+}
+
 /** Opus to PCM using the platform decoder. */
 internal class OpusDec {
     private val codec: MediaCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
@@ -289,6 +390,9 @@ object BuddieLink {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var decoder: OpusDec? = null
+    private var pca: PcaCodec? = null
+    /** The wearer counts as speaking until this time (the earbuds report it in bursts). */
+    private var selfUntil = 0L
     private var segmenter = Segmenter()
     private val order = Mutex()
     private var meetingOnSince = 0L
@@ -322,6 +426,7 @@ object BuddieLink {
             decoder?.release()
             decoder = null
             segmenter = Segmenter()
+            packets = 0
         }
         Glasses.buddieStream.value = "off"
     }
@@ -380,6 +485,7 @@ object BuddieLink {
         try {
             val dev = adapter()?.getRemoteDevice(address) ?: return
             Glasses.buddieStream.value = "connecting"
+            BuddieStats.reset()
             gatt = dev.connectGatt(app, true, callback, BluetoothDevice.TRANSPORT_LE)
         } catch (e: Exception) {
             Glasses.buddieStream.value = "connection failed"
@@ -442,20 +548,57 @@ object BuddieLink {
     }
 
     private fun handle(v: ByteArray) {
-        if (v.size == BuddiePacket.LEGACY_SIZE) {
-            Glasses.buddieStream.value = "older audio format, not supported yet"
-            return
-        }
-        val p = BuddiePacket.parse(v) ?: return
+        val now = System.currentTimeMillis()
         packets++
-        if (packets % 250 == 1L) Glasses.buddieStream.value = "listening"
-        trackMeetingFlag(p.meeting)
-        val pcm = if (p.mic != null) {
-            val dec = decoder ?: OpusDec().also { decoder = it }
-            dec.decode(p.mic)
-        } else ShortArray(320) // 20 ms of silence keeps the segmenter's clock running
-        val u = segmenter.feed(pcm, p.selfSpeaking) ?: return
-        onUtterance(u)
+        if (packets % 250 == 1L) {
+            Glasses.buddieStream.value = "listening"
+            BuddieStats.publish()
+        }
+        when (v.size) {
+            BuddiePacket.LEGACY_SIZE -> {
+                val header = v[0].toInt() and 0xFF
+                if (header == 0x00 || header == 0x01) {
+                    // a status packet from the speaking (bone conduction) sensor, no audio
+                    BuddieStats.sensorSeen = true
+                    if (header == 0x01) selfUntil = now + 2_000
+                    return
+                }
+                if (header != 0xFF && header != 0xFE) return
+                BuddieStats.compressed++
+                if (!trackCall(header == 0xFE)) return
+                val ctx = appCtx ?: return
+                val codec = pca ?: PcaCodec.load(ctx).also { pca = it }
+                for (i in 0 until 3) {
+                    val pcm = codec.decodeBlock(v, 1 + i * PcaCodec.BLOCK)
+                    segmenter.feed(pcm, now < selfUntil)?.let { onUtterance(it) }
+                }
+            }
+            BuddiePacket.SIZE -> {
+                val p = BuddiePacket.parse(v) ?: return
+                BuddieStats.opus++
+                if (p.selfSpeaking) {
+                    BuddieStats.sensorSeen = true
+                    selfUntil = now + 2_000
+                }
+                if (!trackCall(p.meeting)) return
+                val pcm = if (p.mic != null) {
+                    val dec = decoder ?: OpusDec().also { decoder = it }
+                    dec.decode(p.mic)
+                } else ShortArray(320) // 20 ms of silence keeps the segmenter's clock running
+                segmenter.feed(pcm, now < selfUntil)?.let { onUtterance(it) }
+            }
+            else -> BuddieStats.otherSize = v.size
+        }
+    }
+
+    /**
+     * The earbuds flag when a phone call is running. Calls are only transcribed if Jon turned on
+     * call notes; otherwise call audio is dropped. Returns whether to process this packet's audio.
+     */
+    private fun trackCall(onCall: Boolean): Boolean {
+        if (onCall && !Prefs.callNotes) return false
+        trackMeetingFlag(onCall)
+        return true
     }
 
     /** The earbuds can switch meeting mode themselves; follow them, with some debounce. */
@@ -486,18 +629,30 @@ object BuddieLink {
         val ctx = appCtx ?: return
         // While Corin itself is talking or listening, what the earbuds hear is mostly Corin.
         if (Glasses.corinState.value != "idle") return
-        val mine = u.selfRatio > 0.3f
+        BuddieStats.segments++
+        // If these earbuds never report who is speaking, any voice might be his: the wake word
+        // still has to be said, but nearby speech gets transcribed on the phone to look for it.
+        val sensor = BuddieStats.sensorSeen
+        val mine = if (sensor) u.selfRatio > 0.3f else true
         val meeting = Glasses.meeting.value
         if (!mine && !meeting && !Prefs.buddieAmbient) return
         Corin.scope.launch {
             order.withLock {
                 val text = Transcriber.transcribe(ctx, u.pcm)?.trim().orEmpty()
-                if (text.length < 2) return@withLock
+                if (text.length < 2) {
+                    BuddieStats.lastProblem = Transcriber.lastProblem.ifBlank { "speech wasn't understood" }
+                    BuddieStats.publish()
+                    return@withLock
+                }
+                BuddieStats.recognized++
+                BuddieStats.lastHeard = text
+                BuddieStats.lastProblem = ""
+                BuddieStats.publish()
                 if (meeting) {
                     val cmd = if (mine) Wake.extract(text, Prefs.name) else null
                     if (cmd != null && Regex("(?i)\\b(stop|end|finish)\\b").containsMatchIn(cmd)) {
                         Corin.announce(Meeting.finish(ctx))
-                    } else Meeting.add(if (mine) "Jon" else "Other", text)
+                    } else Meeting.add(if (mine && sensor) "Jon" else if (sensor) "Other" else "Voice", text)
                     return@withLock
                 }
                 if (mine) {
@@ -512,7 +667,7 @@ object BuddieLink {
                     }
                 }
                 if (Prefs.buddieAmbient) {
-                    val line = "${if (mine) "Jon" else "Someone nearby"}: $text"
+                    val line = "${if (!sensor) "Heard" else if (mine) "Jon" else "Someone nearby"}: $text"
                     Glasses.noteAmbient(line)
                     Store.appendLog("heard", line)
                 }
