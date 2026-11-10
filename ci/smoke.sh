@@ -41,16 +41,16 @@ PY
   [ -z "$xy" ] && return 1
   adb shell input tap $xy
 }
-check() { sleep 4; alive || fail "process died: $1"; crashed && fail "crash: $1"; note "$1 OK: $(texts)"; }
+PASSED=""
+check() { sleep 4; alive || fail "process died: $1"; crashed && fail "crash: $1"; PASSED="$PASSED$1; "; echo "OK $1: $(texts)"; }
 
 adb shell am start -W -n $PKG/.MainActivity || fail "could not start MainActivity"
 check "Home screen"
-adb shell dumpsys activity services $PKG | grep -q GlassesService && note "Background service is running" || note "Background service not running (emulator has no Bluetooth permission path)"
+adb shell dumpsys activity services $PKG | grep -q GlassesService && PASSED="${PASSED}Background service running; " || fail "background service is not running"
 
 for tab in Notes Whisper Settings Corin; do
   tap "$tab" || fail "tab $tab not found"
   check "$tab tab"
-  [ "$tab" = Notes ] && note "Notes hint nodes in raw dump: $(grep -c 'lands here' ui.xml) / $(grep -o 'text="Say[^>]\{0,60\}' ui.xml | head -2 | tr '\n' ' ')"
 done
 
 # Type a message with no API key: Corin should answer honestly instead of crashing.
@@ -85,14 +85,13 @@ check "Notification listener"
 # Scroll the settings screen top to bottom, checking each section is there.
 tap "Settings"; sleep 2
 seen=""
-for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+for i in $(seq 1 30); do
   dump
   for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
     case "$seen" in *"[$sec]"*) ;; *) grep -q "text=\"$sec\"" ui.xml && seen="$seen[$sec]";; esac
   done
-  adb shell input swipe 500 1500 500 500 300; sleep 1
+  adb shell input swipe 12 1500 12 600 300; sleep 1
 done
-note "Settings sections found: $seen"
 for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
   case "$seen" in *"[$sec]"*) ;; *) fail "Settings section missing: $sec";; esac
 done
@@ -100,7 +99,7 @@ check "Settings scrolled"
 
 # Voice picker: open the phone voice list from the Voice section.
 tap "Corin"; sleep 1; tap "Settings"; sleep 2
-for i in 1 2 3 4 5 6; do has "Choose voice" && break; adb shell input swipe 500 1400 500 900 300; sleep 1; done
+for i in $(seq 1 20); do has "Choose voice" && break; adb shell input swipe 12 1400 12 900 300; sleep 1; done
 tap "Choose voice" || fail "voice picker button not found: $(texts)"
 sleep 3
 has "Voices (tap to hear)" || fail "voice picker did not open: $(texts)"
@@ -117,4 +116,5 @@ adb shell am force-stop $PKG
 adb shell am start -W -n $PKG/.MainActivity
 check "Relaunch"
 note "Device log: $(adb logcat -d -s CORINTEST:I | grep CORINTEST | sed 's/.*CORINTEST: //' | tr '\n' '|' | cut -c1-700)"
+note "All steps passed: $PASSED"
 echo "SMOKE PASSED"
