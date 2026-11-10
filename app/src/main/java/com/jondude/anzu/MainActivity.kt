@@ -829,7 +829,23 @@ fun SettingsScreen() {
             }) { Text("Play what the earbuds last heard") }
             ToggleRow("Experimental: faster link", "May fix choppy audio. Turn it off again if the earbuds start disconnecting. Re-seat the buds after changing.", Prefs.buddieFastLink) { Prefs.buddieFastLink = it }
             OutlinedButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data") }
-            Text("Tap it and talk normally for 8 seconds. A zip file lands in your Downloads folder. It contains raw microphone data from the earbuds for that stretch.", color = Muted, fontSize = 12.sp)
+            val captureStatus by BuddieLink.captureStatus.collectAsState()
+            if (captureStatus.isBlank()) {
+                Text("Tap it and talk normally for 8 seconds. A zip file is saved to your Downloads folder. It contains raw microphone data from the earbuds for that stretch.", color = Muted, fontSize = 12.sp)
+            } else {
+                Text(captureStatus, color = Gold, fontSize = 14.sp)
+                if (captureStatus.startsWith("Saved")) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { BuddieLink.shareCapture(ctx) }) { Text("Share it") }
+                        OutlinedButton(onClick = {
+                            try {
+                                ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            } catch (_: Exception) {
+                            }
+                        }) { Text("Open Downloads") }
+                    }
+                }
+            }
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }

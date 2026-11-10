@@ -325,7 +325,6 @@ object BuddieStats {
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
             append(link())
-            if (note.isNotBlank()) append(" · $note")
         }
     }
 }
@@ -450,6 +449,28 @@ object BuddieLink {
     @Volatile
     private var capture: java.io.ByteArrayOutputStream? = null
 
+    /** What the capture button is doing or did, shown right under it. */
+    val captureStatus = kotlinx.coroutines.flow.MutableStateFlow("")
+    @Volatile
+    var captureUri: android.net.Uri? = null
+
+    /** Opens the share sheet for the last capture, so it can go straight to another app. */
+    fun shareCapture(ctx: Context) {
+        val uri = captureUri ?: return
+        try {
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                .setType("application/zip")
+                .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ctx.startActivity(
+                android.content.Intent.createChooser(send, "Share earbud capture")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            captureStatus.value = "Couldn't open the share sheet: ${e.message}"
+        }
+    }
+
     /**
      * Records the raw data from the earbuds for a few seconds and opens the share sheet,
      * so the exact bytes can be examined when the audio doesn't decode properly.
@@ -457,7 +478,8 @@ object BuddieLink {
     fun captureAndShare(ctx: Context, seconds: Int = 8) {
         if (capture != null) return
         val app = ctx.applicationContext
-        android.widget.Toast.makeText(app, "Recording earbud data for $seconds seconds. Talk normally.", android.widget.Toast.LENGTH_LONG).show()
+        captureUri = null
+        captureStatus.value = "Recording for $seconds seconds. Talk normally…"
         capture = java.io.ByteArrayOutputStream()
         main.postDelayed({
             val data = capture?.toByteArray() ?: ByteArray(0)
@@ -474,18 +496,17 @@ object BuddieLink {
                 val values = android.content.ContentValues().apply {
                     put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
                     put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/zip")
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
                 }
                 val uri = app.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: throw IllegalStateException("couldn't create the file")
                 app.contentResolver.openOutputStream(uri)?.use { it.write(zipped.toByteArray()) }
-                val msg = "Saved $name to Downloads (${data.size / 1024} KB of earbud data)"
-                BuddieStats.lastProblem = ""
-                BuddieStats.note = msg
-                BuddieStats.publish()
-                android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show()
+                val msg = if (data.isEmpty()) "Nothing was captured: the earbuds sent no data in those $seconds seconds."
+                else "Saved $name to Downloads (${data.size / 1024} KB of earbud data)"
+                captureUri = uri
+                captureStatus.value = msg
             } catch (e: Exception) {
-                BuddieStats.lastProblem = "capture failed: ${e.message}"
-                BuddieStats.publish()
+                captureStatus.value = "Capture failed: ${e.message}"
             }
         }, seconds * 1000L)
     }
