@@ -35,3 +35,13 @@ The Anzu has speakers, a microphone and touch controls, with no screen or camera
     CORIN_VAULT=/path/to/vault uvicorn corin_server:app --host 0.0.0.0 --port 8765
 
 Keep it on Tailscale only; it has no login.
+
+## Added in the second pass
+
+- **House alerts**: tells you when a door, window, garage or lock has been left open, and when people come and go.
+- **Activity aware**: no unprompted chatter while driving; opens a real conversation when you head out on a walk.
+- **Places**: "this is home", then "remind me to take out the trash when I get home".
+- **Checklists**: "add milk to my grocery list", "what's my next step?", "done".
+- **Weather** in the morning hello and on request.
+- **Companion screen** with a live orb, today's conversation, and Talk / Quiet buttons on the notification.
+- **Mic test** and a daily token meter in Settings.

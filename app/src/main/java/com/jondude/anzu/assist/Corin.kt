@@ -104,6 +104,28 @@ object Corin {
         }
     }
 
+    /** Says a line, listens, and repeats back what it heard: for checking mic routing. */
+    fun micTest(ctx: Context) {
+        val app = ctx.applicationContext
+        scope.launch {
+            mutex.withLock {
+                try {
+                    Glasses.corinState.value = "speaking"
+                    Speaker.say("Testing. Say something after the tone.")
+                    Glasses.corinState.value = "listening"
+                    val h = Ears.listen(app)
+                    Glasses.corinState.value = "speaking"
+                    Speaker.say(
+                        if (h == null) "I didn't catch anything."
+                        else "I heard: ${h.text}." + if (h.quiet) " That registered as quiet." else ""
+                    )
+                } finally {
+                    Glasses.corinState.value = "idle"
+                }
+            }
+        }
+    }
+
     /** Queue a one-way line (notifications, timers, heads-ups). */
     fun announce(text: String) {
         scope.launch {

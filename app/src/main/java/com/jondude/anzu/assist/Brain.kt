@@ -5,6 +5,9 @@ import android.content.ContentUris
 import android.content.Context
 import android.provider.CalendarContract
 import com.jondude.anzu.Glasses
+import com.jondude.anzu.Motion
+import com.jondude.anzu.Places
+import com.jondude.anzu.Usage
 import com.jondude.anzu.Prefs
 import com.jondude.anzu.Speaker
 import com.jondude.anzu.Store
@@ -77,6 +80,14 @@ object HomeAssistant {
         }
     }
 
+    /** Raw entity states, or null if unreachable. Blocking. */
+    fun states(): JSONArray? = try {
+        val (code, body) = Net.get(base() + "/api/states", auth(), 15_000)
+        if (code in 200..299) JSONArray(body) else null
+    } catch (e: Exception) {
+        null
+    }
+
     /** Who's home, what's open or unlocked, what's on. Blocking. */
     fun summary(): String {
         if (!configured()) return "Home Assistant isn't set up in settings."
@@ -128,6 +139,94 @@ object HomeAssistant {
         if (code in 200..299) System.currentTimeMillis() - t else -1
     } catch (e: Exception) {
         -1
+    }
+}
+
+/** Watches the house and reports only what needs Jon: things left open, people coming and going. */
+object HomeWatch {
+    private val openSince = HashMap<String, Long>()
+    private val told = HashSet<String>()
+    private val people = HashMap<String, String>()
+    private var baseline = false
+
+    /** Blocking poll. Returns lines worth saying out loud. */
+    @Synchronized
+    fun poll(): List<String> {
+        val arr = HomeAssistant.states() ?: return emptyList()
+        val now = System.currentTimeMillis()
+        val out = ArrayList<String>()
+        val seen = HashSet<String>()
+        val ignore = Prefs.homeIgnore.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        val limit = Prefs.homeOpenMinutes.coerceAtLeast(1) * 60_000L
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val id = o.optString("entity_id")
+            val state = o.optString("state")
+            val attrs = o.optJSONObject("attributes") ?: JSONObject()
+            val name = attrs.optString("friendly_name", id)
+            val dc = attrs.optString("device_class")
+            val domain = id.substringBefore('.')
+            val unlocked = domain == "lock" && state == "unlocked"
+            val open = (domain == "cover" && state == "open" && dc in setOf("garage", "door", "gate")) ||
+                (domain == "binary_sensor" && state == "on" && dc in setOf("door", "window", "garage_door", "opening"))
+            if (open || unlocked) {
+                seen.add(id)
+                val since = openSince.getOrPut(id) { now }
+                if (baseline && now - since >= limit && id !in told) {
+                    told.add(id)
+                    out.add("$name has been ${if (unlocked) "unlocked" else "open"} for ${(now - since) / 60_000} minutes.")
+                }
+            }
+            if (domain == "person") {
+                val prev = people.put(id, state)
+                val skip = ignore.any { name.lowercase().contains(it) }
+                if (baseline && prev != null && prev != state && !skip) {
+                    if (state == "home") out.add("$name just got home.")
+                    else if (prev == "home") out.add("$name left home.")
+                }
+            }
+        }
+        openSince.keys.retainAll(seen)
+        told.retainAll(seen)
+        baseline = true
+        return out
+    }
+}
+
+/** Forecast from Open-Meteo (no key needed), for the morning hello and on request. */
+object Weather {
+    private val codes = mapOf(
+        0 to "clear", 1 to "mostly clear", 2 to "partly cloudy", 3 to "overcast", 45 to "foggy", 48 to "foggy",
+        51 to "light drizzle", 53 to "drizzle", 55 to "heavy drizzle", 61 to "light rain", 63 to "rain",
+        65 to "heavy rain", 66 to "freezing rain", 67 to "freezing rain", 71 to "light snow", 73 to "snow",
+        75 to "heavy snow", 77 to "snow grains", 80 to "rain showers", 81 to "rain showers", 82 to "heavy showers",
+        85 to "snow showers", 86 to "heavy snow showers", 95 to "thunderstorms", 96 to "thunderstorms with hail",
+        99 to "thunderstorms with hail"
+    )
+
+    /** Blocking. Empty string when there's no location or no network. */
+    fun brief(): String {
+        val lat = Motion.last?.latitude?.toString() ?: Prefs.sp.getString("wxLat", null) ?: Prefs.lastSeenLat
+        val lon = Motion.last?.longitude?.toString() ?: Prefs.sp.getString("wxLon", null) ?: Prefs.lastSeenLon
+        if (lat.isBlank() || lon.isBlank()) return ""
+        return try {
+            val (code, body) = Net.get(
+                "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+                    "&current=temperature_2m,weather_code,wind_speed_10m" +
+                    "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                    "&temperature_unit=fahrenheit&wind_speed_unit=mph&forecast_days=1&timezone=auto"
+            )
+            if (code !in 200..299) return ""
+            val o = JSONObject(body)
+            val cur = o.getJSONObject("current")
+            val day = o.getJSONObject("daily")
+            val sky = codes[cur.optInt("weather_code")] ?: "mixed"
+            "${cur.optDouble("temperature_2m").toInt()} degrees and $sky, wind ${cur.optDouble("wind_speed_10m").toInt()} mph. " +
+                "High ${day.getJSONArray("temperature_2m_max").optDouble(0).toInt()}, low ${day.getJSONArray("temperature_2m_min").optDouble(0).toInt()}, " +
+                "${day.getJSONArray("precipitation_probability_max").optInt(0)} percent chance of precipitation."
+        } catch (e: Exception) {
+            ""
+        }
     }
 }
 
@@ -315,6 +414,13 @@ object Brain {
         if (ev.isNotEmpty()) sb.append("Rest of today's calendar: ").append(ev.joinToString("; ")).append('\n')
         val n = Glasses.recentNotifications().takeLast(5)
         if (n.isNotEmpty()) sb.append("Recent notifications: ").append(n.joinToString(" | ")).append('\n')
+        if (Prefs.activityAware) {
+            if (Motion.driving()) sb.append("He appears to be driving: keep it short and never ask him to look at anything.\n")
+            else if (Motion.walking()) sb.append("He's out walking.\n")
+        }
+        val lists = Store.lists.value
+        if (lists.isNotEmpty()) sb.append("His checklists: ").append(lists.entries.joinToString("; ") { "${it.key} (${it.value.count { i -> !i.done }} open)" }).append('\n')
+        if (Places.names().isNotEmpty()) sb.append("Saved places: ").append(Places.names().joinToString(", ")).append('\n')
         if (Glasses.heldCount.value > 0) sb.append("Held notifications waiting for a digest: ${Glasses.heldCount.value}\n")
         val notes = Store.notes.value.take(6)
         if (notes.isNotEmpty()) sb.append("His latest notes and ideas: ").append(notes.joinToString(" | ") { it.text.take(120) }).append('\n')
@@ -336,7 +442,7 @@ object Brain {
                 """
 Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and short reminders. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             if (Prefs.aboutMe.isNotBlank()) append("\nAbout Jon (from him): ").append(Prefs.aboutMe.trim()).append('\n')
@@ -368,6 +474,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         a.put(tool("set_timer", "Set a timer or short reminder; you will speak up when it ends.",
             JSONObject().put("minutes", num("Minutes from now; decimals allowed.")).put("label", str("What it's for.")),
             listOf("minutes", "label")))
+        a.put(tool("checklist", "Manage Jon's checklists. Actions: add (item to a list), next (read the next open step), done (check off the current step and read the next), show (read a list, or name all lists if list is empty), clear (delete a list).",
+            JSONObject().put("action", str("add, next, done, show or clear")).put("list", str("List name, e.g. 'groceries'.")).put("item", str("Item text, for add.")),
+            listOf("action", "list")))
+        a.put(tool("save_place", "Save Jon's current location under a name, e.g. 'home' or 'work'.",
+            JSONObject().put("name", str("Place name.")), listOf("name")))
+        a.put(tool("remind_at_place", "Remind Jon of something the next time he arrives at a saved place.",
+            JSONObject().put("place", str("A saved place name.")).put("text", str("What to remind him.")), listOf("place", "text")))
+        a.put(tool("weather", "Current conditions and today's forecast where Jon is."))
         a.put(tool("research", "Look into a topic on the web in the background and report back when finished.",
             JSONObject().put("topic", str("What to look into, with any specifics he gave.")), listOf("topic")))
         a.put(tool("held_notifications", "Get and clear the notifications held back for a digest."))
@@ -451,6 +565,40 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 lastUndo = { Timers.cancel(t); "Timer cancelled." }
                 "Timer set."
             }
+            "checklist" -> {
+                val list = input.optString("list")
+                when (input.optString("action")) {
+                    "add" -> {
+                        val item = input.optString("item")
+                        if (item.isBlank()) "Nothing to add." else {
+                            val k = Store.listAdd(list, item)
+                            "Added to $k."
+                        }
+                    }
+                    "next" -> Store.listNext(list)
+                    "done" -> Store.listDone(list)
+                    "clear" -> Store.listClear(list)
+                    else -> Store.listShow(list)
+                }
+            }
+            "save_place" -> {
+                val loc = Motion.fresh(10 * 60_000)
+                if (loc == null) "No location fix right now. Location works after the app has been opened once with the glasses on."
+                else {
+                    Places.save(input.optString("name"), loc)
+                    "Saved this spot as ${input.optString("name")}."
+                }
+            }
+            "remind_at_place" -> {
+                val place = input.optString("place")
+                if (!Places.known(place)) "No saved place called $place. Saved places: ${Places.names().joinToString(", ").ifBlank { "none yet" }}."
+                else {
+                    Places.addReminder(place, input.optString("text"))
+                    Store.logAction("Set a reminder for $place: ${input.optString("text").take(60)}")
+                    "Reminder set for the next time he arrives at $place."
+                }
+            }
+            "weather" -> Weather.brief().ifBlank { "Couldn't get the weather; no location or no connection." }
             "research" -> {
                 val topic = input.optString("topic")
                 if (!hasKey()) "Research needs the Anthropic API key." else {
@@ -521,7 +669,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             }
             throw RuntimeException("API $code: ${msg.take(140)}")
         }
-        return JSONObject(text)
+        val obj = JSONObject(text)
+        obj.optJSONObject("usage")?.let { Usage.add(it.optInt("input_tokens"), it.optInt("output_tokens")) }
+        return obj
     }
 
     private fun textOf(resp: JSONObject): String {
@@ -643,8 +793,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             options.add("If a recent notification seems worth a remark, comment on it; otherwise just say hi.")
         }
         val directive = when (kind) {
-            "greeting" -> "He just put the glasses on for the first time today. Greet him briefly, and mention anything worth knowing from the calendar if there is anything."
-            "journal" -> "It's evening. Ask him how today went, in your own way, as the opener to a short end-of-day wrap-up."
+            "greeting" -> "He just put the glasses on for the first time today. Greet him briefly, and mention anything worth knowing from the calendar or the weather if there is anything. Weather: ${Weather.brief().ifBlank { "unknown" }}"
+            "journal" -> "It's evening. Ask him how today went, in your own way, as the opener to a short end-of-day wrap-up. If you did things on your own today, mention them in a few words first: ${Store.actionsToday().joinToString("; ").ifBlank { "nothing today" }}."
+            "walk" -> "He's just headed out on a walk, which is a good moment for a real conversation. Bring one of his saved ideas back up if there is one, or open a topic worth chewing on."
             else -> options.random()
         }
         val recentSaid = Store.recentExchanges().takeLast(4).joinToString(" | ") { it.second.take(100) }

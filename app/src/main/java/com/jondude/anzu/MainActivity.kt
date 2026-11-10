@@ -15,6 +15,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -108,7 +116,8 @@ val REQUESTED = arrayOf(
     Manifest.permission.RECORD_AUDIO,
     Manifest.permission.POST_NOTIFICATIONS,
     Manifest.permission.ACCESS_FINE_LOCATION,
-    Manifest.permission.READ_CALENDAR
+    Manifest.permission.READ_CALENDAR,
+    Manifest.permission.ACTIVITY_RECOGNITION
 )
 
 class MainActivity : ComponentActivity() {
@@ -232,6 +241,36 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
     )
 }
 
+/** Corin's face: a slow breath when idle, quicker when listening or thinking. */
+@Composable
+fun Orb(state: String) {
+    val period = when (state) {
+        "listening" -> 700
+        "thinking" -> 450
+        "speaking" -> 1000
+        else -> 2600
+    }
+    val color = when (state) {
+        "listening" -> Color(0xFF7FB58A)
+        "thinking" -> Gold
+        "speaking" -> Cream
+        else -> Color(0xFF8B6B43)
+    }
+    key(period) {
+        val transition = rememberInfiniteTransition(label = "orb")
+        val pulse by transition.animateFloat(
+            initialValue = 0.72f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "pulse"
+        )
+        Canvas(Modifier.size(96.dp)) {
+            val r = size.minDimension / 2
+            drawCircle(color.copy(alpha = 0.18f), r * pulse)
+            drawCircle(color.copy(alpha = 0.35f), r * pulse * 0.72f)
+            drawCircle(color, r * 0.38f)
+        }
+    }
+}
+
 private fun timeAgo(t: Long): String {
     if (t <= 0) return "never"
     return SimpleDateFormat("EEE MMM d, h:mm a", Locale.US).format(Date(t))
@@ -279,6 +318,7 @@ fun HomeScreen(resumes: Int) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Section("${Prefs.name} · $state") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Orb(state) }
             if (heard.isNotBlank()) Text("You: $heard", color = Muted, fontSize = 14.sp)
             Text(if (said.isBlank()) "Nothing said yet." else said, fontSize = 17.sp)
             OutlinedTextField(
@@ -311,6 +351,16 @@ fun HomeScreen(resumes: Int) {
                         if (first != null) Corin.announce(first)
                     }
                 }) { Text(if (waking) "Coming online…" else "Wake ${Prefs.name} for the first time") }
+            }
+        }
+
+        val today = remember(said, heard, resumes) {
+            Store.todayLog().lines().filter { it.isNotBlank() }.takeLast(10)
+                .map { it.removePrefix("- ").replace("**", "") }
+        }
+        if (today.isNotEmpty()) {
+            Section("Today") {
+                today.forEach { Text(it, fontSize = 13.sp, color = Muted) }
             }
         }
 
@@ -422,6 +472,7 @@ fun NotesScreen() {
     val notes by Store.notes.collectAsState()
     val memory by Store.memory.collectAsState()
     val actions by Store.actions.collectAsState()
+    val lists by Store.lists.collectAsState()
     var draft by remember { mutableStateOf("") }
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -449,6 +500,30 @@ fun NotesScreen() {
                         Text(timeAgo(n.time), color = Muted, fontSize = 12.sp)
                     }
                     TextButton(onClick = { Store.removeNote(i) }) { Text("Delete") }
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("Checklists", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            if (lists.isEmpty()) Text("Say \"add milk to my grocery list\" or \"what's my next step?\"", color = Muted)
+            lists.forEach { (name, listItems) ->
+                Card(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                            TextButton(onClick = { Store.listClear(name) }) { Text("Delete") }
+                        }
+                        listItems.forEachIndexed { i, item ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = item.done, onCheckedChange = { Store.listToggle(name, i) })
+                                Text(item.text, color = if (item.done) Muted else Cream)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -519,6 +594,7 @@ fun WhisperScreen() {
 
 @Composable
 fun SettingsScreen() {
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by Updater.status.collectAsState()
     var chat by remember { mutableStateOf(Prefs.chattiness.toFloat()) }
@@ -568,6 +644,7 @@ fun SettingsScreen() {
             ToggleRow("Talk over music and podcasts", null, Prefs.talkOverMedia) { Prefs.talkOverMedia = it }
             ToggleRow("Evening wrap-up", "Asks how the day went, then writes a journal entry", Prefs.journal) { Prefs.journal = it }
             PrefField("Wrap-up hour", Prefs.journalHour.toString()) { s -> s.toIntOrNull()?.let { Prefs.journalHour = it.coerceIn(0, 23) } }
+            ToggleRow("Activity aware", "No unprompted chatter while driving; opens a conversation when you head out on a walk", Prefs.activityAware) { Prefs.activityAware = it }
             ToggleRow("20-20-20 eye breaks", "Every 20 minutes of wear", Prefs.eyeBreaks) { Prefs.eyeBreaks = it }
             ToggleRow("Calendar heads-ups", "Ten minutes before events", Prefs.calendarHeadsUp) { Prefs.calendarHeadsUp = it }
         }
@@ -588,11 +665,15 @@ fun SettingsScreen() {
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
+            OutlinedButton(onClick = { Corin.micTest(ctx) }) { Text("Test voice and microphone") }
         }
 
         Section("Home Assistant") {
             PrefField("URL (e.g. your Tailscale address, port 8123)", Prefs.haUrl) { Prefs.haUrl = it.trim() }
             PrefField("Long-lived access token", Prefs.haToken, secret = true) { Prefs.haToken = it.trim() }
+            ToggleRow("House alerts", "Tells you when something is left open or unlocked, and when people come and go", Prefs.homeAlerts) { Prefs.homeAlerts = it }
+            PrefField("Alert after open for (minutes)", Prefs.homeOpenMinutes.toString()) { s -> s.toIntOrNull()?.let { Prefs.homeOpenMinutes = it.coerceIn(1, 240) } }
+            PrefField("Don't announce comings and goings for", Prefs.homeIgnore) { Prefs.homeIgnore = it }
             PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
             PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }
         }
@@ -607,6 +688,7 @@ fun SettingsScreen() {
 
         Section("App") {
             Text("Version ${BuildConfig.VERSION_NAME}")
+            Text(Usage.summary(), color = Muted, fontSize = 13.sp)
             if (status.isNotBlank()) Text(status, color = Muted, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }

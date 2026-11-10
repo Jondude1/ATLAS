@@ -79,6 +79,10 @@ object Prefs {
     var journal by BoolPref("journal", true)
     var journalHour by IntPref("journalHour", 21)
     var lastJournalDay by StrPref("lastJournalDay", "")
+    var homeAlerts by BoolPref("homeAlerts", true)
+    var homeOpenMinutes by IntPref("homeOpenMinutes", 10)
+    var homeIgnore by StrPref("homeIgnore", "jon")
+    var activityAware by BoolPref("activityAware", true)
     var aboutMe by StrPref("aboutMe", "")
     var haUrl by StrPref("haUrl", "")
     var haToken by StrPref("haToken", "")
@@ -112,17 +116,52 @@ object Prefs {
 
 data class Note(val text: String, val time: Long)
 
+data class Item(val text: String, val done: Boolean)
+
+/** Rough daily token meter so API spend stays visible. */
+object Usage {
+    private fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+    @Synchronized
+    fun add(input: Int, output: Int) {
+        val sp = Prefs.sp
+        val same = sp.getString("usageDay", "") == today()
+        sp.edit().putString("usageDay", today())
+            .putInt("usageCalls", (if (same) sp.getInt("usageCalls", 0) else 0) + 1)
+            .putInt("usageIn", (if (same) sp.getInt("usageIn", 0) else 0) + input)
+            .putInt("usageOut", (if (same) sp.getInt("usageOut", 0) else 0) + output)
+            .apply()
+    }
+
+    fun summary(): String {
+        val sp = Prefs.sp
+        if (sp.getString("usageDay", "") != today()) return "No model calls yet today."
+        return "Today: ${sp.getInt("usageCalls", 0)} calls, ${sp.getInt("usageIn", 0)} tokens in, ${sp.getInt("usageOut", 0)} out."
+    }
+}
+
 /** Corin's long-term memory, Jon's notes, and the rolling conversation. */
 object Store {
     private lateinit var dir: File
     val memory = MutableStateFlow<List<String>>(emptyList())
     val notes = MutableStateFlow<List<Note>>(emptyList())
     val actions = MutableStateFlow<List<Note>>(emptyList())
+    val lists = MutableStateFlow<Map<String, List<Item>>>(emptyMap())
     private val history = ArrayList<Pair<String, String>>()
 
     fun init(c: Context) {
         dir = c.filesDir
         File(dir, "log").mkdirs()
+        try {
+            val o = JSONObject(File(dir, "lists.json").readText())
+            val m = LinkedHashMap<String, List<Item>>()
+            for (k in o.keys()) {
+                val a = o.getJSONArray(k)
+                m[k] = (0 until a.length()).map { a.getJSONObject(it) }.map { Item(it.optString("t"), it.optBoolean("d")) }
+            }
+            lists.value = m
+        } catch (_: Exception) {
+        }
         actions.value = readArray("actions.json").let { a ->
             (0 until a.length()).map { a.getJSONObject(it) }.map { Note(it.optString("text"), it.optLong("time")) }
         }
@@ -181,6 +220,77 @@ object Store {
         val a = JSONArray()
         notes.value.forEach { a.put(JSONObject().put("text", it.text).put("time", it.time)) }
         write("notes.json", a)
+    }
+
+    private fun saveLists() {
+        val o = JSONObject()
+        lists.value.forEach { (k, v) ->
+            val a = JSONArray()
+            v.forEach { a.put(JSONObject().put("t", it.text).put("d", it.done)) }
+            o.put(k, a)
+        }
+        try {
+            File(dir, "lists.json").writeText(o.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Resolve a spoken list name to an existing list where possible. */
+    private fun listKey(name: String): String {
+        val n = name.trim().lowercase().removeSuffix(" list").ifBlank { "list" }
+        val keys = lists.value.keys
+        return keys.firstOrNull { it == n } ?: keys.firstOrNull { it.contains(n) || n.contains(it) } ?: n
+    }
+
+    @Synchronized
+    fun listAdd(name: String, item: String): String {
+        val k = listKey(name)
+        lists.value = lists.value + (k to (lists.value[k].orEmpty() + Item(item.trim(), false)))
+        saveLists()
+        return k
+    }
+
+    @Synchronized
+    fun listNext(name: String): String {
+        val k = listKey(name)
+        val items = lists.value[k] ?: return "There's no list called $k."
+        val next = items.firstOrNull { !it.done } ?: return "Everything on $k is done."
+        return "Next on $k: ${next.text}. ${items.count { !it.done } - 1} more after that."
+    }
+
+    /** Checks off the first open item and reports the next one. */
+    @Synchronized
+    fun listDone(name: String): String {
+        val k = listKey(name)
+        val items = lists.value[k] ?: return "There's no list called $k."
+        val i = items.indexOfFirst { !it.done }
+        if (i < 0) return "Everything on $k is already done."
+        lists.value = lists.value + (k to items.mapIndexed { j, x -> if (j == i) x.copy(done = true) else x })
+        saveLists()
+        return "Checked off ${items[i].text}. " + listNext(k)
+    }
+
+    @Synchronized
+    fun listShow(name: String): String {
+        if (name.isBlank()) return lists.value.keys.joinToString(", ").ifBlank { "No lists yet." }
+        val k = listKey(name)
+        val items = lists.value[k] ?: return "There's no list called $k. Lists: ${lists.value.keys.joinToString(", ")}"
+        return items.joinToString("; ") { (if (it.done) "done: " else "open: ") + it.text }.ifBlank { "$k is empty." }
+    }
+
+    @Synchronized
+    fun listToggle(key: String, index: Int) {
+        val items = lists.value[key] ?: return
+        lists.value = lists.value + (key to items.mapIndexed { j, x -> if (j == index) x.copy(done = !x.done) else x })
+        saveLists()
+    }
+
+    @Synchronized
+    fun listClear(name: String): String {
+        val k = listKey(name)
+        lists.value = lists.value - k
+        saveLists()
+        return "Cleared $k."
     }
 
     /** Record something Corin did on its own authority, for the daily digest. */

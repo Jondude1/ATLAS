@@ -29,6 +29,8 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.jondude.anzu.assist.Brain
 import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.HomeAssistant
+import com.jondude.anzu.assist.HomeWatch
 import com.jondude.anzu.assist.Obelisk
 import com.jondude.anzu.assist.Timers
 import kotlinx.coroutines.CoroutineScope
@@ -58,6 +60,9 @@ class GlassesService : Service() {
     private var warned20 = false
     private var warned10 = false
     private val announcedEvents = HashSet<String>()
+    private var ticks = 0
+    private var wasWalking = false
+    private var lastWalkTalk = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     /**
@@ -149,6 +154,15 @@ class GlassesService : Service() {
             }
         }
         if (intent?.action == ACTION_SPEAK_NOW) scope.launch { speakUp("random") }
+        if (intent?.action == ACTION_QUIET) {
+            Prefs.quietUntil = if (Prefs.quietUntil > System.currentTimeMillis()) 0L else System.currentTimeMillis() + 60 * 60_000
+            refreshNotification()
+        }
+        if (fromUi && Glasses.connected.value && Motion.last == null) {
+            // Location only flows once the service has been armed from the visible app.
+            Motion.stop()
+            Motion.start(this)
+        }
         updateWakeLock()
         return START_STICKY
     }
@@ -171,13 +185,28 @@ class GlassesService : Service() {
         val pi = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        val text = if (Glasses.connected.value) "With you in the glasses" else "Waiting for the glasses"
+        val quiet = Prefs.quietUntil > System.currentTimeMillis()
+        val text = when {
+            !Glasses.connected.value -> "Waiting for the glasses"
+            quiet -> "With you, staying quiet"
+            else -> "With you in the glasses"
+        }
+        val talk = PendingIntent.getActivity(
+            this, 1,
+            Intent(this, com.jondude.anzu.assist.AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        val quietPi = PendingIntent.getService(
+            this, 2, Intent(this, GlassesService::class.java).setAction(ACTION_QUIET), PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(Prefs.name)
             .setContentText(text)
             .setOngoing(true)
             .setContentIntent(pi)
+            .addAction(0, "Talk", talk)
+            .addAction(0, if (quiet) "Resume" else "Quiet 1h", quietPi)
             .build()
     }
 
@@ -254,6 +283,7 @@ class GlassesService : Service() {
         scheduleNext()
         refreshNotification()
         updateWakeLock()
+        Motion.start(this)
         Obelisk.presence("glasses")
         scope.launch {
             delay(5_000) // let the audio route settle
@@ -288,12 +318,18 @@ class GlassesService : Service() {
         saveLocation()
         refreshNotification()
         updateWakeLock()
+        Motion.stop()
         Obelisk.presence("phone")
     }
 
     @SuppressLint("MissingPermission")
     private fun saveLocation() {
         if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) return
+        Motion.fresh(5 * 60_000)?.let {
+            Prefs.lastSeenLat = it.latitude.toString()
+            Prefs.lastSeenLon = it.longitude.toString()
+            return
+        }
         try {
             val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
             var best: Location? = null
@@ -362,7 +398,28 @@ class GlassesService : Service() {
             Corin.announce("Heads up, glasses battery is at $b percent.")
         }
         if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
-        if (System.currentTimeMillis() < Prefs.quietUntil) return
+        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Corin.announce(it) } }
+        ticks++
+        val quietNow = System.currentTimeMillis() < Prefs.quietUntil
+        // House check every three minutes: only things that need him.
+        if (Prefs.homeAlerts && HomeAssistant.configured() && ticks % 6 == 0) {
+            val lines = kotlinx.coroutines.withContext(Dispatchers.IO) { HomeWatch.poll() }
+            if (!quietNow) lines.forEach { Corin.announce(it) }
+        }
+        if (quietNow) return
+        val driving = Prefs.activityAware && Motion.driving()
+        val walking = Prefs.activityAware && Motion.walking()
+        if (driving) return // no unprompted chatter behind the wheel
+        if (walking && !wasWalking && Prefs.proactive && inActiveHours() && interruptible() &&
+            now - lastWalkTalk > 45 * 60_000
+        ) {
+            wasWalking = true
+            lastWalkTalk = now
+            scheduleNext()
+            speakUp("walk")
+            return
+        }
+        wasWalking = walking
         if (Prefs.eyeBreaks && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
             lastEyeBreak = now
             Corin.announce("Twenty minutes. Look at something far away for twenty seconds.")
@@ -417,6 +474,7 @@ class GlassesService : Service() {
         const val EXTRA_FROM_UI = "fromUi"
         const val ACTION_SPEAK_NOW = "com.jondude.anzu.SPEAK_NOW"
         const val ACTION_POKE = "com.jondude.anzu.POKE"
+        const val ACTION_QUIET = "com.jondude.anzu.QUIET"
         const val ACTION_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
 
