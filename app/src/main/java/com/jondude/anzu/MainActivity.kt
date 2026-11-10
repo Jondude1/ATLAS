@@ -827,6 +827,8 @@ fun SettingsScreen() {
                 } catch (_: Exception) {
                 }
             }) { Text("Play what the earbuds last heard") }
+            OutlinedButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data and share") }
+            Text("Tap it, talk normally for 8 seconds, then share the file. It contains raw microphone data from the earbuds for that stretch.", color = Muted, fontSize = 12.sp)
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }

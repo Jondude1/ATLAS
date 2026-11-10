@@ -283,11 +283,13 @@ object BuddieStats {
     var lastSegment = ""
     @Volatile
     var earbuds = 0
+    @Volatile
+    var lost = 0L
 
     fun total(): Long = compressed + opus + statusPackets
 
     fun reset() {
-        compressed = 0; opus = 0; otherSize = 0; segments = 0; recognized = 0; statusPackets = 0
+        compressed = 0; opus = 0; otherSize = 0; segments = 0; recognized = 0; statusPackets = 0; lost = 0
         sensorSeen = false; lastHeard = ""; lastProblem = ""; channels = ""; subscriptions = ""; mtu = 0
         publish()
     }
@@ -312,6 +314,7 @@ object BuddieStats {
             })
             append(" · speech segments: $segments · understood: $recognized")
             if (lastSegment.isNotBlank()) append(" · last segment: $lastSegment")
+            if (compressed > 0) append(" · packets lost: $lost (${lost * 100 / (compressed + lost)}%)")
             append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
             if (earbuds > 0) append(" · earbuds linked: $earbuds")
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
@@ -437,6 +440,40 @@ object BuddieLink {
     private val linked = HashSet<String>()
     private var scanning = false
     private var lastAudioCount = -1L
+    private var lastSeq = -1
+    @Volatile
+    private var capture: java.io.ByteArrayOutputStream? = null
+
+    /**
+     * Records the raw data from the earbuds for a few seconds and opens the share sheet,
+     * so the exact bytes can be examined when the audio doesn't decode properly.
+     */
+    fun captureAndShare(ctx: Context, seconds: Int = 8) {
+        if (capture != null) return
+        val app = ctx.applicationContext
+        capture = java.io.ByteArrayOutputStream()
+        main.postDelayed({
+            val data = capture?.toByteArray() ?: ByteArray(0)
+            capture = null
+            try {
+                val dir = File(app.cacheDir, "share").apply { mkdirs() }
+                val file = File(dir, "buddie_capture.bin")
+                file.writeBytes(data)
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.updates", file)
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("application/octet-stream")
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                app.startActivity(
+                    android.content.Intent.createChooser(send, "Share earbud capture (${data.size / 1024} KB)")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                BuddieStats.lastProblem = "capture failed: ${e.message}"
+                BuddieStats.publish()
+            }
+        }, seconds * 1000L)
+    }
 
     private fun known(): Set<String> {
         val set = HashSet(Prefs.sp.getStringSet("buddieBleAddresses", emptySet()) ?: emptySet())
@@ -506,6 +543,7 @@ object BuddieLink {
         gatts.clear()
         linked.clear()
         lastAudioCount = -1
+        lastSeq = -1
         worker.execute {
             decoder?.release()
             decoder = null
@@ -611,6 +649,15 @@ object BuddieLink {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 val first = synchronized(linked) { linked.add(address); BuddieStats.earbuds = linked.size; linked.size == 1 }
                 if (first) Glasses.buddieStream.value = "connected"
+                // The stream needs about 5 kB/s. At Android's default link speed packets get dropped
+                // and the audio comes out chopped up, so ask for the fast settings Buddie's app uses.
+                try {
+                    g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                    g.setPreferredPhy(
+                        BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_OPTION_NO_PREFERRED
+                    )
+                } catch (_: Exception) {
+                }
                 if (!g.requestMtu(247)) g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 val none = synchronized(linked) { linked.remove(address); BuddieStats.earbuds = linked.size; linked.isEmpty() }
@@ -636,22 +683,24 @@ object BuddieLink {
                 return
             }
             BuddieStats.channels = service.characteristics.joinToString(" ") { short(it.uuid) }
-            // Newer firmware streams Opus on ae04 and the compressed format on ae03; older units
-            // may only have one of them. Try ae04 first, then ae03 if nothing arrives.
+            // The compressed stream is on ae03 and (on newer firmware) Opus is on ae04. Asking for
+            // both at once makes the earbud run two encoders off one microphone, so ask for one,
+            // and only try the other if nothing arrives.
+            val hasCompressed = service.getCharacteristic(COMPRESSED) != null
             val hasOpus = service.getCharacteristic(AUDIO) != null
-            if (!subscribe(g, if (hasOpus) AUDIO else COMPRESSED)) {
+            if (!subscribe(g, if (hasCompressed) COMPRESSED else AUDIO)) {
                 Glasses.buddieStream.value = "connected, but couldn't subscribe to audio"
                 return
             }
             Glasses.buddieStream.value = "listening"
-            if (hasOpus) main.postDelayed({
+            if (hasCompressed && hasOpus) main.postDelayed({
                 if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     try {
-                        subscribe(g, COMPRESSED)
+                        subscribe(g, AUDIO)
                     } catch (_: Exception) {
                     }
                 }
-            }, 5_000)
+            }, 6_000)
             main.postDelayed({
                 if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     BuddieStats.lastProblem = "the earbuds accepted the connection but aren't sending audio"
@@ -691,6 +740,12 @@ object BuddieLink {
 
     private fun handle(v: ByteArray) {
         val now = System.currentTimeMillis()
+        capture?.let { c ->
+            // record: 2-byte length, 2-byte milliseconds, then the packet exactly as received
+            c.write(v.size and 0xFF); c.write((v.size shr 8) and 0xFF)
+            c.write((now and 0xFF).toInt()); c.write(((now shr 8) and 0xFF).toInt())
+            c.write(v)
+        }
         packets++
         if (packets % 250 == 1L) {
             Glasses.buddieStream.value = "listening"
@@ -708,6 +763,10 @@ object BuddieLink {
                 }
                 if (header != 0xFF && header != 0xFE) return
                 BuddieStats.compressed++
+                // byte 241 is a running packet counter, which shows how many were lost on the way
+                val seq = v[241].toInt() and 0xFF
+                if (lastSeq >= 0) BuddieStats.lost += ((seq - lastSeq - 1) and 0xFF)
+                lastSeq = seq
                 if (!trackCall(header == 0xFE)) return
                 val ctx = appCtx ?: return
                 val codec = pca ?: PcaCodec.load(ctx).also { pca = it }
