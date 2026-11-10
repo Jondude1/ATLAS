@@ -285,6 +285,8 @@ object BuddieStats {
     var earbuds = 0
     @Volatile
     var lost = 0L
+    @Volatile
+    var drops = 0
 
     fun total(): Long = compressed + opus + statusPackets
 
@@ -317,6 +319,7 @@ object BuddieStats {
             if (compressed > 0) append(" · packets lost: $lost (${lost * 100 / (compressed + lost)}%)")
             append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
             if (earbuds > 0) append(" · earbuds linked: $earbuds")
+            if (drops > 0) append(" · link dropped $drops times")
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
             append(link())
@@ -526,7 +529,8 @@ object BuddieLink {
         val count = BuddieStats.compressed + BuddieStats.opus
         val stalled = count == lastAudioCount
         lastAudioCount = count
-        if (stalled) start(ctx)
+        // Only go looking when nothing is linked at all (for example he swapped to the other earbud).
+        if (stalled && synchronized(linked) { linked.isEmpty() }) start(ctx)
     }
 
     @SuppressLint("MissingPermission")
@@ -649,18 +653,18 @@ object BuddieLink {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 val first = synchronized(linked) { linked.add(address); BuddieStats.earbuds = linked.size; linked.size == 1 }
                 if (first) Glasses.buddieStream.value = "connected"
-                // The stream needs about 5 kB/s. At Android's default link speed packets get dropped
-                // and the audio comes out chopped up, so ask for the fast settings Buddie's app uses.
-                try {
-                    g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-                    g.setPreferredPhy(
-                        BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_OPTION_NO_PREFERRED
-                    )
-                } catch (_: Exception) {
+                // Optional faster link (Settings). Off by default: on some earbuds it drops the connection.
+                if (Prefs.buddieFastLink) {
+                    try {
+                        g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                    } catch (_: Exception) {
+                    }
                 }
                 if (!g.requestMtu(247)) g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 val none = synchronized(linked) { linked.remove(address); BuddieStats.earbuds = linked.size; linked.isEmpty() }
+                BuddieStats.drops++
+                BuddieStats.publish()
                 if (none) Glasses.buddieStream.value = "waiting for earbuds"
             }
         }
@@ -683,12 +687,13 @@ object BuddieLink {
                 return
             }
             BuddieStats.channels = service.characteristics.joinToString(" ") { short(it.uuid) }
-            // The compressed stream is on ae03 and (on newer firmware) Opus is on ae04. Asking for
-            // both at once makes the earbud run two encoders off one microphone, so ask for one,
-            // and only try the other if nothing arrives.
+            // Ask on ae04 first and then ae03 if nothing arrives. This order is the one that has
+            // been stable on real earbuds; asking for ae03 alone made them drop the connection.
             val hasCompressed = service.getCharacteristic(COMPRESSED) != null
             val hasOpus = service.getCharacteristic(AUDIO) != null
-            if (!subscribe(g, if (hasCompressed) COMPRESSED else AUDIO)) {
+            val firstChannel = if (Prefs.buddieCompressedFirst) (if (hasCompressed) COMPRESSED else AUDIO) else (if (hasOpus) AUDIO else COMPRESSED)
+            val second = if (firstChannel == AUDIO) COMPRESSED else AUDIO
+            if (!subscribe(g, firstChannel)) {
                 Glasses.buddieStream.value = "connected, but couldn't subscribe to audio"
                 return
             }
@@ -696,11 +701,11 @@ object BuddieLink {
             if (hasCompressed && hasOpus) main.postDelayed({
                 if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     try {
-                        subscribe(g, AUDIO)
+                        subscribe(g, second)
                     } catch (_: Exception) {
                     }
                 }
-            }, 6_000)
+            }, 5_000)
             main.postDelayed({
                 if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     BuddieStats.lastProblem = "the earbuds accepted the connection but aren't sending audio"

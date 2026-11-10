@@ -99,6 +99,8 @@ object Prefs {
     var buddieBleAddress by StrPref("buddieBleAddress", "")
     var wakeWord by BoolPref("wakeWord", true)
     var callNotes by BoolPref("callNotes", false)
+    var buddieFastLink by BoolPref("buddieFastLink", false)
+    var buddieCompressedFirst by BoolPref("buddieCompressedFirst", false)
     var commuteAlerts by BoolPref("commuteAlerts", true)
     var houseSpeaker by BoolPref("houseSpeaker", false)
     var haSpeaker by StrPref("haSpeaker", "")
