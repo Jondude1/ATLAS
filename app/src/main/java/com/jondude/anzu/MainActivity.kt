@@ -61,6 +61,17 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -92,24 +103,57 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Gold = Color(0xFFD4AF37)
-private val Cream = Color(0xFFF2EBDD)
-private val Muted = Color(0xFFA9B5A6)
+/** Follows the phone's light or dark setting. */
+private var isDark by mutableStateOf(true)
 
-private val CorinColors = darkColorScheme(
-    primary = Gold,
-    onPrimary = Color(0xFF2A2110),
-    secondary = Color(0xFF8B6B43),
-    onSecondary = Cream,
-    background = Color(0xFF14261D),
-    onBackground = Cream,
-    surface = Color(0xFF1B3327),
-    onSurface = Cream,
-    surfaceVariant = Color(0xFF3A3122),
-    onSurfaceVariant = Color(0xFFD9CDB4),
-    outline = Color(0xFF6E7F6F),
-    error = Color(0xFFE08A6B)
+// The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
+private val Gold: Color get() = if (isDark) Color(0xFFE5B94E) else Color(0xFF9A6B00)
+private val Cream: Color get() = if (isDark) Color(0xFFF5F5F7) else Color(0xFF1D1D1F)
+private val Muted: Color get() = if (isDark) Color(0xFF98989F) else Color(0xFF6E6E73)
+private val Fill: Color get() = if (isDark) Color(0xFF2C2C2E) else Color(0xFFEFEFF4)
+private val Hairline: Color get() = if (isDark) Color(0xFF38383A) else Color(0xFFD1D1D6)
+private val SystemGreen = Color(0xFF34C759)
+
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFFE5B94E),
+    onPrimary = Color(0xFF1D1D1F),
+    secondary = Color(0xFF98989F),
+    onSecondary = Color(0xFF1D1D1F),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFF5F5F7),
+    surface = Color(0xFF1C1C1E),
+    onSurface = Color(0xFFF5F5F7),
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFF98989F),
+    outline = Color(0xFF48484A),
+    error = Color(0xFFFF6961)
 )
+
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF9A6B00),
+    onPrimary = Color(0xFFFFFFFF),
+    secondary = Color(0xFF6E6E73),
+    onSecondary = Color(0xFFFFFFFF),
+    background = Color(0xFFF2F2F7),
+    onBackground = Color(0xFF1D1D1F),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1D1D1F),
+    surfaceVariant = Color(0xFFEFEFF4),
+    onSurfaceVariant = Color(0xFF6E6E73),
+    outline = Color(0xFFC7C7CC),
+    error = Color(0xFFD70015)
+)
+
+/** A quiet secondary button: tinted fill, no outline. */
+@Composable
+fun SoftButton(onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.14f), contentColor = Gold),
+        elevation = null
+    ) { content() }
+}
 
 val REQUESTED = arrayOf(
     Manifest.permission.BLUETOOTH_CONNECT,
@@ -127,7 +171,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = CorinColors) {
+            isDark = isSystemInDarkTheme()
+            MaterialTheme(colorScheme = if (isDark) DarkColors else LightColors) {
                 AppRoot(resumes.intValue)
             }
         }
@@ -155,7 +200,9 @@ fun AppRoot(resumes: Int) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            Column {
+            HorizontalDivider(color = Hairline, thickness = 0.5.dp)
+            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
                 val items = listOf(
                     "Corin" to Icons.Filled.Home,
                     "Notes" to Icons.Filled.Create,
@@ -166,10 +213,16 @@ fun AppRoot(resumes: Int) {
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i },
-                        icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label) }
+                        icon = { Icon(icon, contentDescription = null) },
+                        label = { Text(label, fontSize = 11.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Gold, selectedTextColor = Gold,
+                            unselectedIconColor = Muted, unselectedTextColor = Muted,
+                            indicatorColor = Color.Transparent
+                        )
                     )
                 }
+            }
             }
         }
     ) { pad ->
@@ -177,11 +230,12 @@ fun AppRoot(resumes: Int) {
             val rel = update
             if (rel != null && !dismissed) {
                 Card(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Gold.copy(alpha = 0.14f))
                 ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("Update available: ${rel.tag}", fontWeight = FontWeight.Bold)
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text("Update available: ${rel.tag}", fontWeight = FontWeight.SemiBold)
                         if (progress >= 0f) {
                             LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                         } else {
@@ -203,15 +257,32 @@ fun AppRoot(resumes: Int) {
     }
 }
 
+/** A big left-aligned screen title. */
+@Composable
+fun LargeTitle(text: String) {
+    Text(
+        text, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Cream,
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
+    )
+}
+
+/** A grouped card with a small caption above it. */
 @Composable
 fun Section(title: String, content: @Composable () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, color = Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            content()
+    Column {
+        Text(
+            title.uppercase(), color = Muted, fontSize = 13.sp, letterSpacing = 0.4.sp,
+            modifier = Modifier.padding(start = 16.dp, bottom = 6.dp, top = 4.dp)
+        )
+        Card(
+            Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                content()
+            }
         }
     }
 }
@@ -220,11 +291,17 @@ fun Section(title: String, content: @Composable () -> Unit) {
 fun ToggleRow(label: String, hint: String? = null, initial: Boolean, onChange: (Boolean) -> Unit) {
     var v by remember { mutableStateOf(initial) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(label)
-            if (hint != null) Text(hint, color = Muted, fontSize = 12.sp)
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, fontSize = 16.sp, color = Cream)
+            if (hint != null) Text(hint, color = Muted, fontSize = 13.sp, lineHeight = 17.sp)
         }
-        Switch(checked = v, onCheckedChange = { v = it; onChange(it) })
+        Switch(
+            checked = v, onCheckedChange = { v = it; onChange(it) },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White, checkedTrackColor = SystemGreen,
+                uncheckedThumbColor = Color.White, uncheckedTrackColor = Fill, uncheckedBorderColor = Color.Transparent
+            )
+        )
     }
 }
 
@@ -238,36 +315,54 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
         singleLine = lines == 1,
         minLines = lines,
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
+            unfocusedContainerColor = Fill, focusedContainerColor = Fill,
+            unfocusedLabelColor = Muted, focusedLabelColor = Gold
+        ),
         modifier = Modifier.fillMaxWidth()
     )
 }
 
-/** Corin's face: a slow breath when idle, quicker when listening or thinking. */
+/** Corin's presence: a soft glowing sphere that breathes slowly, and quickens when listening or thinking. */
 @Composable
 fun Orb(state: String) {
     val period = when (state) {
         "listening" -> 700
         "thinking" -> 450
         "speaking" -> 1000
-        else -> 2600
+        else -> 2800
     }
-    val color = when (state) {
-        "listening" -> Color(0xFF7FB58A)
-        "thinking" -> Gold
-        "speaking" -> Cream
-        else -> Color(0xFF8B6B43)
+    val inner = when (state) {
+        "listening" -> Color(0xFF7BE0A4)
+        "thinking" -> Color(0xFFFFD979)
+        "speaking" -> Color(0xFFFFF1CC)
+        else -> Color(0xFFE5B94E)
+    }
+    val outer = when (state) {
+        "listening" -> Color(0xFF1E8E5A)
+        "thinking" -> Color(0xFFB8860B)
+        "speaking" -> Color(0xFFD9A426)
+        else -> Color(0xFF7A5200)
     }
     key(period) {
         val transition = rememberInfiniteTransition(label = "orb")
         val pulse by transition.animateFloat(
-            initialValue = 0.72f, targetValue = 1f,
+            initialValue = 0.86f, targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "pulse"
         )
-        Canvas(Modifier.size(96.dp)) {
+        Canvas(Modifier.size(148.dp)) {
             val r = size.minDimension / 2
-            drawCircle(color.copy(alpha = 0.18f), r * pulse)
-            drawCircle(color.copy(alpha = 0.35f), r * pulse * 0.72f)
-            drawCircle(color, r * 0.38f)
+            val c = Offset(size.width / 2, size.height / 2)
+            // halo
+            drawCircle(Brush.radialGradient(listOf(inner.copy(alpha = 0.32f), Color.Transparent), c, r * pulse), r * pulse, c)
+            // sphere, lit from the upper left
+            val core = r * 0.56f * pulse
+            drawCircle(
+                Brush.radialGradient(listOf(inner, outer), Offset(c.x - core * 0.3f, c.y - core * 0.35f), core * 1.5f),
+                core, c
+            )
         }
     }
 }
@@ -320,31 +415,46 @@ fun HomeScreen(resumes: Int) {
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Section("${Prefs.name} · $state") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Orb(state) }
-            if (heard.isNotBlank()) Text("You: $heard", color = Muted, fontSize = 14.sp)
-            Text(if (said.isBlank()) "Nothing said yet." else said, fontSize = 17.sp)
+        LargeTitle(Prefs.name)
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Orb(state)
+            Text(state.uppercase(), color = Muted, fontSize = 12.sp, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(10.dp))
+            if (heard.isNotBlank()) Text("You: $heard", color = Muted, fontSize = 15.sp, textAlign = TextAlign.Center)
+            Text(
+                if (said.isBlank()) "Nothing said yet." else said,
+                fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.Medium, color = Cream,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+        Section("Talk") {
             OutlinedTextField(
                 value = typed,
                 onValueChange = { typed = it },
                 label = { Text("Type to ${Prefs.name}") },
                 singleLine = true, // so Enter on a hardware or wrist keyboard sends
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
+                    unfocusedContainerColor = Fill, focusedContainerColor = Fill,
+                    unfocusedLabelColor = Muted, focusedLabelColor = Gold
+                ),
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() })
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }) { Text("Talk") }
-                OutlinedButton(onClick = { send() }) { Text("Send") }
-                OutlinedButton(onClick = {
+                SoftButton(onClick = { send() }) { Text("Send") }
+                SoftButton(onClick = {
                     GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW)
                 }) { Text("Speak up") }
             }
             val quiet = quietUntil > System.currentTimeMillis()
-            OutlinedButton(onClick = {
+            SoftButton(onClick = {
                 Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
                 quietUntil = Prefs.quietUntil
             }) { Text(if (quiet) "Quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))} · resume" else "Quiet for an hour") }
@@ -388,8 +498,8 @@ fun HomeScreen(resumes: Int) {
                 color = Muted, fontSize = 13.sp
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { picking = true }) { Text("Choose glasses") }
-                OutlinedButton(onClick = {
+                SoftButton(onClick = { picking = true }) { Text("Choose glasses") }
+                SoftButton(onClick = {
                     try {
                         ToneGenerator(AudioManager.STREAM_MUSIC, 100)
                             .startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 3000)
@@ -399,7 +509,7 @@ fun HomeScreen(resumes: Int) {
             }
             Text("Last seen: ${timeAgo(Prefs.lastSeenTime)}", color = Muted, fontSize = 13.sp)
             if (Prefs.lastSeenLat.isNotBlank()) {
-                OutlinedButton(onClick = {
+                SoftButton(onClick = {
                     val q = "${Prefs.lastSeenLat},${Prefs.lastSeenLon}"
                     try {
                         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$q?q=$q(Glasses)")))
@@ -486,12 +596,12 @@ fun NotesScreen() {
     val lists by Store.lists.collectAsState()
     var draft by remember { mutableStateOf("") }
     LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Spacer(Modifier.height(12.dp))
-            Text("Notes and ideas", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            LargeTitle("Notes")
+            Text("Notes and ideas", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = draft, onValueChange = { draft = it },
@@ -516,7 +626,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("Checklists", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("Checklists", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
             if (lists.isEmpty()) Text("Say \"add milk to my grocery list\" or \"what's my next step?\"", color = Muted)
             lists.forEach { (name, listItems) ->
                 Card(
@@ -540,7 +650,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("What ${Prefs.name} remembers", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("What ${Prefs.name} remembers", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
             if (memory.isEmpty()) Text("Nothing yet. It builds up as you talk.", color = Muted)
         }
         items(memory.size) { i ->
@@ -551,7 +661,7 @@ fun NotesScreen() {
         }
         item {
             Spacer(Modifier.height(12.dp))
-            Text("Done on its own", color = Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("Done on its own", color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
             if (actions.isEmpty()) Text("Nothing yet.", color = Muted)
         }
         items(actions.take(30)) { a ->
@@ -579,16 +689,16 @@ fun WhisperScreen() {
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
-            Spacer(Modifier.height(12.dp))
+            LargeTitle("Whisper")
             Section("Notification whisper") {
                 ToggleRow("Read notifications to me", "Only while the glasses are on", Prefs.readNotifications) { Prefs.readNotifications = it }
                 ToggleRow("Triage", "Messages, calls and reminders now; everything else waits until you ask \"what did I miss?\"", Prefs.triage) { Prefs.triage = it }
                 Text("Whether the message itself is read out is set per wearable in Settings, under Glasses and earbuds.", color = Muted, fontSize = 12.sp)
             }
             Spacer(Modifier.height(8.dp))
-            Text("Apps allowed to reach your ears", color = Gold, fontWeight = FontWeight.Bold)
+            Text("APPS ALLOWED TO REACH YOUR EARS", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 16.dp))
         }
         items(apps, key = { it.second }) { (label, pkg) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -614,9 +724,10 @@ fun SettingsScreen() {
     var identity by remember { mutableStateOf(Prefs.identity) }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        LargeTitle("Settings")
         Section("Brain") {
             PrefField("Anthropic API key", Prefs.apiKey, secret = true) { Prefs.apiKey = it.trim() }
             PrefField("Model", Prefs.model) { Prefs.model = it.trim() }
@@ -696,7 +807,7 @@ fun SettingsScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Phone", "ElevenLabs", "Custom").forEachIndexed { i, label ->
                     if (provider == i) Button(onClick = {}) { Text(label) }
-                    else OutlinedButton(onClick = { provider = i; Prefs.voiceProvider = i }) { Text(label) }
+                    else SoftButton(onClick = { provider = i; Prefs.voiceProvider = i }) { Text(label) }
                 }
             }
             when (provider) {
@@ -704,10 +815,10 @@ fun SettingsScreen() {
                     Text("Voices built into the phone. Higher-quality ones are listed first.", color = Muted, fontSize = 13.sp)
                     Text("Voice: ${chosen.ifBlank { "engine default" }}", fontSize = 14.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { options = Speaker.allVoices(); pick = "voice" }) { Text("Choose voice") }
-                        OutlinedButton(onClick = { options = Speaker.engines().map { it.second to it.first }; pick = "engine" }) { Text("Engine") }
+                        SoftButton(onClick = { options = Speaker.allVoices(); pick = "voice" }) { Text("Choose voice") }
+                        SoftButton(onClick = { options = Speaker.engines().map { it.second to it.first }; pick = "engine" }) { Text("Engine") }
                     }
-                    OutlinedButton(onClick = {
+                    SoftButton(onClick = {
                         try {
                             ctx.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         } catch (_: Exception) {
@@ -719,7 +830,7 @@ fun SettingsScreen() {
                     Text("Neural voices from your ElevenLabs account, including ones you design or clone there. Uses your ElevenLabs credits.", color = Muted, fontSize = 13.sp)
                     PrefField("ElevenLabs API key", Prefs.elevenKey, secret = true) { Prefs.elevenKey = it.trim() }
                     Text("Voice: ${eleven.ifBlank { "none chosen" }}", fontSize = 14.sp)
-                    OutlinedButton(onClick = {
+                    SoftButton(onClick = {
                         voiceNote = "Loading…"
                         scope.launch {
                             val list = withContext(Dispatchers.IO) { CloudVoice.elevenVoices() }
@@ -741,7 +852,7 @@ fun SettingsScreen() {
                 }
             }
             if (voiceNote.isNotBlank()) Text(voiceNote, color = Muted, fontSize = 13.sp)
-            OutlinedButton(onClick = {
+            SoftButton(onClick = {
                 voiceNote = ""
                 Corin.announce("This is how I sound now. Not bad, or should we keep looking?")
                 scope.launch {
@@ -796,14 +907,14 @@ fun SettingsScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Off", "Tap", "Window").forEachIndexed { i, label ->
                     if (mode == i) Button(onClick = {}) { Text(label) }
-                    else OutlinedButton(onClick = { mode = i; Prefs.listenMode = i }) { Text(label) }
+                    else SoftButton(onClick = { mode = i; Prefs.listenMode = i }) { Text(label) }
                 }
             }
             ToggleRow("Use the glasses microphone", "Off uses the phone's mic", Prefs.useGlassesMic) { Prefs.useGlassesMic = it }
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
-            OutlinedButton(onClick = { Corin.micTest(ctx) }) { Text("Test voice and microphone") }
+            SoftButton(onClick = { Corin.micTest(ctx) }) { Text("Test voice and microphone") }
         }
 
         Section("Buddie earbuds") {
@@ -814,7 +925,7 @@ fun SettingsScreen() {
             ToggleRow("Take notes on phone calls", "Off means call audio from the earbuds is never transcribed. Only turn this on where recording calls is allowed and the other person knows.", Prefs.callNotes) { Prefs.callNotes = it }
             val stats by BuddieStats.summary.collectAsState()
             Text("Diagnostics: $stats", color = Muted, fontSize = 12.sp)
-            OutlinedButton(onClick = {
+            SoftButton(onClick = {
                 try {
                     val f = java.io.File(ctx.cacheDir, "buddie_last.wav")
                     if (f.exists()) {
@@ -838,11 +949,12 @@ fun SettingsScreen() {
                 color = if (modelReady) Muted else Gold, fontSize = 14.sp
             )
             if (!modelReady && !model.startsWith("downloading")) {
-                OutlinedButton(onClick = { Whisperer.ensure(ctx, force = true) }) { Text("Download speech model now") }
+                SoftButton(onClick = { Whisperer.ensure(ctx, force = true) }) { Text("Download speech model now") }
             }
             Text("The earbuds send heavily compressed audio. ${Prefs.name} uses its own on-phone speech model to understand it, so nothing you say through them leaves the phone to be transcribed.", color = Muted, fontSize = 12.sp)
+            ToggleRow("Experimental: lighter stream", "Asks the earbuds for one audio channel instead of two, which should use less of their battery. Turn it off again if they start disconnecting. Re-seat the buds after changing.", Prefs.buddieCompressedFirst) { Prefs.buddieCompressedFirst = it }
             ToggleRow("Experimental: faster link", "May fix choppy audio. Turn it off again if the earbuds start disconnecting. Re-seat the buds after changing.", Prefs.buddieFastLink) { Prefs.buddieFastLink = it }
-            OutlinedButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data") }
+            SoftButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data") }
             val captureStatus by BuddieLink.captureStatus.collectAsState()
             if (captureStatus.isBlank()) {
                 Text("Tap it and talk normally for 8 seconds. A zip file is saved to your Downloads folder. It contains raw microphone data from the earbuds for that stretch.", color = Muted, fontSize = 12.sp)
@@ -851,7 +963,7 @@ fun SettingsScreen() {
                 if (captureStatus.startsWith("Saved")) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { BuddieLink.shareCapture(ctx) }) { Text("Share it") }
-                        OutlinedButton(onClick = {
+                        SoftButton(onClick = {
                             try {
                                 ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                             } catch (_: Exception) {
@@ -890,8 +1002,8 @@ fun SettingsScreen() {
             Text(Usage.summary(), color = Muted, fontSize = 13.sp)
             if (status.isNotBlank()) Text(status, color = Muted, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
-                OutlinedButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
+                SoftButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
+                SoftButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
             }
         }
         Spacer(Modifier.height(24.dp))

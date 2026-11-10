@@ -191,6 +191,11 @@ class AssistActivity : ComponentActivity() {
             val state by Glasses.corinState.collectAsState()
             val said by Glasses.lastSaid.collectAsState()
             val heard by Glasses.lastHeard.collectAsState()
+            val dark = androidx.compose.foundation.isSystemInDarkTheme()
+            val sheet = if (dark) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)
+            val text = if (dark) Color(0xFFF5F5F7) else Color(0xFF1D1D1F)
+            val muted = if (dark) Color(0xFF98989F) else Color(0xFF6E6E73)
+            val accent = if (dark) Color(0xFFE5B94E) else Color(0xFF9A6B00)
             Box(
                 Modifier.fillMaxSize().clickable {
                     Speaker.stop()
@@ -199,15 +204,15 @@ class AssistActivity : ComponentActivity() {
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Column(
-                    Modifier.fillMaxWidth().padding(16.dp)
-                        .background(Color(0xFF1B3327), RoundedCornerShape(24.dp))
-                        .padding(20.dp),
+                    Modifier.fillMaxWidth().padding(12.dp)
+                        .background(sheet, RoundedCornerShape(28.dp))
+                        .padding(horizontal = 22.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("${Prefs.name} · $state", color = Color(0xFFD4AF37), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    if (heard.isNotBlank()) Text("You: $heard", color = Color(0xFFBFB59A), fontSize = 14.sp)
-                    if (said.isNotBlank()) Text(said, color = Color(0xFFF2EBDD), fontSize = 16.sp)
-                    Text("Tap anywhere to dismiss", color = Color(0xFF8A9A8E), fontSize = 12.sp)
+                    Text("${Prefs.name} · $state", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    if (heard.isNotBlank()) Text("You: $heard", color = muted, fontSize = 15.sp)
+                    if (said.isNotBlank()) Text(said, color = text, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+                    Text("Tap anywhere to dismiss", color = muted, fontSize = 12.sp)
                 }
             }
         }
