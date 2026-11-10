@@ -190,6 +190,10 @@ class CorinTest {
         val out = AudioMath.downsample(shortArrayOf(3, 6, 9, 30, 60, 90, 1), 3)
         assertEquals(listOf<Short>(6, 60), out.toList())
         assertEquals(4, AudioMath.toBytes(shortArrayOf(1, -1)).size)
+        val wav = AudioMath.wav(ShortArray(100))
+        assertEquals(244, wav.size)
+        assertEquals("RIFF", String(wav, 0, 4, Charsets.US_ASCII))
+        assertEquals("offline speech model not downloaded", Ears.errorName(13))
     }
 
     private fun tone(ms: Int, amp: Double): ShortArray =

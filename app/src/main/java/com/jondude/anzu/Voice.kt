@@ -266,6 +266,28 @@ object Ears {
         }
     }
 
+    /** The error code from the most recent recognizer session that failed (0 = none). */
+    @Volatile
+    var lastError = 0
+
+    fun errorName(code: Int): String = when (code) {
+        0 -> "timed out with no answer"
+        1 -> "network timeout"
+        2 -> "network error"
+        3 -> "audio error"
+        4 -> "server error"
+        5 -> "client error"
+        6 -> "heard no speech"
+        7 -> "no match"
+        8 -> "recognizer busy"
+        9 -> "missing permission"
+        10 -> "too many requests"
+        11 -> "server disconnected"
+        12 -> "language not supported"
+        13 -> "offline speech model not downloaded"
+        else -> "error $code"
+    }
+
     /** Only one recognizer session at a time, microphone or file. */
     val recognizer = Mutex()
 
@@ -294,7 +316,10 @@ object Ears {
             }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onError(error: Int) = finish(null)
+            override fun onError(error: Int) {
+                lastError = error
+                finish(null)
+            }
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                 finish(text?.takeIf { it.isNotBlank() }?.let { Heard(it, peak < 6f) })
@@ -357,19 +382,55 @@ object Transcriber {
             lastProblem = "no speech recognizer on this phone"
             return null
         }
+        // Half a second of silence either side, so the recognizer gets a clean start and end.
+        val padded = ShortArray(pcm.size + 16000)
+        System.arraycopy(pcm, 0, padded, 8000, pcm.size)
+        val bytes = AudioMath.toBytes(padded)
+        val notes = ArrayList<String>()
+        // Try the offline recognizer first, then the regular one.
+        for (onDevice in listOf(true, false)) {
+            if (onDevice && !SpeechRecognizer.isOnDeviceRecognitionAvailable(app)) continue
+            val text = attempt(app, bytes, onDevice)
+            if (text != null) return text
+            notes.add((if (onDevice) "offline recognizer: " else "online recognizer: ") + Ears.errorName(Ears.lastError))
+            if (onDevice && Ears.lastError == 13) requestOfflineModel(app)
+        }
+        lastProblem = notes.joinToString("; ")
+        return null
+    }
+
+    private var askedForModel = false
+
+    /** Asks Android to download the offline English speech model (it shows its own prompt). */
+    private suspend fun requestOfflineModel(app: Context) {
+        if (askedForModel || android.os.Build.VERSION.SDK_INT < 33) return
+        askedForModel = true
+        withContext(Dispatchers.Main) {
+            try {
+                val sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(app)
+                sr.triggerModelDownload(
+                    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private suspend fun attempt(app: Context, bytes: ByteArray, onDevice: Boolean): String? {
         return try {
             val pipe = android.os.ParcelFileDescriptor.createPipe()
-            val bytes = AudioMath.toBytes(pcm)
             Thread {
                 try {
                     android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { it.write(bytes) }
                 } catch (_: Exception) {
                 }
             }.start()
+            Ears.lastError = 0
             val heard = Ears.recognizer.withLock {
                 withContext(Dispatchers.Main) {
                     withTimeoutOrNull(15_000) {
-                        Ears.recognizeOnce(app, onDevice = true) { intent ->
+                        Ears.recognizeOnce(app, onDevice = onDevice) { intent ->
+                            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
                             intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
                             intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
                             intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT)
@@ -384,6 +445,7 @@ object Transcriber {
             }
             heard?.text
         } catch (e: Exception) {
+            Ears.lastError = 5
             null
         }
     }

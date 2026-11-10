@@ -153,6 +153,18 @@ object AudioMath {
         return b.array()
     }
 
+    /** A playable WAV file (16 kHz mono) of the given samples. */
+    fun wav(pcm: ShortArray): ByteArray {
+        val data = toBytes(pcm)
+        val b = ByteBuffer.allocate(44 + data.size).order(ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray(Charsets.US_ASCII)); b.putInt(36 + data.size)
+        b.put("WAVEfmt ".toByteArray(Charsets.US_ASCII)); b.putInt(16)
+        b.putShort(1); b.putShort(1); b.putInt(16000); b.putInt(32000); b.putShort(2); b.putShort(16)
+        b.put("data".toByteArray(Charsets.US_ASCII)); b.putInt(data.size)
+        b.put(data)
+        return b.array()
+    }
+
     fun toBytes(pcm: ShortArray): ByteArray {
         val b = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         for (s in pcm) b.putShort(s)
@@ -267,6 +279,8 @@ object BuddieStats {
     var mtu = 0
     @Volatile
     var statusPackets = 0L
+    @Volatile
+    var lastSegment = ""
 
     fun total(): Long = compressed + opus + statusPackets
 
@@ -295,6 +309,7 @@ object BuddieStats {
                 else -> " (unrecognized size $otherSize)"
             })
             append(" · speech segments: $segments · understood: $recognized")
+            if (lastSegment.isNotBlank()) append(" · last segment: $lastSegment")
             append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
@@ -720,6 +735,14 @@ object BuddieLink {
         // While Corin itself is talking or listening, what the earbuds hear is mostly Corin.
         if (Glasses.corinState.value != "idle") return
         BuddieStats.segments++
+        // Keep the latest segment so it can be played back from Settings to judge the audio.
+        try {
+            var peak = 0
+            for (x in u.pcm) if (Math.abs(x.toInt()) > peak) peak = Math.abs(x.toInt())
+            BuddieStats.lastSegment = "%.1f s, peak %d%%".format(u.pcm.size / 16000f, peak * 100 / 32768)
+            java.io.File(ctx.cacheDir, "buddie_last.wav").writeBytes(AudioMath.wav(u.pcm))
+        } catch (_: Exception) {
+        }
         // If these earbuds never report who is speaking, any voice might be his: the wake word
         // still has to be said, but nearby speech gets transcribed on the phone to look for it.
         val sensor = BuddieStats.sensorSeen

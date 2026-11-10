@@ -814,6 +814,19 @@ fun SettingsScreen() {
             ToggleRow("Take notes on phone calls", "Off means call audio from the earbuds is never transcribed. Only turn this on where recording calls is allowed and the other person knows.", Prefs.callNotes) { Prefs.callNotes = it }
             val stats by BuddieStats.summary.collectAsState()
             Text("Diagnostics: $stats", color = Muted, fontSize = 12.sp)
+            OutlinedButton(onClick = {
+                try {
+                    val f = java.io.File(ctx.cacheDir, "buddie_last.wav")
+                    if (f.exists()) {
+                        val mp = android.media.MediaPlayer()
+                        mp.setDataSource(f.absolutePath)
+                        mp.setOnCompletionListener { it.release() }
+                        mp.prepare()
+                        mp.start()
+                    }
+                } catch (_: Exception) {
+                }
+            }) { Text("Play what the earbuds last heard") }
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { Prefs.buddieBleAddress = ""; BuddieLink.stop() }) { Text("Forget earbuds and search again next time") }
         }
