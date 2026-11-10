@@ -64,7 +64,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -158,6 +159,14 @@ private val LightColors = lightColorScheme(
     onSurfaceVariant = Color(0xFF5E7067),
     outline = Color(0xFFB9C6BD),
     error = Color(0xFFB3261E)
+)
+
+/** Text fields are soft filled wells with the label inside, no outline. */
+@Composable
+private fun fieldColors() = TextFieldDefaults.colors(
+    unfocusedContainerColor = Fill, focusedContainerColor = Fill,
+    unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
+    unfocusedLabelColor = Muted, focusedLabelColor = Gold, cursorColor = Gold
 )
 
 /** A quiet secondary button: tinted fill, no outline. */
@@ -343,7 +352,7 @@ fun ToggleRow(label: String, hint: String? = null, initial: Boolean, onChange: (
 @Composable
 fun PrefField(label: String, initial: String, secret: Boolean = false, lines: Int = 1, onChange: (String) -> Unit) {
     var v by remember { mutableStateOf(initial) }
-    OutlinedTextField(
+    TextField(
         value = v,
         onValueChange = { v = it; onChange(it) },
         label = { Text(label) },
@@ -351,11 +360,7 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
         minLines = lines,
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         shape = RoundedCornerShape(16.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
-            unfocusedContainerColor = Fill, focusedContainerColor = Fill,
-            unfocusedLabelColor = Muted, focusedLabelColor = Gold
-        ),
+        colors = fieldColors(),
         modifier = Modifier.fillMaxWidth()
     )
 }
@@ -499,17 +504,13 @@ fun HomeScreen(resumes: Int) {
             }
         }
         Section("Talk") {
-            OutlinedTextField(
+            TextField(
                 value = typed,
                 onValueChange = { typed = it },
                 label = { Text("Type to ${Prefs.name}") },
                 singleLine = true, // so Enter on a hardware or wrist keyboard sends
                 shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedBorderColor = Color.Transparent, focusedBorderColor = Gold,
-                    unfocusedContainerColor = Fill, focusedContainerColor = Fill,
-                    unfocusedLabelColor = Muted, focusedLabelColor = Gold
-                ),
+                colors = fieldColors(),
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() })
@@ -671,9 +672,10 @@ fun NotesScreen() {
             LargeTitle("Notes")
             Text("Notes and ideas", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
+                TextField(
                     value = draft, onValueChange = { draft = it },
-                    label = { Text("New note") }, modifier = Modifier.weight(1f)
+                    label = { Text("New note") }, modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp), colors = fieldColors()
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { Store.addNote(draft); draft = "" }) { Text("Add") }
