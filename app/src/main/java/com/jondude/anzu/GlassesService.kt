@@ -438,6 +438,8 @@ class GlassesService : Service() {
         }
         updateWakeLock()
         if (!Glasses.connected.value) return
+        // Either earbud can be worn alone; if the audio stream has gone quiet, look for the other one.
+        if (Prefs.buddieListen && synchronized(worn) { worn.containsValue("buddie") }) BuddieLink.nudge(this)
         val now = System.currentTimeMillis()
         readBattery()
         val b = Glasses.battery.value

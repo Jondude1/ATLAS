@@ -281,6 +281,8 @@ object BuddieStats {
     var statusPackets = 0L
     @Volatile
     var lastSegment = ""
+    @Volatile
+    var earbuds = 0
 
     fun total(): Long = compressed + opus + statusPackets
 
@@ -311,6 +313,7 @@ object BuddieStats {
             append(" · speech segments: $segments · understood: $recognized")
             if (lastSegment.isNotBlank()) append(" · last segment: $lastSegment")
             append(" · your-voice sensor: ${if (sensorSeen) "yes" else "not seen"}")
+            if (earbuds > 0) append(" · earbuds linked: $earbuds")
             if (lastHeard.isNotBlank()) append(" · last heard: \"${lastHeard.take(60)}\"")
             if (lastProblem.isNotBlank()) append(" · problem: $lastProblem")
             append(link())
@@ -429,8 +432,27 @@ object BuddieLink {
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     private var appCtx: Context? = null
-    private var gatt: BluetoothGatt? = null
+    /** One link per earbud: each bud has its own address, and either can be worn alone. */
+    private val gatts = HashMap<String, BluetoothGatt>()
+    private val linked = HashSet<String>()
     private var scanning = false
+    private var lastAudioCount = -1L
+
+    private fun known(): Set<String> {
+        val set = HashSet(Prefs.sp.getStringSet("buddieBleAddresses", emptySet()) ?: emptySet())
+        if (Prefs.buddieBleAddress.isNotBlank()) set.add(Prefs.buddieBleAddress) // from earlier versions
+        return set
+    }
+
+    private fun remember(address: String) {
+        Prefs.sp.edit().putStringSet("buddieBleAddresses", known() + address).apply()
+    }
+
+    fun forget() {
+        stop()
+        Prefs.buddieBleAddress = ""
+        Prefs.sp.edit().remove("buddieBleAddresses").apply()
+    }
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var decoder: OpusDec? = null
@@ -450,22 +472,40 @@ object BuddieLink {
     fun start(ctx: Context) {
         val app = ctx.applicationContext
         appCtx = app
-        if (!Prefs.buddieListen || gatt != null || scanning) return
+        if (!Prefs.buddieListen) return
         if (!app.has(Manifest.permission.BLUETOOTH_CONNECT)) return
-        val saved = Prefs.buddieBleAddress
-        if (saved.isNotBlank()) connect(saved) else scan()
+        if (gatts.isEmpty()) BuddieStats.reset()
+        // Wait for every earbud we've seen before, and look for ones we haven't (the other bud).
+        for (address in known()) if (address !in gatts) connect(address)
+        if (!scanning) scan()
+    }
+
+    /**
+     * Called every half minute while Buddie earbuds are worn. If no audio has arrived since the
+     * last call (for example he swapped to the other earbud), search again.
+     */
+    @Synchronized
+    fun nudge(ctx: Context) {
+        val count = BuddieStats.compressed + BuddieStats.opus
+        val stalled = count == lastAudioCount
+        lastAudioCount = count
+        if (stalled) start(ctx)
     }
 
     @SuppressLint("MissingPermission")
     @Synchronized
     fun stop() {
         stopScan()
-        try {
-            gatt?.disconnect()
-            gatt?.close()
-        } catch (_: Exception) {
+        for (g in gatts.values) {
+            try {
+                g.disconnect()
+                g.close()
+            } catch (_: Exception) {
+            }
         }
-        gatt = null
+        gatts.clear()
+        linked.clear()
+        lastAudioCount = -1
         worker.execute {
             decoder?.release()
             decoder = null
@@ -484,9 +524,12 @@ object BuddieLink {
             } catch (_: Exception) {
             }
             if (name == null || !name.startsWith("Buddie", ignoreCase = true)) return
-            stopScan()
-            Prefs.buddieBleAddress = result.device.address
-            connect(result.device.address)
+            val address = result.device.address
+            synchronized(this@BuddieLink) {
+                if (address in gatts) return
+                remember(address)
+                connect(address) // keep scanning: the other earbud may be nearby too
+            }
         }
     }
 
@@ -500,14 +543,14 @@ object BuddieLink {
         val scanner = adapter()?.bluetoothLeScanner ?: return
         try {
             scanning = true
-            Glasses.buddieStream.value = "searching"
+            if (gatts.isEmpty()) Glasses.buddieStream.value = "searching"
             scanner.startScan(scanCallback)
             main.postDelayed({
                 if (scanning) {
                     stopScan()
-                    Glasses.buddieStream.value = "not found"
+                    if (gatts.isEmpty()) Glasses.buddieStream.value = "not found"
                 }
-            }, 30_000)
+            }, 20_000)
         } catch (e: Exception) {
             scanning = false
         }
@@ -528,8 +571,8 @@ object BuddieLink {
         val app = appCtx ?: return
         try {
             val dev = adapter()?.getRemoteDevice(address) ?: return
-            Glasses.buddieStream.value = "connecting"
-            gatt = dev.connectGatt(app, true, callback, BluetoothDevice.TRANSPORT_LE)
+            if (linked.isEmpty()) Glasses.buddieStream.value = "connecting"
+            gatts[address] = dev.connectGatt(app, true, callback, BluetoothDevice.TRANSPORT_LE)
         } catch (e: Exception) {
             Glasses.buddieStream.value = "connection failed"
         }
@@ -564,12 +607,14 @@ object BuddieLink {
     private val callback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            val address = g.device.address
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Glasses.buddieStream.value = "connected"
-                BuddieStats.reset()
+                val first = synchronized(linked) { linked.add(address); BuddieStats.earbuds = linked.size; linked.size == 1 }
+                if (first) Glasses.buddieStream.value = "connected"
                 if (!g.requestMtu(247)) g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Glasses.buddieStream.value = "waiting for earbuds"
+                val none = synchronized(linked) { linked.remove(address); BuddieStats.earbuds = linked.size; linked.isEmpty() }
+                if (none) Glasses.buddieStream.value = "waiting for earbuds"
             }
         }
 
@@ -583,9 +628,11 @@ object BuddieLink {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             val service = g.getService(SERVICE)
             if (service == null) {
-                Glasses.buddieStream.value = "connected, but no audio channel found"
-                BuddieStats.channels = g.services.joinToString(" ") { short(it.uuid) }.ifBlank { "none" } + " (services)"
-                BuddieStats.publish()
+                if (synchronized(linked) { linked.size <= 1 }) {
+                    Glasses.buddieStream.value = "connected, but no audio channel found"
+                    BuddieStats.channels = g.services.joinToString(" ") { short(it.uuid) }.ifBlank { "none" } + " (services)"
+                    BuddieStats.publish()
+                }
                 return
             }
             BuddieStats.channels = service.characteristics.joinToString(" ") { short(it.uuid) }
@@ -598,7 +645,7 @@ object BuddieLink {
             }
             Glasses.buddieStream.value = "listening"
             if (hasOpus) main.postDelayed({
-                if (gatt === g && BuddieStats.compressed + BuddieStats.opus == 0L) {
+                if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     try {
                         subscribe(g, COMPRESSED)
                     } catch (_: Exception) {
@@ -606,7 +653,7 @@ object BuddieLink {
                 }
             }, 5_000)
             main.postDelayed({
-                if (gatt === g && BuddieStats.compressed + BuddieStats.opus == 0L) {
+                if (gatts.containsValue(g) && BuddieStats.compressed + BuddieStats.opus == 0L) {
                     BuddieStats.lastProblem = "the earbuds accepted the connection but aren't sending audio"
                     BuddieStats.publish()
                 }

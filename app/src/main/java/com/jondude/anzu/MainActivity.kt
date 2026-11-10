@@ -828,7 +828,7 @@ fun SettingsScreen() {
                 }
             }) { Text("Play what the earbuds last heard") }
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
-            TextButton(onClick = { Prefs.buddieBleAddress = ""; BuddieLink.stop() }) { Text("Forget earbuds and search again next time") }
+            TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }
 
         Section("Home Assistant") {
