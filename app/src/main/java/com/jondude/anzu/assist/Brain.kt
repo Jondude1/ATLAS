@@ -1031,7 +1031,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Mcp.refresh()
         } catch (_: Exception) {
         }
-        val sys = system(ctx)
+        val sys = system(ctx) + People.context(ctx, userText)
         if (hasKey()) {
             try {
                 val messages = historyMessages()
@@ -1340,5 +1340,51 @@ object Spoken {
         val cut = all.take(words).joinToString(" ")
         val end = cut.lastIndexOfAny(charArrayOf('.', '!', '?'))
         return if (end > cut.length / 2) cut.substring(0, end + 1) else "$cut…"
+    }
+}
+
+
+/**
+ * People awareness: when Jon names someone, what ATLAS knows about them comes along for that turn:
+ * their contact entry and any remembered facts that mention them. Names resolve to context ("message from Ashley").
+ */
+object People {
+    private val notNames = setOf(
+        "atlas", "the", "and", "what", "when", "where", "who", "why", "how", "can", "could", "would", "should", "will",
+        "text", "call", "message", "tell", "ask", "remind", "send", "say", "set", "turn", "play", "open", "find", "check",
+        "today", "tomorrow", "tonight", "yesterday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+        "hey", "okay", "yes", "yeah", "please", "thanks", "this", "that", "there", "here", "home", "work", "athena", "obelisk",
+        "hermes", "jon", "google", "youtube", "spotify", "jellyfin"
+    )
+
+    /** Words in what he said that look like a person's name: capitalized, or already known as one from memory. */
+    fun names(text: String, memory: List<String>): List<String> {
+        val known = memory.flatMap { f -> Regex("\\b[A-Z][a-z]{2,}\\b").findAll(f).map { it.value } }.toSet()
+        val words = Regex("\\b[A-Za-z][a-z]{2,}\\b").findAll(text).map { it.value }.toList()
+        return words.filter { w ->
+            w.lowercase() !in notNames && (w[0].isUpperCase() || known.any { it.equals(w, true) })
+        }.map { it.replaceFirstChar(Char::uppercase) }.distinct().take(3)
+    }
+
+    /** Remembered facts that mention the name. */
+    fun facts(name: String, memory: List<String>): List<String> =
+        memory.filter { Regex("\\b" + Regex.escape(name) + "\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }.take(5)
+
+    fun context(ctx: Context, text: String): String {
+        val memory = Store.memory.value
+        val lines = ArrayList<String>()
+        for (n in names(text, memory)) {
+            val known = facts(n, memory)
+            val contact = try { Phone.findContact(ctx, n) } catch (_: Exception) { null }
+            if (known.isEmpty() && contact == null) continue
+            val about = buildString {
+                append("- ").append(contact?.first ?: n)
+                if (contact != null) append(" (in his contacts)")
+                if (known.isNotEmpty()) append(": ").append(known.joinToString("; "))
+            }
+            lines += about
+        }
+        return if (lines.isEmpty()) "" else "\nPeople he just mentioned, and what you know about them:\n" + lines.joinToString("\n") + "\n"
     }
 }

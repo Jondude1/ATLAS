@@ -112,7 +112,32 @@ object Hub {
                 if (ports is JSONArray) (0 until ports.length()).joinToString(", ") { ports.optString(it) } else (ports?.toString() ?: "")
             )
         }
-        return AthenaStatus(list, o.optString("uptime"), o.opt("disk")?.toString() ?: "", null)
+        // The hub fills its cache in the background; right after a restart it has nothing yet.
+        if (list.isEmpty() && o.optLong("updated", -1) == 0L) {
+            return AthenaStatus(emptyList(), "", "", "Athena's status is still loading on the hub. Ask again in a minute.")
+        }
+        return AthenaStatus(list, readableUptime(o.optString("uptime")), readableDisk(o.opt("disk")?.toString() ?: ""), null)
+    }
+
+    /** PowerShell's TimeSpan, flattened ("Days : 3 Hours : 4 Minutes : 12 ..."), as "3 days, 4 hours". Anything else passes through. */
+    fun readableUptime(raw: String): String {
+        val d = Regex("\\bDays\\s*:\\s*(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull()
+        val h = Regex("\\bHours\\s*:\\s*(\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull()
+        if (d == null && h == null) return raw.trim()
+        val parts = ArrayList<String>()
+        if ((d ?: 0) > 0) parts += "$d day${if (d == 1) "" else "s"}"
+        parts += "${h ?: 0} hour${if (h == 1) "" else "s"}"
+        return parts.joinToString(", ")
+    }
+
+    /** PowerShell's "Used Free ---- ---- <bytes> <bytes>" as "412 GB free of 931 GB". Anything else passes through. */
+    fun readableDisk(raw: String): String {
+        val nums = Regex("\\b\\d{6,}\\b").findAll(raw).map { it.value.toDouble() }.toList()
+        if (!raw.contains("Free") || nums.size < 2) return raw.trim()
+        val gb = 1024.0 * 1024 * 1024
+        val used = nums[0] / gb
+        val free = nums[1] / gb
+        return "%.0f GB free of %.0f GB".format(java.util.Locale.US, free, used + free)
     }
 
     /** Blocking. Athena's containers, uptime and disk, as the hub last saw them. */

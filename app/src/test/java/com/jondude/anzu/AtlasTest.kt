@@ -750,4 +750,31 @@ class AtlasTest {
         assertEquals(false to null, Barge.decide("I was telling him to stop by the store later today", "Atlas"))
         assertEquals(false to null, Barge.decide("", "Atlas"))
     }
+
+    @Test
+    fun athenaLiveShapeFromTheHub() {
+        val H = com.jondude.anzu.assist.Hub
+        // What the deployed hub actually returns: docker ps pipes, PowerShell TimeSpan and PSDrive tables flattened.
+        val st = H.parseAthena(
+            """{"containers":[{"name":"jellyfin","status":"Up 3 days (healthy)","ports":"0.0.0.0:8096->8096/tcp"}],
+               "uptime":"Days : 3 Hours : 4 Minutes : 12 Seconds : 9 Milliseconds : 0 Ticks : 2700000000000 TotalDays : 3.17",
+               "disk":"Used Free ---- ---- 542000000000 443000000000","updated":1794390000000}"""
+        )
+        assertNull(st.error)
+        assertEquals("3 days, 4 hours", st.uptime)
+        assertEquals("413 GB free of 917 GB", st.disk)
+        assertTrue(st.containers[0].up)
+        val warming = H.parseAthena("""{"containers":[],"uptime":"","disk":"","updated":0}""")
+        assertNotNull(warming.error)
+    }
+
+    @Test
+    fun peopleResolveFromWhatHeSaid() {
+        val P = com.jondude.anzu.assist.People
+        val mem = listOf("Jenna is Jon's wife and the Common Grounds treasurer", "Dave runs the D&D game on Fridays", "Likes his coffee black")
+        assertEquals(listOf("Jenna"), P.names("text jenna that I'm on my way", mem))
+        assertEquals(listOf("Ashley"), P.names("Atlas, what did Ashley say?", mem))
+        assertEquals(emptyList<String>(), P.names("What time is it on Friday?", mem))
+        assertEquals(listOf("Dave runs the D&D game on Fridays"), P.facts("Dave", mem))
+    }
 }
