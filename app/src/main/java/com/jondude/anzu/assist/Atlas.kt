@@ -316,6 +316,8 @@ object Interrupts {
         val m = parse(Prefs.cutoffs).toMutableMap()
         m[source] = ((m[source] ?: emptyList()) + now).filter { now - it < WEEK }.takeLast(10)
         Prefs.cutoffs = encode(m)
+        // The hub learns from this too (ack vs ignore): one report per cut-off.
+        Hub.report("atlas", "cut off: $source", "Jon said stop over a $source line.", key = "cutoff-$source-$now")
         if (mutedIn(m, source, now)) Store.logAction("Stopped speaking $source updates out loud (you cut them off ${LIMIT}x this week); they'll be a soft bell and a line in your brief.")
     }
 
