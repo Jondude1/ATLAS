@@ -1070,6 +1070,83 @@ def test_leave_home_check_uses_parser_when_available(atlas, monkeypatch):
     assert body["summary"] == "House is set."
 
 
+def test_routine_save_and_list(atlas):
+    mod, client = atlas
+    resp = client.post(
+        "/atlas/routines",
+        json={"name": "workshop mode", "steps": ["shop lights on", "focus music", "urgent only"]},
+    )
+    assert resp.json() == {"ok": True}
+
+    routines = client.get("/atlas/routines").json()["routines"]
+    assert len(routines) == 1
+    assert routines[0]["name"] == "workshop mode"
+    assert routines[0]["steps"] == ["shop lights on", "focus music", "urgent only"]
+
+
+def test_routine_save_replaces_by_name(atlas):
+    mod, client = atlas
+    client.post("/atlas/routines", json={"name": "workshop mode", "steps": ["old step"]})
+    client.post("/atlas/routines", json={"name": "workshop mode", "steps": ["new step"]})
+
+    routines = client.get("/atlas/routines").json()["routines"]
+    assert len(routines) == 1
+    assert routines[0]["steps"] == ["new step"]
+
+
+def test_routine_run_executes_hub_actionable_steps_and_flags_the_rest(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}}
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    client.post(
+        "/atlas/routines",
+        json={"name": "workshop mode", "steps": ["shop lights on", "printer status", "urgent only"]},
+    )
+
+    resp = client.post("/atlas/routines/run", json={"name": "workshop mode"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert any("pass to app/HA" in r and "shop lights on" in r for r in results)
+    assert any("Printer status" in r for r in results)
+    assert any("urgent-only" in r.lower() for r in results)
+
+
+def test_routine_run_sets_and_clears_urgent_only_mode(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "This should never be used in urgent-only mode."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/report", json={"app": "home", "title": "Normal thing"})
+    client.post("/atlas/report", json={"app": "home", "title": "Pipe burst", "priority": "urgent"})
+
+    client.post("/atlas/routines", json={"name": "focus", "steps": ["urgent only"]})
+    client.post("/atlas/routines/run", json={"name": "focus"})
+
+    import asyncio
+
+    asyncio.run(mod._rebuild_brief())
+    body = client.get("/atlas/brief").json()
+    assert "Pipe burst" in body["brief"]
+    assert "Normal thing" not in body["brief"]
+
+    client.post("/atlas/routines", json={"name": "resume", "steps": ["normal briefs"]})
+    client.post("/atlas/routines/run", json={"name": "resume"})
+    asyncio.run(mod._rebuild_brief())
+    body = client.get("/atlas/brief").json()
+    assert body["brief"] == "This should never be used in urgent-only mode."
+
+
+def test_routine_run_404_for_unknown_name(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/routines/run", json={"name": "does not exist"})
+    assert resp.status_code == 404
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

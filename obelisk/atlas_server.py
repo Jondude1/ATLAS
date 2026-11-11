@@ -359,6 +359,16 @@ def init_hub_db():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_house_list ON house_list_items(list_name, done_at)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS routines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                steps TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -366,6 +376,7 @@ init_hub_db()
 
 _brief_cache = {"brief": "", "updated": 0}
 _brief_lock = asyncio.Lock()
+_brief_mode = {"urgent_only": False}
 _brief_task: Optional[asyncio.Task] = None
 _captures_task: Optional[asyncio.Task] = None
 _money_task: Optional[asyncio.Task] = None
@@ -417,6 +428,15 @@ class HouseListItem(BaseModel):
 
 class HouseListDone(BaseModel):
     ids: list[int]
+
+
+class Routine(BaseModel):
+    name: str
+    steps: list[str]
+
+
+class RoutineRun(BaseModel):
+    name: str
 
 
 def _now_ms() -> int:
@@ -475,6 +495,19 @@ def _pick_resurfacing_loops(conn: sqlite3.Connection, limit: int = OPEN_LOOPS_PE
 
 
 async def _rebuild_brief():
+    if _brief_mode["urgent_only"]:
+        # Named Routines (#22) can put the hub in "workshop mode" etc: skip
+        # the full LLM composition and just name the urgent items, nothing
+        # else, until a routine (or the toggle) turns it back off.
+        with hub_db() as conn:
+            urgent_rows = conn.execute(
+                "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
+            ).fetchall()
+        _brief_cache["brief"] = (
+            "; ".join(r["title"] for r in urgent_rows) if urgent_rows else "Nothing urgent right now."
+        )
+        _brief_cache["updated"] = _now_ms()
+        return
     # Fix #3: if a report lands while we wait on the model, rebuild once more
     # after finishing so it is not missed until some later report.
     for _attempt in range(2):
@@ -1392,6 +1425,78 @@ async def leave_home_check():
     return await _compose_leave_home_check()
 
 
+# Named Routines (#22), hub half. A routine is a flat list of free-text
+# steps, voice-taught. Only a handful of step phrases are hub-actionable
+# (printer status, brief mode); anything else is named back to the caller
+# as "pass to app/HA" rather than silently dropped -- this hub has no way
+# to flip a light or start music itself.
+ROUTINE_HUB_KEYWORDS = {
+    "printer status": "printer_status",
+    "print status": "printer_status",
+    "urgent only": "urgent_only_on",
+    "urgent-only": "urgent_only_on",
+    "quiet briefs": "urgent_only_on",
+    "normal briefs": "urgent_only_off",
+    "all briefs": "urgent_only_off",
+}
+
+
+async def _execute_routine_step(step: str) -> str:
+    low = step.lower()
+    for phrase, action in ROUTINE_HUB_KEYWORDS.items():
+        if phrase in low:
+            if action == "printer_status":
+                state = await print_preflight()
+                return f"Printer status: {state.get('reason') or 'camera watching, ' + state['camera']}"
+            if action == "urgent_only_on":
+                _brief_mode["urgent_only"] = True
+                return "Briefs set to urgent-only."
+            if action == "urgent_only_off":
+                _brief_mode["urgent_only"] = False
+                return "Briefs back to normal."
+    return f"Not hub-actionable, pass to app/HA: {step}"
+
+
+async def _run_routine(name: str) -> dict:
+    with hub_db() as conn:
+        row = conn.execute("SELECT * FROM routines WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no routine named '{name}'")
+    steps = json.loads(row["steps"])
+    results = [await _execute_routine_step(s) for s in steps]
+    return {"name": name, "results": results}
+
+
+@app.post("/atlas/routines", dependencies=[Depends(require_token)])
+def save_routine(r: Routine):
+    with hub_db() as conn:
+        conn.execute("DELETE FROM routines WHERE name = ?", (r.name,))
+        conn.execute(
+            "INSERT INTO routines (name, steps, created_at) VALUES (?, ?, ?)",
+            (r.name, json.dumps(r.steps), _now_ms()),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.get("/atlas/routines", dependencies=[Depends(require_token)])
+def list_routines():
+    with hub_db() as conn:
+        rows = conn.execute("SELECT * FROM routines ORDER BY name ASC").fetchall()
+    return {"routines": [{"name": r["name"], "steps": json.loads(r["steps"])} for r in rows]}
+
+
+@app.post("/atlas/routines/run", dependencies=[Depends(require_token)])
+async def run_routine(r: RoutineRun):
+    return await _run_routine(r.name)
+
+
+@app.post("/atlas/brief/urgent-only", dependencies=[Depends(require_token)])
+def set_urgent_only_mode(on: bool = True):
+    _brief_mode["urgent_only"] = on
+    return {"urgent_only": _brief_mode["urgent_only"]}
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -2191,6 +2296,24 @@ async def mcp_house_maintenance_check() -> dict:
 async def mcp_leave_home_check() -> dict:
     """Run the leave-home checklist (cameras, print area); composes a 'House is set' line, exceptions only."""
     return await leave_home_check()
+
+
+@mcp.tool
+def mcp_save_routine(name: str, steps: list[str]) -> dict:
+    """Teach or replace a named routine (a flat list of free-text steps)."""
+    return save_routine(Routine(name=name, steps=steps))
+
+
+@mcp.tool
+def mcp_list_routines() -> dict:
+    """List all named routines and their steps."""
+    return list_routines()
+
+
+@mcp.tool
+async def mcp_run_routine(name: str) -> dict:
+    """Run a named routine: executes hub-actionable steps (printer status, brief mode), names the rest for app/HA."""
+    return await run_routine(RoutineRun(name=name))
 
 
 @mcp.tool
