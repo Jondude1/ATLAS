@@ -74,6 +74,16 @@ SUNDAY_BRIEF_LOOKBACK_DAYS = int(os.environ.get("ATLAS_SUNDAY_BRIEF_LOOKBACK_DAY
 
 WHERE_WAS_I_LOOKBACK_MIN = int(os.environ.get("ATLAS_WHERE_WAS_I_LOOKBACK_MIN", "180"))
 
+# Storm & Outage Protocol (#4), Outage half only. The Storm half (severe
+# weather alerts) needs Jon's zip/coordinates to query correctly, which
+# isn't guessed here — flagged in the issue instead. Outage detection is
+# self-contained: TCP reachability to well-known hosts, no credentials,
+# no personal data, so it ships now.
+OUTAGE_CHECK_HOSTS = [h.strip() for h in os.environ.get("ATLAS_OUTAGE_CHECK_HOSTS", "1.1.1.1:443,8.8.8.8:443").split(",") if h.strip()]
+OUTAGE_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_OUTAGE_CHECK_INTERVAL_S", "120"))
+_outage_state = {"last_up": None}
+_outage_task: Optional[asyncio.Task] = None
+
 # Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
 # person/car/dog/cat on its cameras today, no printer-specific camera or
 # zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
@@ -113,6 +123,7 @@ async def _atlas_lifespan(app):
             _schedule_athena_container_watch()
             _schedule_gatekeeper()
             _schedule_sunday_brief()
+            _schedule_outage_watch()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -123,6 +134,7 @@ async def _atlas_lifespan(app):
         _schedule_athena_container_watch()
         _schedule_gatekeeper()
         _schedule_sunday_brief()
+        _schedule_outage_watch()
         yield
 
 
@@ -1017,6 +1029,77 @@ async def where_was_i():
     return await _compose_where_was_i()
 
 
+async def _tcp_reachable(host_port: str, timeout_s: float = 5) -> bool:
+    try:
+        host, port_str = host_port.rsplit(":", 1)
+        port = int(port_str)
+    except ValueError:
+        return False
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout_s)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def _check_internet_outage() -> dict:
+    up = False
+    for host_port in OUTAGE_CHECK_HOSTS:
+        if await _tcp_reachable(host_port):
+            up = True
+            break
+    last_up = _outage_state.get("last_up")
+    if last_up is not None and up != last_up:
+        if up:
+            title, body = "Internet's back", "Obelisk can reach the outside internet again."
+        else:
+            title, body = (
+                "Internet looks down",
+                "Obelisk can't reach any outside host right now — could be an outage, or just this node.",
+            )
+        await report(
+            Report(
+                app="outage",
+                title=title,
+                body=body,
+                priority="urgent" if not up else "normal",
+                key="internet-outage",
+            )
+        )
+    _outage_state["last_up"] = up
+    return {"up": up}
+
+
+async def _outage_loop():
+    while True:
+        await asyncio.sleep(OUTAGE_CHECK_INTERVAL_S)
+        try:
+            await _check_internet_outage()
+        except Exception:
+            pass
+
+
+def _schedule_outage_watch():
+    global _outage_task
+    if _outage_task is not None and not _outage_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _outage_task = loop.create_task(_outage_loop())
+
+
+@app.post("/atlas/outage/check", dependencies=[Depends(require_token)])
+async def outage_check():
+    return await _check_internet_outage()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -1768,6 +1851,12 @@ async def mcp_sunday_brief_compose() -> dict:
 async def mcp_where_was_i() -> dict:
     """Remind the person what they were just doing or talking about."""
     return await where_was_i()
+
+
+@mcp.tool
+async def mcp_outage_check() -> dict:
+    """Check Obelisk's own internet reachability now; reports if it just went down or came back."""
+    return await outage_check()
 
 
 @mcp.tool

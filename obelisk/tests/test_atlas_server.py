@@ -851,6 +851,59 @@ def test_where_was_i_uses_parser_when_available(atlas, monkeypatch):
     assert resp.json()["answer"] == "You were just looking at the garage door fix."
 
 
+def test_outage_check_baseline_then_reports_on_transition(atlas, monkeypatch):
+    mod, client = atlas
+    state = {"up": True}
+
+    async def fake_reachable(host_port, timeout_s=5):
+        # Every configured host is checked the same way within one call
+        # (a down-check tries all hosts, not just the first), so the fake
+        # must answer consistently per call rather than off a flat sequence.
+        return state["up"]
+
+    monkeypatch.setattr(mod, "_tcp_reachable", fake_reachable)
+
+    baseline = client.post("/atlas/outage/check").json()
+    assert baseline == {"up": True}
+    assert client.get("/atlas/reports", params={"app": "outage"}).json()["reports"] == []
+
+    still_up = client.post("/atlas/outage/check").json()
+    assert still_up == {"up": True}
+    assert client.get("/atlas/reports", params={"app": "outage"}).json()["reports"] == []
+
+    state["up"] = False
+    went_down = client.post("/atlas/outage/check").json()
+    assert went_down == {"up": False}
+    reports = client.get("/atlas/reports", params={"app": "outage"}).json()["reports"]
+    assert len(reports) == 1
+    assert "down" in reports[0]["title"].lower()
+
+    still_down = client.post("/atlas/outage/check").json()
+    assert still_down == {"up": False}
+    assert len(client.get("/atlas/reports", params={"app": "outage"}).json()["reports"]) == 1
+
+    state["up"] = True
+    back_up = client.post("/atlas/outage/check").json()
+    assert back_up == {"up": True}
+    reports = client.get("/atlas/reports", params={"app": "outage"}).json()["reports"]
+    assert len(reports) == 1
+    assert "back" in reports[0]["title"].lower()
+
+
+def test_outage_check_tries_every_configured_host(atlas, monkeypatch):
+    mod, client = atlas
+    calls = []
+
+    async def fake_reachable(host_port, timeout_s=5):
+        calls.append(host_port)
+        return host_port == mod.OUTAGE_CHECK_HOSTS[-1]
+
+    monkeypatch.setattr(mod, "_tcp_reachable", fake_reachable)
+    resp = client.post("/atlas/outage/check").json()
+    assert resp == {"up": True}
+    assert calls == mod.OUTAGE_CHECK_HOSTS
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
