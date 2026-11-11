@@ -26,6 +26,7 @@ object Systems {
     val all = listOf(
         Service("The hub", "Obelisk", OBELISK, 8765, "/atlas/status", "ATLAS's hub: reports, briefs, Athena"),
         Service("Ollama", "Obelisk", OBELISK, 11434, "/api/tags", "local models"),
+        Service("HomeAgent", "Obelisk", OBELISK, 18791, "/", "the existing house agent"),
         Service("Home Assistant", "Home Assistant", "100.68.172.113", 80, "/", "the house"),
         Service("Jellyfin", "Athena", ATHENA, 8096, "/health", "movies and TV"),
         Service("Audiobookshelf", "Athena", ATHENA, 13378, "/healthcheck", "audiobooks and ebooks"),

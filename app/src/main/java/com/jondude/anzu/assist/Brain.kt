@@ -607,7 +607,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
-        a.put(tool("service_status", "Whether Jon's self-hosted services are up, checked live over his tailnet: the hub and Ollama on Obelisk, Home Assistant, and on Athena Jellyfin, Audiobookshelf, Frigate, Jellyseerr, Overseerr, Nextcloud, Node-RED, ESPHome, Radarr, Sonarr, Lidarr, Prowlarr, LazyLibrarian. Leave name empty to check all.",
+        a.put(tool("service_status", "Whether Jon's self-hosted services are up, checked live over his tailnet: the hub, Ollama and HomeAgent on Obelisk, Home Assistant, and on Athena Jellyfin, Audiobookshelf, Frigate, Jellyseerr, Overseerr, Nextcloud, Node-RED, ESPHome, Radarr, Sonarr, Lidarr, Prowlarr, LazyLibrarian. Leave name empty to check all.",
             JSONObject().put("name", str("One service to check, or empty for all.")), emptyList()))
         if (Hub.configured()) {
             a.put(tool("athena_run", "Run one command on Athena (Windows; PowerShell or cmd, and docker). Always asks Jon first. Use for things like restarting a container (docker restart jellyfin), checking logs (docker logs --tail 20 sonarr) or disk space. Report the gist of the output in a sentence, not the raw text.",
