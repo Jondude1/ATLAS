@@ -221,7 +221,11 @@ object Wake {
         val words = Regex("[A-Za-z']+|[^A-Za-z'\\s]+").findAll(text).map { it.value }.toList()
         val tokens = words.withIndex().filter { it.value.first().isLetter() }
         if (tokens.isEmpty()) return null
-        fun near(w: String) = w.lowercase().let { it.length in (n.length - 1)..(n.length + 1) && it.first() == n.first() && distance(it, n) <= 1 }
+        // real words that happen to sit one letter away from a name
+        val ordinary = setOf("alas", "alias", "atlases", "cores", "coring", "corn")
+        fun near(w: String) = w.lowercase().let {
+            it !in ordinary && it.length in (n.length - 1)..(n.length + 1) && it.first() == n.first() && distance(it, n) <= 1
+        }
         fun rest(fromIndex: Int) = words.drop(fromIndex).joinToString(" ").replace(Regex(" ([,.!?;:])"), "$1").trim().trimStart(',', '.', ' ')
         var first = 0
         if (tokens[0].value.lowercase() in setOf("hey", "ok", "okay", "yo") && tokens.size > 1) first = 1
