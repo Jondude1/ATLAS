@@ -544,6 +544,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 if (b.urgent.isNotEmpty()) append("Urgent and not yet told to Jon: ").append(b.urgent.joinToString("; ") { "${it.app}: ${it.title}" }).append('\n')
                 append("For anything beyond the brief, use ask_hub rather than guessing.\n")
             }
+            append("\nJon's machines on his tailnet: Obelisk (${com.jondude.anzu.OBELISK}) runs the hub, Ollama and Hermes; Athena (${com.jondude.anzu.ATHENA}) is his Windows desktop; Home Assistant is ${com.jondude.anzu.HOME_ASSISTANT.removePrefix("http://")}.\n")
             Mcp.summary().takeIf { it.isNotBlank() }?.let {
                 append("\nSystems you're connected to, whose tools you can use directly (their tool names start with x_): ").append(it).append('\n')
             }

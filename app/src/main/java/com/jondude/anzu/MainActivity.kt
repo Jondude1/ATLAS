@@ -1303,7 +1303,7 @@ fun SettingsScreen() {
             if (Prefs.haToken.isBlank()) Text("Home Assistant connects here by itself once its token is in under Settings → Home Assistant.", color = Muted, fontSize = 13.sp)
             Text("Add a connection", color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             PrefField("Name (for example Athena files)", "") { newName = it }
-            PrefField("Address (for example http://athena:8000/mcp)", "") { newUrl = it.trim() }
+            PrefField("Address (for example http://$ATHENA:8000/mcp)", "") { newUrl = it.trim() }
             PrefField("Token, if it needs one", "", secret = true) { newToken = it.trim() }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = newName.isNotBlank() && newUrl.startsWith("http"), onClick = {
@@ -1312,7 +1312,7 @@ fun SettingsScreen() {
                 }) { Text("Connect") }
                 SoftButton(onClick = { scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Mcp.refresh(force = true) } }) { Text("Check all") }
             }
-            Text("Changes to the add form take effect when you tap Connect. Addresses can be Tailscale names, since the phone is on your tailnet.", color = Muted, fontSize = 12.sp)
+            Text("Your machines: Obelisk is $OBELISK, Athena is $ATHENA, Home Assistant is ${HOME_ASSISTANT.removePrefix("http://")}.", color = Muted, fontSize = 12.sp)
         }
 
         Section("Hermes and your vault") {

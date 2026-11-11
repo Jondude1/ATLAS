@@ -49,6 +49,10 @@ class LongPref(private val key: String, private val def: Long) {
 const val OBELISK_HUB = "http://obalisk.tail8dab0b.ts.net:8765"
 /** Home Assistant (port 80). */
 const val HOME_ASSISTANT = "http://homeassistant-1.tail8dab0b.ts.net"
+/** Athena, the Windows desktop. */
+const val ATHENA = "athena.tail8dab0b.ts.net"
+/** Obelisk, the local AI node (Ollama, Hermes, the hub). */
+const val OBELISK = "obalisk.tail8dab0b.ts.net"
 
 object Prefs {
     lateinit var sp: SharedPreferences
