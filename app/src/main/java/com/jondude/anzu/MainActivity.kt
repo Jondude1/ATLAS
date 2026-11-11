@@ -187,7 +187,8 @@ private val ConsoleType = androidx.compose.material3.Typography().let { t ->
     )
 }
 private val ConsoleShapes = androidx.compose.material3.Shapes(
-    extraSmall = Flat, small = Flat, medium = Flat, large = Flat, extraLarge = Flat
+    extraSmall = RoundedCornerShape(0.dp), small = RoundedCornerShape(0.dp), medium = RoundedCornerShape(0.dp),
+    large = RoundedCornerShape(0.dp), extraLarge = RoundedCornerShape(0.dp)
 )
 
 /** Every button in the app: chamfered, never a pill. */
