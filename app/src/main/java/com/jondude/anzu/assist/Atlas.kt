@@ -171,6 +171,42 @@ object Atlas {
     }
 
     /** Queue a one-way line (notifications, timers, heads-ups). */
+    /** Lines that waited for music to stop: when they may still be said, and the line. */
+    private val waiting = ArrayList<Pair<Long, String>>()
+
+    /** True when music or other media is playing and Jon hasn't said Atlas may talk over it. */
+    fun musicPlaying(): Boolean {
+        val ctx = Brain.appContext ?: return false
+        if (Prefs.talkOverMedia) return false
+        return try {
+            (ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).isMusicActive
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * For things that aren't urgent: never over music. The line waits for a pause (up to [maxWaitMs]),
+     * then moves to the held digest he hears in the next brief instead.
+     */
+    fun polite(text: String, maxWaitMs: Long = 10 * 60_000L) {
+        if (!musicPlaying()) announce(text)
+        else synchronized(waiting) { waiting.add(System.currentTimeMillis() + maxWaitMs to text) }
+    }
+
+    /** Called every tick: say what waited if the music stopped; hold what waited too long. */
+    fun flushPolite() {
+        val due = synchronized(waiting) {
+            if (waiting.isEmpty()) return
+            val now = System.currentTimeMillis()
+            val music = musicPlaying()
+            val out = waiting.filter { !music || it.first < now }
+            waiting.removeAll(out.toSet())
+            out.map { (it.first < now && music) to it.second }
+        }
+        due.forEach { (held, line) -> if (held) Glasses.hold(line) else announce(line) }
+    }
+
     fun announce(text: String) {
         scope.launch {
             mutex.withLock {

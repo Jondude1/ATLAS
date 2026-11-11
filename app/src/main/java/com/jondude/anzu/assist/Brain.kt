@@ -836,9 +836,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         } catch (e: Exception) {
                             answer.take(400)
                         }
-                        Atlas.announce("Hermes is back. $spoken The full answer is in your notes.")
+                        Atlas.polite("Hermes is back. $spoken The full answer is in your notes.")
                     } catch (e: Exception) {
-                        Atlas.announce("Hermes didn't come through on that. ${e.message ?: ""}")
+                        Atlas.polite("Hermes didn't come through on that. ${e.message ?: ""}")
                     }
                 }
                 "Handed to Hermes; you'll report back when it answers."
@@ -1237,15 +1237,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             )
             val text = textOf(resp)
             if (text.isBlank()) {
-                Atlas.announce("I looked into $topic but came back empty-handed.")
+                Atlas.polite("I looked into $topic but came back empty-handed.")
                 return
             }
             Store.addNote("Research: $topic\n$text")
             Store.logAction("Finished research: ${topic.take(80)}")
             record("[research errand finished: $topic]", text, "")
-            Atlas.announce("I finished looking into $topic. $text I saved it to your notes.")
+            Atlas.polite("I finished looking into $topic. $text I saved it to your notes.")
         } catch (e: Exception) {
-            Atlas.announce("The research on $topic failed. ${e.message ?: ""}")
+            Atlas.polite("The research on $topic failed. ${e.message ?: ""}")
         }
     }
 }

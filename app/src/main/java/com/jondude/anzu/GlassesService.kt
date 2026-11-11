@@ -457,6 +457,7 @@ class GlassesService : Service() {
             Atlas.announce("Timer's up: ${it.label}.")
         }
         updateWakeLock()
+        Atlas.flushPolite()
         // The hub, by ear. Urgent earns speech (two clear notes first), but never over a call: it waits, unacknowledged,
         // until the call ends. Anything else new earns one soft bell and a line in the next brief, outside quiet time.
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
@@ -500,10 +501,10 @@ class GlassesService : Service() {
             Atlas.announce("Glasses are at $b percent. I'll drop out soon.")
         } else if (b in 11..20 && !warned20) {
             warned20 = true
-            Atlas.announce("Heads up, glasses battery is at $b percent.")
+            Atlas.polite("Heads up, glasses battery is at $b percent.")
         }
         if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
-        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Atlas.announce(it) } }
+        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Atlas.polite(it) } }
         ticks++
         if (Glasses.meeting.value) return // stay out of the way while taking notes
         if (Prefs.commuteAlerts && ticks % 10 == 0) commuteCheck(now)
@@ -511,7 +512,7 @@ class GlassesService : Service() {
         // House check every three minutes: only things that need him.
         if (Prefs.homeAlerts && HomeAssistant.configured() && ticks % 6 == 0) {
             val lines = kotlinx.coroutines.withContext(Dispatchers.IO) { HomeWatch.poll() }
-            if (!quietNow) lines.forEach { Atlas.announce(it) }
+            if (!quietNow) lines.forEach { Atlas.polite(it) }
         }
         if (quietNow) return
         val driving = Prefs.activityAware && Motion.driving()
@@ -527,7 +528,7 @@ class GlassesService : Service() {
             return
         }
         wasWalking = walking
-        if (Prefs.eyeBreaks && Wear.eyeBreaks() && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
+        if (Prefs.eyeBreaks && Wear.eyeBreaks() && now - lastEyeBreak > 20 * 60_000 && interruptible() && !Atlas.musicPlaying()) {
             lastEyeBreak = now
             Atlas.announce("Twenty minutes. Look at something far away for twenty seconds.")
             return
@@ -624,7 +625,7 @@ class GlassesService : Service() {
                     if (c.getInt(3) != 0 || begin <= now || key in announcedEvents) continue
                     announcedEvents.add(key)
                     val mins = ((begin - now) / 60_000 + 1).toInt()
-                    Atlas.announce("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.")
+                    Atlas.polite("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.", 3 * 60_000L)
                 }
             }
         } catch (_: Exception) {
