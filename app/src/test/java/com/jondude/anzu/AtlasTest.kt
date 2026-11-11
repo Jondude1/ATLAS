@@ -496,47 +496,71 @@ class AtlasTest {
     @Test
     fun mcpClientTalksToAServer() {
         val calls = java.util.Collections.synchronizedList(ArrayList<String>())
-        val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/mcp") { ex ->
-            val body = ex.requestBody.readBytes().toString(Charsets.UTF_8)
-            val msg = JSONObject(body)
-            val method = msg.optString("method")
-            calls.add(method)
-            if (ex.requestHeaders.getFirst("Authorization") != "Bearer secret") {
-                ex.sendResponseHeaders(401, -1); ex.close(); return@createContext
-            }
-            if (method != "initialize" && ex.requestHeaders.getFirst("Mcp-Session-Id") != "s1") {
-                ex.sendResponseHeaders(400, -1); ex.close(); return@createContext
-            }
-            if (!msg.has("id")) { ex.sendResponseHeaders(202, -1); ex.close(); return@createContext }
-            val id = msg.getInt("id")
-            val result = when (method) {
-                "initialize" -> JSONObject().put("protocolVersion", "2025-06-18").put("capabilities", JSONObject().put("tools", JSONObject()))
-                    .put("serverInfo", JSONObject().put("name", "fake").put("version", "1"))
-                "tools/list" -> JSONObject().put("tools", org.json.JSONArray()
-                    .put(JSONObject().put("name", "light_on").put("description", "Turn on a light")
-                        .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject().put("room", JSONObject().put("type", "string"))))))
-                "tools/call" -> JSONObject().put("content", org.json.JSONArray().put(JSONObject().put("type", "text")
-                    .put("text", "Light on in " + msg.getJSONObject("params").getJSONObject("arguments").getString("room"))))
-                else -> JSONObject()
-            }
-            val reply = JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result).toString()
-            // initialize answers as plain JSON and hands out a session; the rest answer as an event stream
-            val bytes: ByteArray
-            if (method == "initialize") {
-                ex.responseHeaders.add("Content-Type", "application/json")
-                ex.responseHeaders.add("Mcp-Session-Id", "s1")
-                bytes = reply.toByteArray()
-            } else {
-                ex.responseHeaders.add("Content-Type", "text/event-stream")
-                bytes = "event: message\ndata: $reply\n\n".toByteArray()
-            }
-            ex.sendResponseHeaders(200, bytes.size.toLong())
-            ex.responseBody.use { it.write(bytes) }
+        val server = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+        fun respond(out: java.io.OutputStream, code: Int, headers: Map<String, String>, body: ByteArray) {
+            val head = StringBuilder("HTTP/1.1 $code X\r\nContent-Length: ${body.size}\r\nConnection: close\r\n")
+            headers.forEach { (k, v) -> head.append("$k: $v\r\n") }
+            head.append("\r\n")
+            out.write(head.toString().toByteArray()); out.write(body); out.flush()
         }
-        server.start()
+        val worker = Thread {
+            while (!server.isClosed) {
+                val sock = try { server.accept() } catch (e: Exception) { break }
+                sock.use { c ->
+                    val input = java.io.BufferedInputStream(c.getInputStream())
+                    val reqHeaders = HashMap<String, String>()
+                    fun line(): String {
+                        val b = StringBuilder()
+                        while (true) {
+                            val ch = input.read()
+                            if (ch < 0 || ch == '\n'.code) break
+                            if (ch != '\r'.code) b.append(ch.toChar())
+                        }
+                        return b.toString()
+                    }
+                    line() // request line
+                    while (true) {
+                        val h = line()
+                        if (h.isEmpty()) break
+                        val i = h.indexOf(':')
+                        if (i > 0) reqHeaders[h.substring(0, i).trim().lowercase()] = h.substring(i + 1).trim()
+                    }
+                    val len = reqHeaders["content-length"]?.toIntOrNull() ?: 0
+                    val buf = ByteArray(len)
+                    var read = 0
+                    while (read < len) { val n = input.read(buf, read, len - read); if (n < 0) break; read += n }
+                    val msg = JSONObject(String(buf))
+                    val method = msg.optString("method")
+                    calls.add(method)
+                    val out = c.getOutputStream()
+                    if (reqHeaders["authorization"] != "Bearer secret") { respond(out, 401, emptyMap(), ByteArray(0)); return@use }
+                    if (method != "initialize" && reqHeaders["mcp-session-id"] != "s1") { respond(out, 400, emptyMap(), ByteArray(0)); return@use }
+                    if (!msg.has("id")) { respond(out, 202, emptyMap(), ByteArray(0)); return@use }
+                    val id = msg.getInt("id")
+                    val result = when (method) {
+                        "initialize" -> JSONObject().put("protocolVersion", "2025-06-18").put("capabilities", JSONObject().put("tools", JSONObject()))
+                            .put("serverInfo", JSONObject().put("name", "fake").put("version", "1"))
+                        "tools/list" -> JSONObject().put("tools", JSONArray()
+                            .put(JSONObject().put("name", "light_on").put("description", "Turn on a light")
+                                .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject().put("room", JSONObject().put("type", "string"))))))
+                        "tools/call" -> JSONObject().put("content", JSONArray().put(JSONObject().put("type", "text")
+                            .put("text", "Light on in " + msg.getJSONObject("params").getJSONObject("arguments").getString("room"))))
+                        else -> JSONObject()
+                    }
+                    val reply = JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result).toString()
+                    // initialize answers as plain JSON and hands out a session; the rest answer as an event stream
+                    if (method == "initialize") {
+                        respond(out, 200, mapOf("Content-Type" to "application/json", "Mcp-Session-Id" to "s1"), reply.toByteArray())
+                    } else {
+                        respond(out, 200, mapOf("Content-Type" to "text/event-stream"), "event: message\ndata: $reply\n\n".toByteArray())
+                    }
+                }
+            }
+        }
+        worker.isDaemon = true
+        worker.start()
         try {
-            val url = "http://127.0.0.1:${server.address.port}/mcp"
+            val url = "http://127.0.0.1:${server.localPort}/mcp"
             val bad = com.jondude.anzu.assist.McpServer("Wrong", url, "nope")
             assertTrue(com.jondude.anzu.assist.Mcp.discover(bad).isEmpty())
             assertTrue(com.jondude.anzu.assist.Mcp.status.value["Wrong"]!!.contains("refused"))
@@ -555,7 +579,7 @@ class AtlasTest {
             com.jondude.anzu.assist.Mcp.setEnabled("House", false)
             assertNull(com.jondude.anzu.assist.Mcp.find("x_House__light_on"))
         } finally {
-            server.stop(0)
+            server.close()
             com.jondude.anzu.assist.Mcp.remove("House")
         }
     }
