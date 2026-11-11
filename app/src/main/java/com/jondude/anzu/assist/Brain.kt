@@ -496,6 +496,7 @@ object Brain {
             if (Glasses.battery.value >= 0) sb.append(", battery ${Glasses.battery.value}%")
             sb.append(", worn ${Glasses.wornMinutes()} min this session\n")
             com.jondude.anzu.Wear.promptLine().takeIf { it.isNotBlank() }?.let { sb.append(it).append('\n') }
+            CoPilot.promptLine().takeIf { it.isNotBlank() }?.let { sb.append(it).append('\n') }
         } else sb.append("Wearing: nothing right now (he's on the phone, possibly typing)\n")
         if (Glasses.meeting.value) sb.append("Meeting notes are being recorded right now.\n")
         if (Prefs.buddieAmbient) {
@@ -643,6 +644,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("close_loop", "Close an open loop when Jon says it's done. Leave 'which' empty to close the one(s) the last brief mentioned, or give words from it ('the vet one').",
                 JSONObject().put("which", str("Words identifying the loop, or empty for the last one mentioned.")), emptyList()))
         }
+        a.put(tool("driving", "Jon says he's driving (or has parked). Co-pilot mode: short lines, nothing to look at.",
+            JSONObject().put("driving", JSONObject().put("type", "boolean").put("description", "true if driving, false if parked")), listOf("driving")))
         a.put(tool("guests", "Jon has company (or it's over). While guests are over you hold low-priority things as cards instead of speaking; urgent things still come through.",
             JSONObject().put("hours", num("How long, in hours; 0 means they've gone. Default until midnight.")), emptyList()))
         a.put(tool("status", "Check your own systems: glasses battery and link, Obelisk, Home Assistant, latency."))
@@ -922,6 +925,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     else -> "The hub didn't take that just now."
                 }
             }
+            "driving" -> if (input.optBoolean("driving")) {
+                Prefs.drivingUntil = System.currentTimeMillis() + 3 * 3_600_000L
+                "Co-pilot on. I'll keep it short."
+            } else { Prefs.drivingUntil = 0; "Got it, you're parked." }
             "guests" -> {
                 val h = input.optDouble("hours", -1.0)
                 if (h == 0.0) { Prefs.guestsUntil = 0; "Got it, back to normal." }
@@ -1378,7 +1385,7 @@ object Spoken {
      * What actually goes into the ear: no markdown, no raw links, and at most ~80 words, with the rest left on the phone.
      * The screen always shows the full text.
      */
-    fun forEar(text: String, words: Int = 80): String {
+    fun forEar(text: String, words: Int = if (CoPilot.active) 40 else 80): String {
         var t = text
             .replace(Regex("https?://\\S*[^\\s.,;:!?)]"), "the link")
             .replace(Regex("(?m)^\\s*([-*•]|\\d+[.)])\\s+"), "")

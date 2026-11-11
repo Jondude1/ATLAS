@@ -1312,6 +1312,7 @@ fun SettingsScreen() {
             Text("Keeping it down", color = Cream, fontSize = 16.sp)
             Text("At the D&D table, with guests over, after bedtime and during work hours, ${Prefs.name} holds low-priority things as cards on Home instead of speaking. Urgent things and your own questions still come through. Say \"${Prefs.name}, guests are here\" to turn on guest mode.", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
             ToggleRow("During work hours (weekdays ${Prefs.workStart}:00–${Prefs.workEnd}:00)", null, Prefs.workDiscretion) { Prefs.workDiscretion = it }
+            ToggleRow("Co-pilot while driving", "When you're driving (or Android Auto is on): one or two short sentences, nothing to look at, yes-or-no out loud instead of tapping. House and other low-priority things wait until you park.", Prefs.coPilot) { Prefs.coPilot = it }
             ToggleRow("Grayscale after bedtime (${Prefs.bedtimeHour}:00–${Prefs.wakeHour}:00)", null, Prefs.grayscaleNight) { Prefs.grayscaleNight = it }
 
             ToggleRow("Speak up on its own", "Random check-ins, thoughts and questions through the day", Prefs.proactive) { Prefs.proactive = it }

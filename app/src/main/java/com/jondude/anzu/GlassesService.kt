@@ -500,6 +500,20 @@ class GlassesService : Service() {
                 }
             }
         }
+        // Co-pilot works through whatever is playing audio, the car included, so it runs before the "worn" check.
+        when (val c = com.jondude.anzu.assist.CoPilot.update(com.jondude.anzu.assist.CoPilot.detect(this))) {
+            is com.jondude.anzu.assist.CoPilot.Change.Started -> if (System.currentTimeMillis() >= Prefs.quietUntil) {
+                Atlas.announce(com.jondude.anzu.assist.CoPilot.hello(nextEventLine()))
+            }
+            is com.jondude.anzu.assist.CoPilot.Change.Parked -> if (c.minutes >= 5 && System.currentTimeMillis() >= Prefs.quietUntil) {
+                val held = Glasses.heldCount.value
+                val catchUp = if (c.minutes >= 15) kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    com.jondude.anzu.assist.Hub.catchMeUp()?.let { com.jondude.anzu.assist.Spoken.trimWords(it, 60) }
+                } else null
+                Atlas.announce(com.jondude.anzu.assist.CoPilot.parkedLine(held, catchUp))
+            }
+            else -> {}
+        }
         if (!Glasses.connected.value) {
             ticks++
             return
@@ -615,6 +629,27 @@ class GlassesService : Service() {
             out
         }
         lines.forEach { Atlas.announce(it) }
+    }
+
+    /** "Dentist at 3:00 PM" for the next timed event in the coming three hours, or null. */
+    private fun nextEventLine(): String? {
+        if (!has(Manifest.permission.READ_CALENDAR)) return null
+        val now = System.currentTimeMillis()
+        return try {
+            val b = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(b, now)
+            ContentUris.appendId(b, now + 3 * 3_600_000L)
+            contentResolver.query(
+                b.build(), arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY),
+                null, null, CalendarContract.Instances.BEGIN + " ASC"
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    if (c.getInt(2) != 0 || c.getLong(1) < now) continue
+                    return@use "${c.getString(0) ?: "an event"} at ${java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(c.getLong(1)))}"
+                }
+                null
+            }
+        } catch (_: Exception) { null }
     }
 
     private fun calendarHeadsUp(now: Long) {

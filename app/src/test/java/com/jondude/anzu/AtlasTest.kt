@@ -929,4 +929,22 @@ class AtlasTest {
         val brief = H.parseLoops("""{"brief":"…","urgent":[],"open_loops":[{"id":3,"text":"Call the vet","source":"capture","created_at":1,"spoken_count":3,"last_spoken_at":2}],"updated":5}""")
         assertEquals(1, brief.size)
     }
+
+    @Test
+    fun coPilotStartsAndParks() {
+        val C = com.jondude.anzu.assist.CoPilot
+        C.reset(); Prefs.coPilot = true
+        val t = 1_000_000_000L
+        assertTrue(C.update(true, t) is com.jondude.anzu.assist.CoPilot.Change.Started)
+        assertTrue(C.active)
+        assertEquals(40, com.jondude.anzu.assist.Spoken.forEar((1..60).joinToString(" ") { "w$it." }).split(" ").size - 6) // 40 words + "The rest is on your phone."
+        assertTrue(C.update(false, t + 3 * 60_000) is com.jondude.anzu.assist.CoPilot.Change.None)    // a red light isn't parking
+        assertTrue(C.update(true, t + 20 * 60_000) is com.jondude.anzu.assist.CoPilot.Change.None)
+        val p = C.update(false, t + 26 * 60_000)
+        assertEquals(com.jondude.anzu.assist.CoPilot.Change.Parked(20), p)
+        assertFalse(C.active)
+        assertEquals("You're parked. 2 things came in while you drove; they're on your phone.", C.parkedLine(2, null))
+        assertEquals("Co-pilot on. Next up: Dentist at 3:00 PM. I'll keep it short.", C.hello("Dentist at 3:00 PM"))
+        C.reset()
+    }
 }

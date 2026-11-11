@@ -203,6 +203,9 @@ object Prefs {
     var workStart by IntPref("workStart", 8)
     var workEnd by IntPref("workEnd", 17)
     var grayscaleNight by BoolPref("grayscaleNight", true)
+    // Co-Pilot Mode
+    var coPilot by BoolPref("coPilot", true)
+    var drivingUntil by LongPref("drivingUntil", 0L)
     var lastWake by LongPref("lastWake", 0L)
     var lastWakeSource by StrPref("lastWakeSource", "")
 

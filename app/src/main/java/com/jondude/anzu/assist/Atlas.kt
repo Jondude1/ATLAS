@@ -113,9 +113,18 @@ object Atlas {
                         // From the earbuds' wake word there's no follow-up listen, so a gated action asks aloud and waits for a tap.
                         val answer = Brain.reply(app, text) { question ->
                             Glasses.atlasState.value = "speaking"
-                            Speaker.say("$question Tap approve on your phone.")
-                            Glasses.atlasState.value = "thinking"
-                            Approvals.ask(app, question)
+                            if (CoPilot.active) {
+                                // Behind the wheel: never "look at your phone". Ask out loud and listen for yes.
+                                Speaker.say(question)
+                                Glasses.atlasState.value = "listening"
+                                val r = Ears.listen(app)
+                                Glasses.atlasState.value = "thinking"
+                                r != null && yes.containsMatchIn(r.text)
+                            } else {
+                                Speaker.say("$question Tap approve on your phone.")
+                                Glasses.atlasState.value = "thinking"
+                                Approvals.ask(app, question)
+                            }
                         }
                         Glasses.atlasState.value = "speaking"
                         Speaker.say(answer)
@@ -193,6 +202,11 @@ object Atlas {
      */
     fun polite(text: String, maxWaitMs: Long = 10 * 60_000L, source: String = "") {
         // A kind of line Jon keeps cutting off gets a soft bell and a place in the brief instead of speech.
+        // On the road only what matters for driving is spoken; the rest waits for when he parks.
+        if (CoPilot.active && source !in CoPilot.roadworthy) {
+            Glasses.hold(text)
+            return
+        }
         // At the table, with guests, at lights-out or during work: hold it as a card instead of speaking.
         Discretion.current()?.let { why ->
             if (why == "work hours") Earcons.play("notice")
