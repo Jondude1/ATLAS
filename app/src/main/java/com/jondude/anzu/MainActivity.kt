@@ -630,6 +630,46 @@ fun Orb(state: String, diameter: Dp = 240.dp) {
     }
 }
 
+/** Open loops from the hub: oldest first, tap Done to close; a peek at what's been closed. */
+@Composable
+fun LoopsPanel() {
+    val scope = rememberCoroutineScope()
+    var loops by remember { mutableStateOf<List<com.jondude.anzu.assist.Hub.Loop>?>(null) }
+    var closed by remember { mutableStateOf(false) }
+    fun refresh() = scope.launch {
+        loops = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.openLoops(closed) }
+    }
+    LaunchedEffect(closed) { refresh() }
+    val l = loops
+    Section("Open loops") {
+        when {
+            l == null -> Text(
+                if (com.jondude.anzu.assist.Hub.needsToken) "The hub needs its token (Settings, Obelisk) to show your loops." else "Checking with the hub…",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
+            l.isEmpty() -> Text(if (closed) "Nothing closed yet." else "Nothing open. Say \"${Prefs.name}, todo …\" to add one.", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
+            else -> l.forEach { loop ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(loop.text, color = if (loop.ackedAt > 0) Muted else Cream, fontSize = 16.sp, lineHeight = 22.sp)
+                        Text(
+                            timeAgo(loop.createdAt) + (if (loop.spokenCount > 0) " · mentioned ${loop.spokenCount}×" else "") + (if (loop.ackedAt > 0) " · done" else ""),
+                            color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Light
+                        )
+                    }
+                    if (loop.ackedAt == 0L) Text("Done", color = Gold, fontSize = 14.sp, modifier = Modifier.clickable {
+                        scope.launch {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.ackLoops(listOf(loop.id)) }
+                            refresh()
+                        }
+                    }.padding(8.dp))
+                }
+            }
+        }
+        Text(if (closed) "Show open" else "Show closed", color = Muted, fontSize = 14.sp, modifier = Modifier.clickable { closed = !closed })
+    }
+}
+
 /** Every built-in service: a sentence first, then each one with an Open link. */
 @Composable
 fun SystemsPanel() {
@@ -1078,6 +1118,7 @@ fun NotesScreen() {
             }
         }
 
+        LoopsPanel()
         val captures = notes.filter { n -> listOf("Idea: ", "Note: ", "Reminder: ", "To do: ").any { n.text.startsWith(it) } }
         if (captures.isNotEmpty()) Section("Captured") {
             captures.takeLast(12).reversed().forEach { n ->

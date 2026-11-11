@@ -912,4 +912,21 @@ class AtlasTest {
         assertTrue(S.isCatchUpRequest("what's been going on while I was out"))
         assertFalse(S.isBriefRequest("catch me up"))
     }
+
+    @Test
+    fun openLoopsParseAndMatch() {
+        val H = com.jondude.anzu.assist.Hub
+        val body = """{"open_loops":[{"id":3,"text":"Call the vet about Fiona","source":"capture","created_at":1794380000000,"acked_at":null,"spoken_count":2,"last_spoken_at":1794390000000,"key":"capture-1"},
+                                     {"id":5,"text":"Order more PLA","source":"voice","created_at":1794385000000,"acked_at":null,"spoken_count":0}]}"""
+        val loops = H.parseLoops(body)
+        assertEquals(listOf(3L, 5L), loops.map { it.id })
+        assertEquals(0L, loops[0].ackedAt)
+        assertEquals(2, loops[0].spokenCount)
+        assertEquals(3L, H.matchLoop(loops, "the vet one")!!.id)
+        assertEquals(5L, H.matchLoop(loops, "PLA is ordered")!!.id)
+        assertNull(H.matchLoop(loops, "that one"))
+        // the brief carries the (at most two) loops it just spoke
+        val brief = H.parseLoops("""{"brief":"…","urgent":[],"open_loops":[{"id":3,"text":"Call the vet","source":"capture","created_at":1,"spoken_count":3,"last_spoken_at":2}],"updated":5}""")
+        assertEquals(1, brief.size)
+    }
 }

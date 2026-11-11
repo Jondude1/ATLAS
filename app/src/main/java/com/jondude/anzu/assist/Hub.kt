@@ -54,7 +54,7 @@ object Hub {
             val (code, body) = Net.get(base() + "/atlas/brief", auth(), 6_000)
             needsToken = code == 401 || code == 403
             if (code !in 200..299) return cached
-            parseBrief(body)?.also { cached = it; fetchedAt = now }
+            parseBrief(body)?.also { cached = it; fetchedAt = now; lastSpokenLoops = parseLoops(body) }
         } catch (e: Exception) {
             cached
         }
@@ -180,6 +180,53 @@ object Hub {
         } catch (e: Exception) {
             AthenaRun(false, -1, "Athena didn't answer: couldn't reach the hub.")
         }
+    }
+
+    data class Loop(val id: Long, val text: String, val source: String, val createdAt: Long, val ackedAt: Long, val spokenCount: Int)
+
+    /** The loops the last brief spoke (at most two), so "that's done" can close them. */
+    @Volatile
+    var lastSpokenLoops: List<Loop> = emptyList()
+
+    fun parseLoops(body: String, field: String = "open_loops"): List<Loop> = try {
+        val arr = JSONObject(body).optJSONArray(field) ?: JSONArray()
+        (0 until arr.length()).map { arr.getJSONObject(it) }.map {
+            Loop(it.optLong("id"), it.optString("text"), it.optString("source"),
+                it.optLong("created_at"), it.optLong("acked_at", 0), it.optInt("spoken_count"))
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /** Blocking. Open loops oldest first, or the whole history newest first; null if the hub can't be reached. */
+    fun openLoops(includeClosed: Boolean = false): List<Loop>? {
+        if (!configured()) return null
+        return try {
+            val (code, body) = Net.get(base() + "/atlas/open-loops?include_closed=$includeClosed&limit=100", auth(), 8_000)
+            needsToken = code == 401 || code == 403
+            if (code in 200..299) parseLoops(body) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Blocking. Closes loops; true if the hub took it. */
+    fun ackLoops(ids: List<Long>): Boolean {
+        if (!configured() || ids.isEmpty()) return false
+        return try {
+            val (code, _) = Net.postJson(base() + "/atlas/open-loop/ack", auth(), JSONObject().put("ids", JSONArray(ids)).toString(), 8_000)
+            code in 200..299
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** The loop whose text best matches what he said ("the vet one"), or null. */
+    fun matchLoop(loops: List<Loop>, said: String): Loop? {
+        val words = said.lowercase().split(Regex("\\W+")).filter { it.length > 2 && it !in setOf("the", "that", "one", "done", "loop", "close", "finished", "with", "about") }
+        if (words.isEmpty()) return null
+        return loops.map { l -> l to words.count { w -> l.text.lowercase().contains(w) } }
+            .filter { it.second > 0 }.maxByOrNull { it.second }?.first
     }
 
     /** Blocking. Posts an open loop (it rides the brief until acked). */

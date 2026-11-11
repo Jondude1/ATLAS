@@ -638,6 +638,11 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         a.put(tool("undo", "Reverse the last action you took, where possible."))
         a.put(tool("quiet", "Stop speaking up on your own for a while.",
             JSONObject().put("minutes", num("How long to stay quiet.")), listOf("minutes")))
+        if (Hub.configured()) {
+            a.put(tool("open_loops", "The open loops: things Jon still has to follow up on (they ride the brief until done). Read them oldest first, briefly."))
+            a.put(tool("close_loop", "Close an open loop when Jon says it's done. Leave 'which' empty to close the one(s) the last brief mentioned, or give words from it ('the vet one').",
+                JSONObject().put("which", str("Words identifying the loop, or empty for the last one mentioned.")), emptyList()))
+        }
         a.put(tool("guests", "Jon has company (or it's over). While guests are over you hold low-priority things as cards instead of speaking; urgent things still come through.",
             JSONObject().put("hours", num("How long, in hours; 0 means they've gone. Default until midnight.")), emptyList()))
         a.put(tool("status", "Check your own systems: glasses battery and link, Obelisk, Home Assistant, latency."))
@@ -902,6 +907,20 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 Prefs.quietUntil = System.currentTimeMillis() + (input.optDouble("minutes", 60.0) * 60_000).toLong()
                 lastUndo = { Prefs.quietUntil = before; "Quiet time cancelled." }
                 "Okay, staying quiet."
+            }
+            "open_loops" -> Hub.openLoops()?.let { l ->
+                if (l.isEmpty()) "No open loops." else "${l.size} open: " + l.take(8).joinToString("; ") { it.text }
+            } ?: "I can't reach the hub's list right now."
+            "close_loop" -> {
+                val which = input.optString("which").trim()
+                val open = Hub.openLoops() ?: emptyList()
+                val target = if (which.isBlank()) Hub.lastSpokenLoops.take(1).ifEmpty { open.take(1) }
+                else listOfNotNull(Hub.matchLoop(open, which))
+                when {
+                    target.isEmpty() -> "I couldn't tell which loop that was. The open ones are: " + open.take(5).joinToString("; ") { it.text }
+                    Hub.ackLoops(target.map { it.id }) -> { Store.logAction("Closed loop: ${target[0].text.take(60)}"); "Closed: ${target[0].text}." }
+                    else -> "The hub didn't take that just now."
+                }
             }
             "guests" -> {
                 val h = input.optDouble("hours", -1.0)
