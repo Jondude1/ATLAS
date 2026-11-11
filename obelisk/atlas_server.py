@@ -482,6 +482,156 @@ async def delegate(d: Delegate):
     return {"answer": answer}
 
 
+
+# ---------------------------------------------------------------------------
+# Athena channel: ATLAS talks to Athena (Jon's Windows desktop) over the SSH
+# Jon set up from Obelisk. Exec follows the /atlas/delegate pattern; status
+# is cached and refreshed in the background like the brief, so the app never
+# waits on SSH to paint a screen.
+# ---------------------------------------------------------------------------
+
+ATHENA_HOST = os.environ.get("ATLAS_ATHENA_HOST", "user@athena.tail8dab0b.ts.net")
+ATHENA_EXEC_TIMEOUT_S = 60
+ATHENA_STATUS_TIMEOUT_S = 30
+ATHENA_STATUS_TTL_S = 60
+ATHENA_MAX_OUTPUT = 20000
+
+_athena_cache = {"containers": [], "uptime": "", "disk": "", "updated": 0}
+_athena_task: Optional[asyncio.Task] = None
+
+
+def require_athena_token(authorization: Optional[str] = Header(default=None)):
+    """Stricter than require_token: an exec channel stays closed until the
+    hub has ATLAS_TOKEN set AND the caller presents it. Other endpoints may
+    run tokenless on the tailnet; this one may not (spec is non-negotiable).
+    The token itself is never logged."""
+    if not TOKEN:
+        raise HTTPException(status_code=401, detail="ATLAS_TOKEN is not set on the hub; the Athena channel is disabled until it is.")
+    if authorization != f"Bearer {TOKEN}":
+        raise HTTPException(status_code=401, detail="bad or missing bearer token")
+
+
+class AthenaExec(BaseModel):
+    command: str
+    timeout_s: Optional[int] = None
+
+
+async def _run_athena_ssh(command: str, timeout_s: int) -> tuple[int, str, str]:
+    """Runs one command on Athena via ssh (BatchMode: fails fast, never
+    prompts). Returns (exit, stdout, stderr), each output truncated.
+    Raises HTTPException(502) only when SSH itself cannot run/time out --
+    a remote command that exits non-zero is a result, not a hub error."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            ATHENA_HOST,
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise HTTPException(status_code=502, detail="Athena didn't answer in time.")
+        out = stdout.decode(errors="ignore")[:ATHENA_MAX_OUTPUT]
+        err = stderr.decode(errors="ignore")[:ATHENA_MAX_OUTPUT]
+        return proc.returncode if proc.returncode is not None else -1, out, err
+    except FileNotFoundError:
+        raise HTTPException(status_code=502, detail="ssh isn't installed on this node.")
+
+
+@app.post("/atlas/athena", dependencies=[Depends(require_athena_token)])
+async def athena_exec(a: AthenaExec):
+    command = a.command.strip()
+    if not command:
+        raise HTTPException(status_code=400, detail="empty command")
+    timeout_s = a.timeout_s or ATHENA_EXEC_TIMEOUT_S
+    timeout_s = max(5, min(int(timeout_s), 120))
+    exit_code, out, err = await _run_athena_ssh(command, timeout_s)
+    # Every completed exec is filed as a hub report (app athena) so it shows
+    # in the brief/audit trail. Filing must never break the exec result.
+    try:
+        body = (out or err).strip()[:500]
+        await report(Report(app="athena", title=f"Athena exec: {command[:80]}",
+                            body=body or f"exit {exit_code}", key=None))
+    except Exception:
+        pass
+    return {"ok": exit_code == 0, "exit": exit_code, "stdout": out, "stderr": err}
+
+
+def _parse_athena_status(docker_out: str, uptime_out: str, disk_out: str) -> dict:
+    containers = []
+    for line in docker_out.splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        parts = line.split("|")
+        name = parts[0].strip()
+        status = parts[1].strip() if len(parts) > 1 else ""
+        ports = parts[2].strip() if len(parts) > 2 else ""
+        if name:
+            containers.append({"name": name, "status": status, "ports": ports})
+    uptime = " ".join(uptime_out.split())[:200]
+    disk = " ".join(disk_out.split())[:200]
+    return {"containers": containers, "uptime": uptime, "disk": disk}
+
+
+async def _refresh_athena_status():
+    docker_out = uptime_out = disk_out = ""
+    try:
+        code, docker_out, _ = await _run_athena_ssh(
+            'docker ps --format "{{.Names}}|{{.Status}}|{{.Ports}}"', ATHENA_STATUS_TIMEOUT_S)
+        if code != 0:
+            docker_out = ""
+    except HTTPException:
+        docker_out = ""
+    try:
+        _, uptime_out, _ = await _run_athena_ssh(
+            "powershell -NoProfile -Command \"(Get-Date)-(Get-CimInstance Win32_OperatingSystem).LastBootUpTime\"",
+            ATHENA_STATUS_TIMEOUT_S)
+    except HTTPException:
+        uptime_out = ""
+    try:
+        _, disk_out, _ = await _run_athena_ssh(
+            "powershell -NoProfile -Command \"Get-PSDrive C | Select-Object Used,Free\"",
+            ATHENA_STATUS_TIMEOUT_S)
+    except HTTPException:
+        disk_out = ""
+    parsed = _parse_athena_status(docker_out, uptime_out, disk_out)
+    _athena_cache.update(parsed)
+    _athena_cache["updated"] = _now_ms()
+
+
+def _schedule_athena_refresh():
+    global _athena_task
+    if _athena_task is not None and not _athena_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _athena_task = loop.create_task(_refresh_athena_status())
+
+
+@app.get("/atlas/athena/status", dependencies=[Depends(require_token)])
+async def athena_status():
+    # async (not def) so _schedule_athena_refresh runs on the live event loop
+    # instead of FastAPI's threadpool, where there is none to schedule onto.
+    stale = _now_ms() - int(_athena_cache.get("updated") or 0) > ATHENA_STATUS_TTL_S * 1000
+    if stale:
+        _schedule_athena_refresh()
+    return {
+        "containers": _athena_cache.get("containers", []),
+        "uptime": _athena_cache.get("uptime", ""),
+        "disk": _athena_cache.get("disk", ""),
+        "updated": _athena_cache.get("updated", 0),
+    }
+
+
 @app.get("/atlas/reports", dependencies=[Depends(require_token)])
 def list_reports(app: Optional[str] = None, since: Optional[int] = None, limit: int = 50):
     query = "SELECT * FROM reports WHERE 1=1"
