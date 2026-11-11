@@ -1350,7 +1350,7 @@ fun SettingsScreen() {
         }
 
         Section("Obelisk and local models") {
-            PrefField("Hub on Obelisk (for example http://obelisk:8765)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
+            PrefField("Hub on Obelisk (built in)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim().ifBlank { OBELISK_HUB } }
             PrefField("Hub token, if you set one", Prefs.hubToken, secret = true) { Prefs.hubToken = it.trim() }
             Text("Your apps report to the hub, its local model digests everything for free, and ${Prefs.name} only reads a short brief. It also logs every exchange to your vault. The server is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
             PrefField("Ollama URL (optional)", Prefs.ollamaUrl) { Prefs.ollamaUrl = it.trim() }

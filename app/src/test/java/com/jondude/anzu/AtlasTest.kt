@@ -627,6 +627,10 @@ class AtlasTest {
         assertEquals("idea-7", r.getString("key"))
         assertEquals("normal", com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "whenever", null).getString("priority"))
         assertFalse(com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "low", null).has("key"))
+        // the hub address is built in, and comes back if the setting is ever cleared
+        assertEquals(OBELISK_HUB, Prefs.obeliskUrl)
+        assertTrue(com.jondude.anzu.assist.Hub.configured())
+        Prefs.obeliskUrl = ""
         assertFalse(com.jondude.anzu.assist.Hub.configured())
         assertNull(com.jondude.anzu.assist.Hub.brief())
     }

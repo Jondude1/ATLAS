@@ -44,6 +44,9 @@ class LongPref(private val key: String, private val def: Long) {
     operator fun setValue(t: Any?, p: KProperty<*>, v: Long) = Prefs.sp.edit().putLong(key, v).apply()
 }
 
+/** The hub on Obelisk, over Tailscale. */
+const val OBELISK_HUB = "http://obalisk.tail8dab0b.ts.net:8765"
+
 object Prefs {
     lateinit var sp: SharedPreferences
 
@@ -57,6 +60,13 @@ object Prefs {
     fun init(c: Context) {
         // The settings file keeps its original name so nothing is lost across the rename to Atlas.
         sp = c.getSharedPreferences("corin", Context.MODE_PRIVATE)
+        // Jon's own network addresses are built in, so there's nothing to type. Fill them in for
+        // anyone who installed before they were (an empty field counts as not set).
+        if (!sp.getBoolean("networkDefaultsV1", false)) {
+            val e = sp.edit().putBoolean("networkDefaultsV1", true)
+            if (sp.getString("obeliskUrl", "").isNullOrBlank()) e.putString("obeliskUrl", OBELISK_HUB)
+            e.apply()
+        }
         if (!sp.getBoolean("renamedToAtlas", false)) {
             val e = sp.edit().putBoolean("renamedToAtlas", true)
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
@@ -84,7 +94,7 @@ object Prefs {
     var speechKey by StrPref("speechKey", "")
     var speechModel by StrPref("speechModel", "gpt-4o-mini-tts")
     var speechVoice by StrPref("speechVoice", "alloy")
-    var obeliskUrl by StrPref("obeliskUrl", "")
+    var obeliskUrl by StrPref("obeliskUrl", OBELISK_HUB)
     var hubToken by StrPref("hubToken", "")
     var ollamaUrl by StrPref("ollamaUrl", "")
     var ollamaModel by StrPref("ollamaModel", "mistral-nemo")
