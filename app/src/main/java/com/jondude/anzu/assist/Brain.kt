@@ -656,6 +656,30 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
         a.put(tool("driving", "Jon says he's driving (or has parked). Co-pilot mode: short lines, nothing to look at.",
             JSONObject().put("driving", JSONObject().put("type", "boolean").put("description", "true if driving, false if parked")), listOf("driving")))
+        if (Hub.configured()) {
+            // #17 Print Sentinel: spoken pre-flight and an approval-gated go-ahead.
+            a.put(tool("print_preflight", "Before a print: the next queued job, filament on hand for it, whether the print camera is watching and the bed is clear. Speak it in two sentences."))
+            a.put(tool("start_print", "Jon wants the next queued print started. Always asks first after a pre-flight read.",
+                JSONObject().put("job", str("The job name, or empty for the next queued one.")), emptyList()))
+            // #22 Named Routines: taught by voice, run as one command across the hub and Home Assistant.
+            a.put(tool("teach_routine", "Save a named routine Jon describes, as a list of plain steps (e.g. workshop mode: printer status, shop lights on, focus music, briefs urgent only).",
+                JSONObject().put("name", str("Routine name.")).put("steps", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))), listOf("name", "steps")))
+            a.put(tool("run_routine", "Run one of Jon's named routines.", JSONObject().put("name", str("Routine name.")), listOf("name")))
+            // #27 Table Chronicler.
+            a.put(tool("chronicle", "Log a D&D session note (loot, a name, a ruling, or a plain note) for tonight's recap.",
+                JSONObject().put("text", str("The note in his words.")).put("kind", str("loot, name, ruling or note")), listOf("text")))
+            a.put(tool("chronicle_recap", "Recap of tonight's (or the latest) D&D session from its notes, as story beats."))
+            a.put(tool("last_time_on", "The 'last time on…' opener for the next D&D session."))
+            // #28 Care Nudges (opt-in, killable).
+            a.put(tool("care_settings", "Turn Jon's gentle care nudges on or off: movement reminders on long sedentary stretches, and a weekly weigh-in line in the Sunday Brief.",
+                JSONObject().put("movement", JSONObject().put("type", "boolean")).put("weigh_in", JSONObject().put("type", "boolean")), emptyList()))
+            a.put(tool("weigh_in", "Log Jon's weight for the weekly line in the Sunday Brief (only if he's opted in).", JSONObject().put("weight", num("Weight.")), listOf("weight")))
+            // #7 Second Set of Eyes.
+            a.put(tool("camera_ask", "Ask about what one of Jon's cameras sees right now (front_porch, back_deck, living_room, family_room, office, garage_cam, dog_cam, fiona_cam).",
+                JSONObject().put("camera", str("Camera name.")).put("question", str("The question.")), listOf("camera", "question")))
+            a.put(tool("camera_find", "Look across every enabled camera for something (e.g. where Fiona is, is the car in the driveway).",
+                JSONObject().put("question", str("What to look for.")), listOf("question")))
+        }
         a.put(tool("guests", "Jon has company (or it's over). While guests are over you hold low-priority things as cards instead of speaking; urgent things still come through.",
             JSONObject().put("hours", num("How long, in hours; 0 means they've gone. Default until midnight.")), emptyList()))
         a.put(tool("status", "Check your own systems: glasses battery and link, Obelisk, Home Assistant, latency."))
@@ -939,6 +963,76 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 Prefs.drivingUntil = System.currentTimeMillis() + 3 * 3_600_000L
                 "Co-pilot on. I'll keep it short."
             } else { Prefs.drivingUntil = 0; "Got it, you're parked." }
+            "print_preflight" -> Workshop.preflight()
+            "start_print" -> {
+                val pre = Workshop.preflight()
+                val job = input.optString("job").ifBlank { Workshop.nextJob()?.optString("name").orEmpty() }
+                if (job.isBlank()) "There's nothing queued to print."
+                else if (!confirm("$pre Start $job?")) "Not started."
+                else {
+                    Hub.report("print", "Start approved: $job", pre, key = "print-start-${System.currentTimeMillis()}")
+                    Store.logAction("Approved print: $job")
+                    "Approved and logged. I can't press start on the printer myself yet, so go ahead and start $job."
+                }
+            }
+            "teach_routine" -> {
+                val name = input.optString("name").trim().lowercase()
+                val steps = input.optJSONArray("steps") ?: org.json.JSONArray()
+                if (name.isBlank() || steps.length() == 0) "I need a name and at least one step."
+                else Hub.call("POST", "/atlas/routines", JSONObject().put("name", name).put("steps", steps)).let { (c, _) ->
+                    if (c in 200..299) "Saved \"$name\" with ${steps.length()} step${if (steps.length() == 1) "" else "s"}." else Hub.failure(c)
+                }
+            }
+            "run_routine" -> {
+                val name = input.optString("name").trim().lowercase()
+                val (c, body) = Hub.call("POST", "/atlas/routines/run", JSONObject().put("name", name), 60_000)
+                if (c !in 200..299) { if (c == 404) "There's no routine called $name." else Hub.failure(c) }
+                else {
+                    val results = JSONObject(body).optJSONArray("results") ?: org.json.JSONArray()
+                    val said = ArrayList<String>()
+                    for (i in 0 until results.length()) {
+                        val r = results.optString(i)
+                        val step = r.substringAfter("pass to app/HA: ", "")
+                        // Steps the hub can't do (lights, music) run here through Home Assistant, with the usual gates.
+                        said += if (step.isNotBlank()) runTool(ctx, "home_assistant", JSONObject().put("command", step), confirm) else r
+                    }
+                    Store.logAction("Ran routine: $name")
+                    "$name: " + said.joinToString(" ")
+                }
+            }
+            "chronicle" -> Hub.call("POST", "/atlas/chronicle/note", JSONObject().put("text", input.optString("text")).put("kind", input.optString("kind").ifBlank { "note" })).let { (c, _) ->
+                if (c in 200..299) "Logged." else Hub.failure(c)
+            }
+            "chronicle_recap" -> {
+                val (c, body) = Hub.call("GET", "/atlas/chronicle/sessions")
+                val id = if (c in 200..299) JSONObject(body).optJSONArray("sessions")?.optJSONObject(0)?.optString("session_id") else null
+                if (id.isNullOrBlank()) (if (c in 200..299) "There are no session notes yet." else Hub.failure(c))
+                else Hub.call("POST", "/atlas/chronicle/recap", JSONObject().put("session_id", id), 90_000).let { (c2, b2) ->
+                    if (c2 in 200..299) JSONObject(b2).optString("recap").ifBlank { b2.take(800) } else Hub.failure(c2)
+                }
+            }
+            "last_time_on" -> Hub.call("GET", "/atlas/chronicle/opener", timeoutMs = 60_000).let { (c, b) ->
+                if (c in 200..299) JSONObject(b).optString("opener").ifBlank { "No recap from a past session yet." } else Hub.failure(c)
+            }
+            "care_settings" -> {
+                val q = ArrayList<String>()
+                if (input.has("movement")) q += "movement_enabled=${input.optBoolean("movement")}"
+                if (input.has("weigh_in")) q += "weighin_enabled=${input.optBoolean("weigh_in")}"
+                Hub.call("POST", "/atlas/care/settings" + if (q.isEmpty()) "" else "?" + q.joinToString("&")).let { (c, _) ->
+                    if (c in 200..299) "Done. Say the word any time to turn them off." else Hub.failure(c)
+                }
+            }
+            "weigh_in" -> Hub.call("POST", "/atlas/care/weigh-in", JSONObject().put("weight", input.optDouble("weight"))).let { (c, _) ->
+                if (c in 200..299) "Logged." else Hub.failure(c)
+            }
+            "camera_ask" -> Hub.call("POST", "/atlas/camera/ask", JSONObject().put("camera", input.optString("camera")).put("question", input.optString("question")), 60_000).let { (c, b) ->
+                if (c in 200..299) JSONObject(b).optString("answer") else Hub.failure(c)
+            }
+            "camera_find" -> Hub.call("POST", "/atlas/camera/find", JSONObject().put("question", input.optString("question")), 120_000).let { (c, b) ->
+                if (c !in 200..299) Hub.failure(c) else JSONObject(b).let { o ->
+                    if (o.optBoolean("found")) "On ${o.optString("camera").replace('_', ' ')}: ${o.optString("answer")}" else o.optString("answer")
+                }
+            }
             "guests" -> {
                 val h = input.optDouble("hours", -1.0)
                 if (h == 0.0) { Prefs.guestsUntil = 0; "Got it, back to normal." }
@@ -1090,6 +1184,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     ): String = withContext(Dispatchers.IO) {
         // "Say that again" repeats the last full answer without a model call.
         if (Spoken.isRepeatRequest(userText) && Spoken.lastFull.isNotBlank()) return@withContext Spoken.lastFull
+        // At the table: "loot: …", "name: …", "ruling: …" go straight to tonight's chronicle.
+        Regex("^\\W*(?:atlas\\W*)?(loot|name|ruling)\\b[\\s:,.-]+(.+)$", RegexOption.IGNORE_CASE).find(userText.trim())?.let { m ->
+            if (Discretion.current(ctx) == "at the table" && Hub.configured()) {
+                val (c, _) = Hub.call("POST", "/atlas/chronicle/note", JSONObject().put("text", m.groupValues[2].trim()).put("kind", m.groupValues[1].lowercase()))
+                val said = if (c in 200..299) "Logged." else Hub.failure(c)
+                record(userText, said)
+                return@withContext said
+            }
+        }
         // Quick capture: "idea: …", "note …", "todo …", "remind me to …" (no time in it) is filed at once, no model needed.
         Capture.parse(userText)?.let { (kind, text) ->
             val said = Capture.file(ctx, kind, text)
@@ -1601,6 +1704,47 @@ object FollowMe {
             choose(players, motion, room, Prefs.haSpeaker.trim(), System.currentTimeMillis())
         } catch (e: Exception) {
             Prefs.haSpeaker.trim().ifBlank { null }
+        }
+    }
+}
+
+
+/** Workshop helpers for the print pre-flight (#17). */
+object Workshop {
+    fun nextJob(): JSONObject? {
+        val (c, b) = Hub.call("GET", "/atlas/print/queue")
+        if (c !in 200..299) return null
+        val q = JSONObject(b).optJSONArray("queue") ?: return null
+        return (0 until q.length()).map { q.getJSONObject(it) }.firstOrNull { it.optString("status") == "queued" }
+    }
+
+    /** The spoken pre-flight: job, filament, camera, bed. Only real readings; anything unreachable is said plainly. */
+    fun preflight(): String {
+        val job = nextJob()
+        val (sc, sb) = Hub.call("GET", "/atlas/filament/spools")
+        val (pc, pb) = Hub.call("GET", "/atlas/print/preflight", timeoutMs = 20_000)
+        if (sc == -1 && pc == -1) return Hub.failure(-1)
+        if (pc == 401 || pc == 403) return Hub.failure(pc)
+        val spools = if (sc in 200..299) JSONObject(sb).optJSONArray("spools") else null
+        val cam = if (pc in 200..299) JSONObject(pb) else null
+        val bed = if (cam?.optBoolean("ok") == true) Hub.call("POST", "/atlas/print/bed-clear", timeoutMs = 60_000).let { (c, b) -> if (c in 200..299) JSONObject(b).optString("answer") else null } else null
+        return line(job, spools, cam, bed)
+    }
+
+    /** Pure, so it can be tested. */
+    fun line(job: JSONObject?, spools: org.json.JSONArray?, cam: JSONObject?, bed: String?): String = buildString {
+        if (job == null) append("Nothing's queued.") else {
+            val mat = job.optString("material"); val need = job.optDouble("estimated_g", 0.0)
+            append("Next up: ${job.optString("name")}, about ${need.toInt()} grams of $mat.")
+            if (spools != null) {
+                val have = (0 until spools.length()).map { spools.getJSONObject(it) }.filter { it.optString("material").equals(mat, true) }.sumOf { it.optDouble("remaining_g") }
+                append(if (have >= need) " You have ${have.toInt()} grams on hand." else " Only ${have.toInt()} grams of $mat on hand, so it may run short.")
+            }
+        }
+        when {
+            cam == null -> append(" I can't check the print camera.")
+            !cam.optBoolean("ok") -> append(" The print camera isn't watching: ${cam.optString("reason")}.")
+            bed != null -> append(" Camera on the bed: ${bed.trim().trimEnd('.')}.")
         }
     }
 }

@@ -446,6 +446,8 @@ class GlassesService : Service() {
     }
 
     private var lastBriefSeen = 0L
+    private var lastMoved = 0L
+    private var lastSedentaryPing = 0L
     private var lastNotice = 0L
 
     /** 23:00 to 07:00: nothing but urgent makes a sound. */
@@ -471,6 +473,16 @@ class GlassesService : Service() {
         updateWakeLock()
         Atlas.flushPolite()
         com.jondude.anzu.assist.SocialGrace.tick(this)
+        // #28: after 90 minutes without walking during waking hours, tell the hub; it decides (opt-in, cooldown) whether to nudge.
+        if (ticks % 10 == 0) {
+            val now2 = System.currentTimeMillis()
+            if (Motion.walking()) lastMoved = now2
+            if (lastMoved == 0L) lastMoved = now2
+            if (now2 - lastMoved > 90 * 60_000 && !quietHours() && now2 - lastSedentaryPing > 90 * 60_000) {
+                lastSedentaryPing = now2
+                scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Hub.call("POST", "/atlas/care/sedentary") }
+            }
+        }
         // The hub, by ear. Urgent earns speech (two clear notes first), but never over a call: it waits, unacknowledged,
         // until the call ends. Anything else new earns one soft bell and a line in the next brief, outside quiet time.
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {

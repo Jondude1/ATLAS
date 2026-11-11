@@ -995,4 +995,18 @@ class AtlasTest {
         assertEquals("media_player.office", F.choose(players, stale, "", "media_player.office", now))           // an hour-old motion doesn't count
         assertNull(F.choose(emptyList(), emptyList(), "", "", now))
     }
+
+    @Test
+    fun printPreflightSaysOnlyWhatItKnows() {
+        val W = com.jondude.anzu.assist.Workshop
+        val job = JSONObject("""{"name":"Benchy","material":"PLA","estimated_g":20,"status":"queued"}""")
+        val spools = JSONArray("""[{"material":"PLA","color":"black","remaining_g":800,"total_g":1000},{"material":"PETG","color":"clear","remaining_g":5,"total_g":1000}]""")
+        assertEquals("Next up: Benchy, about 20 grams of PLA. You have 800 grams on hand. The print camera isn't watching: camera exists but is disabled in Frigate.",
+            W.line(job, spools, JSONObject("""{"ok":false,"camera":"garage_cam","reason":"camera exists but is disabled in Frigate"}"""), null))
+        val big = JSONObject("""{"name":"Helmet","material":"PETG","estimated_g":400,"status":"queued"}""")
+        assertTrue(W.line(big, spools, JSONObject("""{"ok":true}"""), "The bed is clear.").contains("Only 5 grams of PETG on hand"))
+        assertTrue(W.line(big, spools, JSONObject("""{"ok":true}"""), "The bed is clear.").endsWith("Camera on the bed: The bed is clear."))
+        assertEquals("Nothing's queued. I can't check the print camera.", W.line(null, null, null, null))
+        assertEquals("The hub wants its token first. It goes in Settings, Obelisk.", com.jondude.anzu.assist.Hub.failure(401))
+    }
 }

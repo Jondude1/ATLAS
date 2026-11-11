@@ -252,6 +252,27 @@ object Hub {
         }
     }
 
+    /** Blocking. A JSON call to any hub endpoint: (http code, body), or (-1, "") if unreachable. */
+    fun call(method: String, path: String, json: JSONObject? = null, timeoutMs: Int = 30_000): Pair<Int, String> {
+        if (!configured()) return -1 to ""
+        return try {
+            val r = if (method == "GET") Net.get(base() + path, auth(), timeoutMs)
+            else Net.postJson(base() + path, auth(), (json ?: JSONObject()).toString(), timeoutMs)
+            needsToken = r.first == 401 || r.first == 403
+            r
+        } catch (e: Exception) {
+            -1 to ""
+        }
+    }
+
+    /** Plain words for a failed hub call. */
+    fun failure(code: Int): String = when (code) {
+        -1 -> "I can't reach the hub on Obelisk right now."
+        401, 403 -> "The hub wants its token first. It goes in Settings, Obelisk."
+        404 -> "The hub doesn't know that one."
+        else -> "The hub had trouble with that ($code)."
+    }
+
     /** Builds a report in the hub's format. */
     fun reportJson(app: String, title: String, body: String, priority: String, key: String?): JSONObject {
         val p = priority.lowercase().takeIf { it in setOf("low", "normal", "urgent") } ?: "normal"
