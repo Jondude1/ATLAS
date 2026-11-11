@@ -706,6 +706,55 @@ def test_gatekeeper_does_not_duplicate_the_same_event(atlas, monkeypatch):
     assert len(reports) == 1
 
 
+def test_sunday_brief_get_before_any_compose(atlas):
+    mod, client = atlas
+    body = client.get("/atlas/sunday-brief").json()
+    assert body["brief"] == "No Sunday Brief has been composed yet."
+    assert body["updated"] == 0
+
+
+def test_sunday_brief_composes_from_the_week(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/report", json={"app": "home", "title": "Garage left open"})
+
+    body = client.post("/atlas/sunday-brief/compose").json()
+    assert "Garage left open" in body["brief"]
+
+    cached = client.get("/atlas/sunday-brief").json()
+    assert cached["brief"] == body["brief"]
+    assert cached["updated"] == body["updated"]
+
+
+def test_sunday_brief_excludes_reports_older_than_the_lookback(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    too_old = mod._now_ms() - (mod.SUNDAY_BRIEF_LOOKBACK_DAYS + 1) * 86400 * 1000
+    client.post("/atlas/report", json={"app": "home", "title": "Ancient event", "at": too_old})
+
+    body = client.post("/atlas/sunday-brief/compose").json()
+    assert "Ancient event" not in body["brief"]
+
+
+def test_sunday_brief_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "A quiet, productive week overall."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.post("/atlas/sunday-brief/compose").json()
+    assert body["brief"] == "A quiet, productive week overall."
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

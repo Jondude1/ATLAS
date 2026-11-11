@@ -69,6 +69,9 @@ MONEY_CHECK_HOUR = int(os.environ.get("ATLAS_MONEY_CHECK_HOUR", "6"))  # local 2
 # actually fetched (not peeked).
 CATCH_UP_MAX_HOURS = int(os.environ.get("ATLAS_CATCH_UP_MAX_HOURS", "72"))
 
+SUNDAY_BRIEF_HOUR = int(os.environ.get("ATLAS_SUNDAY_BRIEF_HOUR", "9"))  # local 24h clock, Sunday
+SUNDAY_BRIEF_LOOKBACK_DAYS = int(os.environ.get("ATLAS_SUNDAY_BRIEF_LOOKBACK_DAYS", "7"))
+
 # Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
 # person/car/dog/cat on its cameras today, no printer-specific camera or
 # zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
@@ -107,6 +110,7 @@ async def _atlas_lifespan(app):
             _schedule_filament_check()
             _schedule_athena_container_watch()
             _schedule_gatekeeper()
+            _schedule_sunday_brief()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -116,6 +120,7 @@ async def _atlas_lifespan(app):
         _schedule_filament_check()
         _schedule_athena_container_watch()
         _schedule_gatekeeper()
+        _schedule_sunday_brief()
         yield
 
 
@@ -310,6 +315,8 @@ _brief_task: Optional[asyncio.Task] = None
 _captures_task: Optional[asyncio.Task] = None
 _money_task: Optional[asyncio.Task] = None
 _catch_up_cache = {"last_shown_at": 0}
+_sunday_brief_cache = {"brief": "", "since": 0, "updated": 0}
+_sunday_brief_task: Optional[asyncio.Task] = None
 _print_watch_task: Optional[asyncio.Task] = None
 _print_watch_state = {"last_ok": None}
 _filament_task: Optional[asyncio.Task] = None
@@ -845,6 +852,85 @@ async def _compose_catch_me_up(peek: bool = False) -> dict:
 @app.get("/atlas/catch-me-up", dependencies=[Depends(require_token)])
 async def catch_me_up(peek: bool = False):
     return await _compose_catch_me_up(peek=peek)
+
+
+def _seconds_until_next_sunday(hour: int) -> float:
+    now = datetime.now()
+    days_ahead = (6 - now.weekday()) % 7  # Monday=0 ... Sunday=6
+    target = (now + timedelta(days=days_ahead)).replace(hour=hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=7)
+    return (target - now).total_seconds()
+
+
+async def _compose_sunday_brief() -> dict:
+    now_ms = _now_ms()
+    since = now_ms - SUNDAY_BRIEF_LOOKBACK_DAYS * 86400 * 1000
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reports WHERE at >= ? ORDER BY at ASC LIMIT 200", (since,)
+        ).fetchall()
+    reports_text = "\n".join(
+        f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip()
+        for r in rows
+    )
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Write a short, warm weekly look-back covering the last 7 days, drawn "
+                    "only from the reports given. If the week was quiet, say so briefly and "
+                    "warmly. Plain spoken English, at most 120 words, no markdown, no lists."
+                ),
+            },
+            {
+                "role": "user",
+                "content": reports_text or "(a quiet week, nothing reported)",
+            },
+        ],
+        max_tokens=220,
+        timeout_s=90,
+    )
+    summary = reply if reply else _fallback_brief(rows)
+    _sunday_brief_cache["brief"] = summary
+    _sunday_brief_cache["since"] = since
+    _sunday_brief_cache["updated"] = now_ms
+    return {"brief": summary, "since": since, "updated": now_ms}
+
+
+async def _sunday_brief_loop():
+    while True:
+        await asyncio.sleep(_seconds_until_next_sunday(SUNDAY_BRIEF_HOUR))
+        try:
+            await _compose_sunday_brief()
+        except Exception:
+            pass
+
+
+def _schedule_sunday_brief():
+    global _sunday_brief_task
+    if _sunday_brief_task is not None and not _sunday_brief_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _sunday_brief_task = loop.create_task(_sunday_brief_loop())
+
+
+@app.get("/atlas/sunday-brief", dependencies=[Depends(require_token)])
+def sunday_brief():
+    return {
+        "brief": _sunday_brief_cache["brief"] or "No Sunday Brief has been composed yet.",
+        "since": _sunday_brief_cache["since"],
+        "updated": _sunday_brief_cache["updated"],
+    }
+
+
+@app.post("/atlas/sunday-brief/compose", dependencies=[Depends(require_token)])
+async def sunday_brief_compose():
+    return await _compose_sunday_brief()
 
 
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
@@ -1538,6 +1624,18 @@ async def mcp_money_check() -> dict:
 async def mcp_catch_me_up() -> dict:
     """Compose a short catch-up on what happened since the last time this was called (call it on arrival)."""
     return await catch_me_up()
+
+
+@mcp.tool
+def mcp_sunday_brief() -> dict:
+    """Get the most recently composed Sunday Brief (the weekly look-back)."""
+    return sunday_brief()
+
+
+@mcp.tool
+async def mcp_sunday_brief_compose() -> dict:
+    """Compose the Sunday Brief now instead of waiting for Sunday morning."""
+    return await sunday_brief_compose()
 
 
 @mcp.tool
