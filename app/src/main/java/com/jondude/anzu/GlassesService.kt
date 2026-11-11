@@ -163,8 +163,14 @@ class GlassesService : Service() {
         }
         if (intent?.action == ACTION_SPEAK_NOW) scope.launch { speakUp("random") }
         if (intent?.action == ACTION_QUIET) {
-            Prefs.quietUntil = if (Prefs.quietUntil > System.currentTimeMillis()) 0L else System.currentTimeMillis() + 60 * 60_000
+            val going = Prefs.quietUntil <= System.currentTimeMillis()
+            Prefs.quietUntil = if (going) System.currentTimeMillis() + 60 * 60_000 else 0L
             refreshNotification()
+            // Confirm by ear, so it works without looking.
+            if (Glasses.connected.value) {
+                Earcons.play(if (going) "done" else "listen")
+                Atlas.announce(if (going) "Going quiet for an hour." else "I'm back.")
+            }
         }
         if (fromUi && Glasses.connected.value && Motion.last == null) {
             // Location only flows once the service has been armed from the visible app.
@@ -427,6 +433,12 @@ class GlassesService : Service() {
         return !Atlas.busy
     }
 
+    private var lastBriefSeen = 0L
+    private var lastNotice = 0L
+
+    /** 23:00 to 07:00: nothing but urgent makes a sound. */
+    private fun quietHours(): Boolean = Calendar.getInstance().get(Calendar.HOUR_OF_DAY).let { it >= 23 || it < 7 }
+
     private fun inActiveHours(): Boolean {
         val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val s = Prefs.activeStart
@@ -445,14 +457,33 @@ class GlassesService : Service() {
             Atlas.announce("Timer's up: ${it.label}.")
         }
         updateWakeLock()
-        // Urgent items from the hub: say them if he's wearing something, otherwise hold for later.
+        // The hub, by ear. Urgent earns speech (two clear notes first), but never over a call: it waits, unacknowledged,
+        // until the call ends. Anything else new earns one soft bell and a line in the next brief, outside quiet time.
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
             val b = kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.brief(0) }
-            if (b != null && b.urgent.isNotEmpty()) {
-                if (Glasses.connected.value && System.currentTimeMillis() >= Prefs.quietUntil) {
-                    b.urgent.take(3).forEach { Atlas.announce("${it.app}: ${it.title}.") }
-                    kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.ack(b.urgent.take(3).map { it.id }) }
-                } else b.urgent.forEach { Glasses.hold("${it.app}: ${it.title}") }
+            if (b != null) {
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val inCall = am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION ||
+                    am.mode == AudioManager.MODE_RINGTONE
+                val now = System.currentTimeMillis()
+                if (b.urgent.isNotEmpty() && !inCall) {
+                    if (Glasses.connected.value && now >= Prefs.quietUntil) {
+                        Earcons.play("urgent")
+                        kotlinx.coroutines.delay(500)
+                        b.urgent.take(3).forEach { Atlas.announce("${it.app}: ${it.title}.") }
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.ack(b.urgent.take(3).map { it.id }) }
+                    } else b.urgent.forEach { Glasses.hold("${it.app}: ${it.title}") }
+                }
+                if (b.updated > lastBriefSeen) {
+                    val fresh = lastBriefSeen > 0
+                    lastBriefSeen = b.updated
+                    if (fresh && b.urgent.isEmpty() && Glasses.connected.value && !inCall && now >= Prefs.quietUntil &&
+                        !quietHours() && now - lastNotice > 10 * 60_000
+                    ) {
+                        lastNotice = now
+                        Earcons.play("notice")
+                    }
+                }
             }
         }
         if (!Glasses.connected.value) {

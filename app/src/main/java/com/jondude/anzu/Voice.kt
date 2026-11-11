@@ -222,20 +222,8 @@ object Speaker : TextToSpeech.OnInitListener {
 data class Heard(val text: String, val quiet: Boolean)
 
 object Ears {
-    /** Earcons are Atlas's body language: "listen", "think", "done". */
-    fun earcon(kind: String) {
-        try {
-            val tone = when (kind) {
-                "listen" -> ToneGenerator.TONE_PROP_BEEP
-                "think" -> ToneGenerator.TONE_PROP_ACK
-                else -> ToneGenerator.TONE_PROP_PROMPT
-            }
-            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 50)
-            tg.startTone(tone, 120)
-            Handler(Looper.getMainLooper()).postDelayed({ tg.release() }, 400)
-        } catch (_: Exception) {
-        }
-    }
+    /** Earcons are Atlas's body language, soft enough for all-day wear. See [Earcons]. */
+    fun earcon(kind: String) = Earcons.play(kind)
 
     /** Returns what was heard, or null on silence / failure. */
     suspend fun listen(ctx: Context): Heard? = withContext(Dispatchers.Main) {
@@ -532,5 +520,66 @@ object CloudVoice {
             Speaker.lastCloudError = "Couldn't reach the voice service: ${e.message}"
             null
         }
+    }
+}
+
+
+/**
+ * The ring's audio twin: short, quiet sine tones with soft attacks, so they read as presence, not alarms.
+ * listen = a gentle rise, think = one low breath, done = a gentle fall,
+ * notice = a single soft bell (something new is in the next brief), urgent = two clear notes before speech.
+ */
+object Earcons {
+    private const val RATE = 22_050
+
+    /** Notes as (frequency Hz, length ms, gap ms after). Pure so it can be tested. */
+    fun notes(kind: String): List<Triple<Double, Int, Int>> = when (kind) {
+        "listen" -> listOf(Triple(659.3, 90, 20), Triple(880.0, 140, 0))   // E5 → A5
+        "think" -> listOf(Triple(440.0, 220, 0))                           // A4, held softly
+        "notice" -> listOf(Triple(1046.5, 260, 0))                         // C6, bell-like decay
+        "urgent" -> listOf(Triple(784.0, 120, 60), Triple(1046.5, 180, 0)) // G5, C6
+        else -> listOf(Triple(880.0, 90, 20), Triple(659.3, 140, 0))       // done: A5 → E5
+    }
+
+    fun render(kind: String, volume: Float = 0.12f): ShortArray {
+        val out = ArrayList<Short>()
+        for ((f, ms, gap) in notes(kind)) {
+            val n = RATE * ms / 1000
+            val attack = (RATE * 0.012).toInt()
+            for (i in 0 until n) {
+                val t = i.toDouble() / RATE
+                val env = if (i < attack) i.toDouble() / attack else Math.exp(-4.0 * (i - attack) / n)
+                val v = Math.sin(2 * Math.PI * f * t) + 0.25 * Math.sin(4 * Math.PI * f * t)
+                out.add((v / 1.25 * env * volume * Short.MAX_VALUE).toInt().toShort())
+            }
+            repeat(RATE * gap / 1000) { out.add(0) }
+        }
+        return out.toShortArray()
+    }
+
+    fun play(kind: String) {
+        Thread {
+            try {
+                val pcm = render(kind)
+                val track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+                    )
+                    .setAudioFormat(
+                        android.media.AudioFormat.Builder().setSampleRate(RATE)
+                            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build()
+                    )
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(pcm.size * 2)
+                    .build()
+                track.write(pcm, 0, pcm.size)
+                track.play()
+                Thread.sleep(pcm.size * 1000L / RATE + 80)
+                track.release()
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 }

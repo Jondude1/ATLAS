@@ -684,4 +684,16 @@ class AtlasTest {
         assertEquals("It's Tuesday. Obelisk isn't answering.", knowsLine(false, null, -1, null, false, null, "", "Tuesday"))
         assertEquals("Garage is open.", firstSentence("Garage is open. Two packages came."))
     }
+
+    @Test
+    fun earconsAreShortAndQuiet() {
+        for (kind in listOf("listen", "think", "done", "notice", "urgent")) {
+            val pcm = Earcons.render(kind)
+            assertTrue("$kind too long", pcm.size < 22_050 / 2)       // under half a second
+            assertTrue("$kind too loud", pcm.maxOf { kotlin.math.abs(it.toInt()) } < Short.MAX_VALUE / 6)
+            assertTrue("$kind silent", pcm.any { it.toInt() != 0 })
+        }
+        assertTrue(Earcons.notes("listen").last().first > Earcons.notes("listen").first().first) // rises
+        assertTrue(Earcons.notes("done").last().first < Earcons.notes("done").first().first)     // falls
+    }
 }
