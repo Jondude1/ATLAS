@@ -1321,7 +1321,7 @@ fun SettingsScreen() {
         }
 
         Section("Hermes and your vault") {
-            Text("${Prefs.name} handles the conversation itself and hands bigger, tool-heavy jobs to Hermes on Athena, then reports back.", color = Muted, fontSize = 13.sp)
+            Text("${Prefs.name} hands bigger, tool-heavy jobs to Hermes through the hub on Obelisk, then reports back. A direct Hermes address is only needed if you're not using the hub.", color = Muted, fontSize = 13.sp)
             PrefField("Hermes API address (ends in /v1)", Prefs.hermesUrl) { Prefs.hermesUrl = it.trim() }
             PrefField("Hermes API key (if it needs one)", Prefs.hermesKey, secret = true) { Prefs.hermesKey = it.trim() }
             PrefField("Model name to send", Prefs.hermesModel) { Prefs.hermesModel = it.trim() }

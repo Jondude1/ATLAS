@@ -78,6 +78,19 @@ object Hub {
         }
     }
 
+    /** Blocking, and slow: Hermes works the task through the hub. Null if it couldn't. */
+    fun delegate(task: String): String? {
+        if (!configured()) return null
+        return try {
+            val (code, body) = Net.postJson(
+                base() + "/atlas/delegate", auth(), JSONObject().put("task", task).toString(), 300_000
+            )
+            if (code in 200..299) JSONObject(body).optString("answer").takeIf { it.isNotBlank() } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Builds a report in the hub's format. */
     fun reportJson(app: String, title: String, body: String, priority: String, key: String?): JSONObject {
         val p = priority.lowercase().takeIf { it in setOf("low", "normal", "urgent") } ?: "normal"

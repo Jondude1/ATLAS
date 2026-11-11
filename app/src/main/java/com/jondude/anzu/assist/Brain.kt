@@ -536,7 +536,7 @@ Time is real for you. Each of Jon's messages is stamped with when he said it, an
 
 Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on his desktop, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             Hub.brief()?.let { b ->
@@ -606,8 +606,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
-        if (Hermes.configured()) {
-            a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes on Jon's desktop. Runs in the background; you report the result when it comes back.",
+        if (Hub.configured() || Hermes.configured()) {
+            a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes, Jon's agent on Obelisk. Runs in the background; you report the result when it comes back.",
                 JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
         }
         // Everything reachable through Connections (Home Assistant, Hermes, servers on Athena and Obelisk...).
@@ -802,7 +802,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 Store.logAction("Asked Hermes: ${task.take(80)}")
                 Atlas.scope.launch(Dispatchers.IO) {
                     try {
-                        val answer = Hermes.ask(task)
+                        // Through the hub on Obelisk when it's set up; a direct Hermes link is the fallback.
+                        val answer = Hub.delegate(task) ?: if (Hermes.configured()) Hermes.ask(task)
+                            else throw RuntimeException("the hub on Obelisk didn't get an answer from Hermes")
                         Store.addNote("Hermes: ${task.take(80)}\n$answer")
                         record("[Hermes finished: $task]", answer, "")
                         val spoken = try {
