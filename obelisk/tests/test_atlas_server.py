@@ -346,6 +346,77 @@ def test_captures_filtered_by_category(atlas, monkeypatch):
     assert len(house_only) == 0
 
 
+def test_money_check_files_a_report_for_an_upcoming_renewal(atlas, monkeypatch):
+    mod, client = atlas
+    today = mod.datetime.now().date()
+    due = today + mod.timedelta(days=3)
+    mod.MONEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.MONEY_FILE.write_text(f"- Netflix | 15.49 | monthly | {due:%Y-%m-%d}\n", encoding="utf-8")
+
+    resp = client.post("/atlas/money/check")
+    assert resp.status_code == 200
+    assert resp.json() == {"checked": 1, "filed": 1}
+
+    reports = client.get("/atlas/reports", params={"app": "money"}).json()["reports"]
+    assert len(reports) == 1
+    assert "Netflix" in reports[0]["title"]
+    assert "15.49" in reports[0]["body"]
+
+
+def test_money_check_skips_renewals_outside_the_lookahead_window(atlas):
+    mod, client = atlas
+    today = mod.datetime.now().date()
+    far = today + mod.timedelta(days=mod.MONEY_LOOKAHEAD_DAYS + 5)
+    mod.MONEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.MONEY_FILE.write_text(f"- Domain | 18 | yearly | {far:%Y-%m-%d}\n", encoding="utf-8")
+
+    resp = client.post("/atlas/money/check")
+    assert resp.json() == {"checked": 1, "filed": 0}
+    assert client.get("/atlas/reports", params={"app": "money"}).json()["reports"] == []
+
+
+def test_money_check_is_idempotent_for_the_same_renewal_date(atlas):
+    mod, client = atlas
+    today = mod.datetime.now().date()
+    due = today + mod.timedelta(days=1)
+    mod.MONEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.MONEY_FILE.write_text(f"- Etsy Plus | 10 | monthly | {due:%Y-%m-%d}\n", encoding="utf-8")
+
+    client.post("/atlas/money/check")
+    client.post("/atlas/money/check")
+
+    reports = client.get("/atlas/reports", params={"app": "money"}).json()["reports"]
+    assert len(reports) == 1
+
+
+def test_money_check_handles_missing_file_and_malformed_lines(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/money/check")
+    assert resp.status_code == 200
+    assert resp.json() == {"checked": 0, "filed": 0}
+
+    mod.MONEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.MONEY_FILE.write_text(
+        "# just a header\n- incomplete line\n- Bad Date | 5 | monthly | not-a-date\n",
+        encoding="utf-8",
+    )
+    resp = client.post("/atlas/money/check")
+    assert resp.json() == {"checked": 0, "filed": 0}
+
+
+def test_money_subscriptions_lists_parsed_entries(atlas):
+    mod, client = atlas
+    today = mod.datetime.now().date()
+    due = today + mod.timedelta(days=2)
+    mod.MONEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.MONEY_FILE.write_text(f"- Gym | 29.99 | monthly | {due:%Y-%m-%d}\n", encoding="utf-8")
+
+    subs = client.get("/atlas/money/subscriptions").json()["subscriptions"]
+    assert len(subs) == 1
+    assert subs[0]["name"] == "Gym"
+    assert subs[0]["amount"] == 29.99
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

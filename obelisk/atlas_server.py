@@ -55,6 +55,14 @@ OPEN_LOOPS_PER_BRIEF = 2  # oldest first; stays in the running list until acked
 CAPTURE_CATEGORIES = ("shop", "house", "projects")
 CAPTURES_SORT_HOUR = int(os.environ.get("ATLAS_CAPTURES_SORT_HOUR", "2"))  # local 24h clock
 
+# Money Sentinel v1: a hand-maintained vault file, one renewal per markdown
+# list item: "- Name | Amount | Cadence | YYYY-MM-DD". Richer feeds later.
+MONEY_FILE = Path(
+    os.environ.get("ATLAS_MONEY_FILE", str(VAULT / "Atlas" / "subscriptions.md"))
+).expanduser()
+MONEY_LOOKAHEAD_DAYS = int(os.environ.get("ATLAS_MONEY_LOOKAHEAD_DAYS", "7"))
+MONEY_CHECK_HOUR = int(os.environ.get("ATLAS_MONEY_CHECK_HOUR", "6"))  # local 24h clock
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -69,10 +77,12 @@ async def _atlas_lifespan(app):
         async with _mcp_app.lifespan(app):
             _schedule_athena_refresh()
             _schedule_captures_nightly()
+            _schedule_money_check()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
         _schedule_captures_nightly()
+        _schedule_money_check()
         yield
 
 
@@ -265,6 +275,7 @@ _brief_cache = {"brief": "", "updated": 0}
 _brief_lock = asyncio.Lock()
 _brief_task: Optional[asyncio.Task] = None
 _captures_task: Optional[asyncio.Task] = None
+_money_task: Optional[asyncio.Task] = None
 
 
 class Report(BaseModel):
@@ -604,9 +615,9 @@ async def _sort_captures() -> dict:
     return {"sorted": len(rows)}
 
 
-def _seconds_until_next_sort_hour() -> float:
+def _seconds_until_next_hour(hour: int) -> float:
     now = datetime.now()
-    target = now.replace(hour=CAPTURES_SORT_HOUR, minute=0, second=0, microsecond=0)
+    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
     return (target - now).total_seconds()
@@ -614,7 +625,7 @@ def _seconds_until_next_sort_hour() -> float:
 
 async def _captures_nightly_loop():
     while True:
-        await asyncio.sleep(_seconds_until_next_sort_hour())
+        await asyncio.sleep(_seconds_until_next_hour(CAPTURES_SORT_HOUR))
         try:
             await _sort_captures()
         except Exception:
@@ -666,6 +677,95 @@ def list_captures(category: Optional[str] = None, since: Optional[int] = None, l
 @app.post("/atlas/captures/sort", dependencies=[Depends(require_token)])
 async def captures_sort():
     return await _sort_captures()
+
+
+def _parse_money_line(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 4 or not parts[0]:
+        return None
+    name, amount_raw, cadence, date_raw = parts[0], parts[1], parts[2], parts[3]
+    try:
+        next_date = datetime.strptime(date_raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    try:
+        amount = float(amount_raw.replace("$", "").replace(",", ""))
+    except ValueError:
+        amount = None
+    return {"name": name, "amount": amount, "cadence": cadence, "next_date": date_raw, "_date": next_date}
+
+
+def _read_subscriptions() -> list[dict]:
+    if not MONEY_FILE.exists():
+        return []
+    subs = []
+    for line in MONEY_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parsed = _parse_money_line(line)
+        if parsed:
+            subs.append(parsed)
+    return subs
+
+
+async def _check_money_subscriptions() -> dict:
+    today = datetime.now().date()
+    horizon = today + timedelta(days=MONEY_LOOKAHEAD_DAYS)
+    subs = _read_subscriptions()
+    filed = 0
+    for sub in subs:
+        if today <= sub["_date"] <= horizon:
+            days_out = (sub["_date"] - today).days
+            when = "today" if days_out == 0 else ("tomorrow" if days_out == 1 else f"in {days_out} days")
+            amount_str = f"${sub['amount']:.2f}" if sub["amount"] is not None else "unknown amount"
+            await report(
+                Report(
+                    app="money",
+                    title=f"{sub['name']} renews {when}",
+                    body=f"{amount_str}, {sub['cadence']}, due {sub['next_date']}",
+                    priority="normal",
+                    key=f"money:{sub['name']}:{sub['next_date']}",
+                )
+            )
+            filed += 1
+    return {"checked": len(subs), "filed": filed}
+
+
+async def _money_nightly_loop():
+    while True:
+        await asyncio.sleep(_seconds_until_next_hour(MONEY_CHECK_HOUR))
+        try:
+            await _check_money_subscriptions()
+        except Exception:
+            pass
+
+
+def _schedule_money_check():
+    global _money_task
+    if _money_task is not None and not _money_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _money_task = loop.create_task(_money_nightly_loop())
+
+
+@app.get("/atlas/money/subscriptions", dependencies=[Depends(require_token)])
+def money_subscriptions():
+    subs = _read_subscriptions()
+    return {
+        "subscriptions": [
+            {"name": s["name"], "amount": s["amount"], "cadence": s["cadence"], "next_date": s["next_date"]}
+            for s in subs
+        ]
+    }
+
+
+@app.post("/atlas/money/check", dependencies=[Depends(require_token)])
+async def money_check():
+    return await _check_money_subscriptions()
 
 
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
@@ -975,6 +1075,18 @@ def mcp_captures(category: str | None = None, since: int | None = None, limit: i
 async def mcp_captures_sort() -> dict:
     """Run the nightly capture-sort job now instead of waiting for the scheduled hour."""
     return await captures_sort()
+
+
+@mcp.tool
+def mcp_money_subscriptions() -> dict:
+    """List subscriptions/renewals read from the vault's subscriptions file."""
+    return money_subscriptions()
+
+
+@mcp.tool
+async def mcp_money_check() -> dict:
+    """Run the Money Sentinel check now and file hub reports for anything renewing soon."""
+    return await money_check()
 
 
 @mcp.tool
