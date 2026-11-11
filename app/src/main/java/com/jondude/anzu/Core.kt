@@ -44,8 +44,11 @@ class LongPref(private val key: String, private val def: Long) {
     operator fun setValue(t: Any?, p: KProperty<*>, v: Long) = Prefs.sp.edit().putLong(key, v).apply()
 }
 
-/** The hub on Obelisk, over Tailscale. */
+// Jon's machines on his tailnet. Built in so nothing has to be typed.
+/** The hub on Obelisk. */
 const val OBELISK_HUB = "http://obalisk.tail8dab0b.ts.net:8765"
+/** Home Assistant (port 80). */
+const val HOME_ASSISTANT = "http://homeassistant-1.tail8dab0b.ts.net"
 
 object Prefs {
     lateinit var sp: SharedPreferences
@@ -65,6 +68,7 @@ object Prefs {
         if (!sp.getBoolean("networkDefaultsV1", false)) {
             val e = sp.edit().putBoolean("networkDefaultsV1", true)
             if (sp.getString("obeliskUrl", "").isNullOrBlank()) e.putString("obeliskUrl", OBELISK_HUB)
+            if (sp.getString("haUrl", "").isNullOrBlank()) e.putString("haUrl", HOME_ASSISTANT)
             e.apply()
         }
         if (!sp.getBoolean("renamedToAtlas", false)) {
@@ -128,7 +132,9 @@ object Prefs {
     var haSpeaker by StrPref("haSpeaker", "")
     var haTtsService by StrPref("haTtsService", "tts.google_translate_say")
     var aboutMe by StrPref("aboutMe", "")
-    var haUrl by StrPref("haUrl", "")
+    var haUrl by StrPref("haUrl", HOME_ASSISTANT)
+    /** Whether Home Assistant's own MCP tools are offered under Connections. */
+    var haMcp by BoolPref("haMcp", true)
     var haToken by StrPref("haToken", "")
     var deviceAddress by StrPref("deviceAddress", "")
     var deviceName by StrPref("deviceName", "")

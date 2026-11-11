@@ -1246,7 +1246,7 @@ fun SettingsScreen() {
         }
 
         Section("Home Assistant") {
-            PrefField("URL (e.g. your Tailscale address, port 8123)", Prefs.haUrl) { Prefs.haUrl = it.trim() }
+            PrefField("Address (built in)", Prefs.haUrl) { Prefs.haUrl = it.trim().ifBlank { HOME_ASSISTANT } }
             PrefField("Long-lived access token", Prefs.haToken, secret = true) { Prefs.haToken = it.trim() }
             ToggleRow("House alerts", "Tells you when something is left open or unlocked, and when people come and go", Prefs.homeAlerts) { Prefs.homeAlerts = it }
             PrefField("Alert after open for (minutes)", Prefs.homeOpenMinutes.toString()) { s -> s.toIntOrNull()?.let { Prefs.homeOpenMinutes = it.coerceIn(1, 240) } }
@@ -1300,12 +1300,7 @@ fun SettingsScreen() {
                     }
                 }
             }
-            if (Prefs.haUrl.isNotBlank() && servers.none { it.url.contains("/api/mcp") }) {
-                SoftButton(onClick = {
-                    val s = com.jondude.anzu.assist.McpServer("Home Assistant", Prefs.haUrl.trim().trimEnd('/') + "/api/mcp", Prefs.haToken)
-                    com.jondude.anzu.assist.Mcp.upsert(s); reload(); check(s)
-                }) { Text("Connect Home Assistant") }
-            }
+            if (Prefs.haToken.isBlank()) Text("Home Assistant connects here by itself once its token is in under Settings → Home Assistant.", color = Muted, fontSize = 13.sp)
             Text("Add a connection", color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             PrefField("Name (for example Athena files)", "") { newName = it }
             PrefField("Address (for example http://athena:8000/mcp)", "") { newUrl = it.trim() }

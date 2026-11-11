@@ -627,6 +627,15 @@ class AtlasTest {
         assertEquals("idea-7", r.getString("key"))
         assertEquals("normal", com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "whenever", null).getString("priority"))
         assertFalse(com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "low", null).has("key"))
+        // Home Assistant's address is built in; its connection appears once a token is set, and can be switched off
+        assertEquals(HOME_ASSISTANT, Prefs.haUrl)
+        assertTrue(com.jondude.anzu.assist.Mcp.servers().none { it.name == "Home Assistant" })
+        Prefs.haToken = "t"
+        val ha = com.jondude.anzu.assist.Mcp.servers().first { it.name == "Home Assistant" }
+        assertEquals("http://homeassistant-1.tail8dab0b.ts.net/api/mcp", ha.url)
+        com.jondude.anzu.assist.Mcp.setEnabled("Home Assistant", false)
+        assertFalse(com.jondude.anzu.assist.Mcp.servers().first { it.name == "Home Assistant" }.enabled)
+        Prefs.haToken = ""
         // the hub address is built in, and comes back if the setting is ever cleared
         assertEquals(OBELISK_HUB, Prefs.obeliskUrl)
         assertTrue(com.jondude.anzu.assist.Hub.configured())
