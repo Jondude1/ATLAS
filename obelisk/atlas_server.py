@@ -69,6 +69,14 @@ MONEY_CHECK_HOUR = int(os.environ.get("ATLAS_MONEY_CHECK_HOUR", "6"))  # local 2
 # actually fetched (not peeked).
 CATCH_UP_MAX_HOURS = int(os.environ.get("ATLAS_CATCH_UP_MAX_HOURS", "72"))
 
+# Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
+# person/car/dog/cat on its cameras today, no printer-specific camera or
+# zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
+# print-failure detection. Don't claim more than that in reports or UI text.
+FRIGATE_URL = os.environ.get("ATLAS_FRIGATE_URL", "http://100.88.113.24:5000")
+PRINT_CAMERA = os.environ.get("ATLAS_PRINT_CAMERA", "garage_cam")
+PRINT_WATCH_INTERVAL_S = int(os.environ.get("ATLAS_PRINT_WATCH_INTERVAL_S", "300"))
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -84,11 +92,13 @@ async def _atlas_lifespan(app):
             _schedule_athena_refresh()
             _schedule_captures_nightly()
             _schedule_money_check()
+            _schedule_print_watch()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
         _schedule_captures_nightly()
         _schedule_money_check()
+        _schedule_print_watch()
         yield
 
 
@@ -283,6 +293,8 @@ _brief_task: Optional[asyncio.Task] = None
 _captures_task: Optional[asyncio.Task] = None
 _money_task: Optional[asyncio.Task] = None
 _catch_up_cache = {"last_shown_at": 0}
+_print_watch_task: Optional[asyncio.Task] = None
+_print_watch_state = {"last_ok": None}
 
 
 class Report(BaseModel):
@@ -817,6 +829,94 @@ async def catch_me_up(peek: bool = False):
     return await _compose_catch_me_up(peek=peek)
 
 
+async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
+    """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.get(f"{FRIGATE_URL.rstrip('/')}{path}")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        return None
+
+
+@app.get("/atlas/frigate/cameras", dependencies=[Depends(require_token)])
+async def frigate_cameras():
+    config = await _frigate_get("/api/config")
+    if config is None:
+        return {"ok": False, "cameras": []}
+    cameras = [
+        {"name": name, "enabled": bool(cfg.get("enabled", False))}
+        for name, cfg in config.get("cameras", {}).items()
+    ]
+    return {"ok": True, "cameras": cameras}
+
+
+@app.get("/atlas/print/preflight", dependencies=[Depends(require_token)])
+async def print_preflight():
+    config = await _frigate_get("/api/config")
+    if config is None:
+        return {"ok": False, "camera": PRINT_CAMERA, "reason": "Frigate isn't answering"}
+    camera_cfg = config.get("cameras", {}).get(PRINT_CAMERA)
+    if camera_cfg is None:
+        return {"ok": False, "camera": PRINT_CAMERA, "reason": f"no camera named '{PRINT_CAMERA}' in Frigate"}
+    if not camera_cfg.get("enabled", False):
+        return {"ok": False, "camera": PRINT_CAMERA, "reason": "camera exists but is disabled in Frigate"}
+    return {
+        "ok": True,
+        "camera": PRINT_CAMERA,
+        "snapshot_url": f"{FRIGATE_URL.rstrip('/')}/api/{PRINT_CAMERA}/latest.jpg",
+    }
+
+
+async def _check_print_camera() -> dict:
+    config = await _frigate_get("/api/config")
+    camera_cfg = (config or {}).get("cameras", {}).get(PRINT_CAMERA)
+    ok = bool(camera_cfg and camera_cfg.get("enabled"))
+    last_ok = _print_watch_state.get("last_ok")
+    if last_ok is not None and ok != last_ok:
+        if ok:
+            title, body = (
+                "Print camera back online",
+                f"{PRINT_CAMERA} is reachable and enabled again.",
+            )
+        else:
+            title, body = (
+                "Print camera offline",
+                f"{PRINT_CAMERA} stopped answering or is disabled — the print area isn't being watched.",
+            )
+        await report(
+            Report(app="print", title=title, body=body, priority="normal", key="print-camera-status")
+        )
+    _print_watch_state["last_ok"] = ok
+    return {"camera": PRINT_CAMERA, "ok": ok}
+
+
+async def _print_watch_loop():
+    while True:
+        await asyncio.sleep(PRINT_WATCH_INTERVAL_S)
+        try:
+            await _check_print_camera()
+        except Exception:
+            pass
+
+
+def _schedule_print_watch():
+    global _print_watch_task
+    if _print_watch_task is not None and not _print_watch_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _print_watch_task = loop.create_task(_print_watch_loop())
+
+
+@app.post("/atlas/print/watch-check", dependencies=[Depends(require_token)])
+async def print_watch_check():
+    return await _check_print_camera()
+
+
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
 async def ask(a: Ask):
     with hub_db() as conn:
@@ -1142,6 +1242,24 @@ async def mcp_money_check() -> dict:
 async def mcp_catch_me_up() -> dict:
     """Compose a short catch-up on what happened since the last time this was called (call it on arrival)."""
     return await catch_me_up()
+
+
+@mcp.tool
+async def mcp_frigate_cameras() -> dict:
+    """List Frigate's cameras and whether each is enabled."""
+    return await frigate_cameras()
+
+
+@mcp.tool
+async def mcp_print_preflight() -> dict:
+    """Pre-flight check before starting a print: is the print-area camera up and able to confirm the bed is clear."""
+    return await print_preflight()
+
+
+@mcp.tool
+async def mcp_print_watch_check() -> dict:
+    """Check the print-area camera's liveness now and report if it just went offline or came back."""
+    return await print_watch_check()
 
 
 @mcp.tool

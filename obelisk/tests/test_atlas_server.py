@@ -477,6 +477,94 @@ def test_catch_me_up_uses_parser_when_available(atlas, monkeypatch):
     assert body["summary"] == "Welcome back! Quiet while you were out."
 
 
+def test_frigate_cameras_lists_from_config(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        assert path == "/api/config"
+        return {"cameras": {"garage_cam": {"enabled": False}, "front_porch": {"enabled": True}}}
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    body = client.get("/atlas/frigate/cameras").json()
+    assert body["ok"] is True
+    assert {"name": "garage_cam", "enabled": False} in body["cameras"]
+    assert {"name": "front_porch", "enabled": True} in body["cameras"]
+
+
+def test_frigate_cameras_when_frigate_is_down(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return None
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    body = client.get("/atlas/frigate/cameras").json()
+    assert body == {"ok": False, "cameras": []}
+
+
+def test_print_preflight_not_configured_when_camera_missing(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {"front_porch": {"enabled": True}}}
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    body = client.get("/atlas/print/preflight").json()
+    assert body["ok"] is False
+    assert mod.PRINT_CAMERA in body["reason"]
+
+
+def test_print_preflight_reports_disabled_camera(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {mod.PRINT_CAMERA: {"enabled": False}}}
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    body = client.get("/atlas/print/preflight").json()
+    assert body["ok"] is False
+    assert "disabled" in body["reason"]
+
+
+def test_print_preflight_ok_when_camera_enabled(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}}
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    body = client.get("/atlas/print/preflight").json()
+    assert body["ok"] is True
+    assert body["camera"] == mod.PRINT_CAMERA
+    assert mod.PRINT_CAMERA in body["snapshot_url"]
+
+
+def test_print_watch_reports_only_on_transition(atlas, monkeypatch):
+    mod, client = atlas
+    responses = iter(
+        [
+            {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}},
+            {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}},
+            {"cameras": {mod.PRINT_CAMERA: {"enabled": False}}},
+            {"cameras": {mod.PRINT_CAMERA: {"enabled": False}}},
+        ]
+    )
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return next(responses)
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+
+    client.post("/atlas/print/watch-check")  # first reading, no prior state: no report
+    client.post("/atlas/print/watch-check")  # still ok: no report
+    client.post("/atlas/print/watch-check")  # transitions to not-ok: files a report
+    client.post("/atlas/print/watch-check")  # stays not-ok: no duplicate
+
+    reports = client.get("/atlas/reports", params={"app": "print"}).json()["reports"]
+    assert len(reports) == 1
+    assert "offline" in reports[0]["title"].lower()
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
