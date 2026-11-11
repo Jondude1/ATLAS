@@ -334,17 +334,20 @@ async def report(r: Report):
 
 @app.get("/atlas/brief", dependencies=[Depends(require_token)])
 def brief():
-    if _brief_cache["updated"] == 0:
-        with hub_db() as conn:
+    with hub_db() as conn:
+        urgent_rows = conn.execute(
+            "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
+        ).fetchall()
+        if _brief_cache["updated"] == 0:
             rows = conn.execute("SELECT * FROM reports ORDER BY at DESC LIMIT 50").fetchall()
-        _brief_cache["brief"] = _fallback_brief(rows)
-        _brief_cache["updated"] = _now_ms()
-        _brief_cache.setdefault("urgent", [])
-    return {
-        "brief": _brief_cache["brief"],
-        "urgent": _brief_cache.get("urgent", []),
-        "updated": _brief_cache["updated"],
-    }
+            _brief_cache["brief"] = _fallback_brief(rows)
+            _brief_cache["updated"] = _now_ms()
+    urgent = [
+        {"id": r["id"], "app": r["app"], "title": r["title"], "body": r["body"], "at": r["at"]}
+        for r in urgent_rows
+    ]
+    _brief_cache["urgent"] = urgent
+    return {"brief": _brief_cache["brief"], "urgent": urgent, "updated": _brief_cache["updated"]}
 
 
 @app.post("/atlas/ack", dependencies=[Depends(require_token)])
