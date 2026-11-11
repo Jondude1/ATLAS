@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_bg">#1B3327</color>
-    <color name="window_bg">#EEF2EE</color>
+    <color name="ic_bg">#000000</color>
+    <color name="window_bg">#FFFFFF</color>
     <style name="Theme.Atlas" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_bg</item>
         <item name="android:statusBarColor">@color/window_bg</item>

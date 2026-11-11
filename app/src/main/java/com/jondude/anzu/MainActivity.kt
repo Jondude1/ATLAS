@@ -141,16 +141,16 @@ import java.util.Locale
 /** Follows the phone's light or dark setting. */
 private var isDark by mutableStateOf(true)
 
-// Atlas's palette: a forest at dusk in dark mode, sage paper in light mode.
+// Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = if (isDark) Color(0xFFE3B655) else Color(0xFF1F5D45)
-private val OnGold: Color get() = if (isDark) Color(0xFF1B1405) else Color(0xFFFFFFFF)
-private val Cream: Color get() = if (isDark) Color(0xFFF1ECDF) else Color(0xFF13201A)
-private val Muted: Color get() = if (isDark) Color(0xFF8FA397) else Color(0xFF5E7067)
-private val Ground: Color get() = if (isDark) Color(0xFF0C1512) else Color(0xFFEEF2EE)
-private val Panel: Color get() = if (isDark) Color(0xFF16231D) else Color(0xFFFFFFFF)
-private val Fill: Color get() = if (isDark) Color(0xFF213529) else Color(0xFFE3EAE4)
-private val Hairline: Color get() = if (isDark) Color(0xFF26392F) else Color(0xFFD5DED7)
+private val Gold: Color get() = if (isDark) Color(0xFFFF6B1A) else Color(0xFFF25C05)
+private val OnGold: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
+private val Muted: Color get() = if (isDark) Color(0xFF9A9A9A) else Color(0xFF6B6B6B)
+private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+private val Panel: Color get() = if (isDark) Color(0xFF141414) else Color(0xFFF4F4F5)
+private val Fill: Color get() = if (isDark) Color(0xFF232323) else Color(0xFFE6E6E8)
+private val Hairline: Color get() = if (isDark) Color(0xFF2A2A2A) else Color(0xFFDDDDDD)
 
 /** The display face (Bricolage Grotesque) for titles and Atlas's own words. */
 private val Display = FontFamily(
@@ -159,33 +159,33 @@ private val Display = FontFamily(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFE3B655),
-    onPrimary = Color(0xFF1B1405),
-    secondary = Color(0xFF8FA397),
-    onSecondary = Color(0xFF0C1512),
-    background = Color(0xFF0C1512),
-    onBackground = Color(0xFFF1ECDF),
-    surface = Color(0xFF16231D),
-    onSurface = Color(0xFFF1ECDF),
-    surfaceVariant = Color(0xFF213529),
-    onSurfaceVariant = Color(0xFF8FA397),
-    outline = Color(0xFF3A5246),
-    error = Color(0xFFFF8A73)
+    primary = Color(0xFFFF6B1A),
+    onPrimary = Color(0xFF000000),
+    secondary = Color(0xFF9A9A9A),
+    onSecondary = Color(0xFF000000),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFFFFFFF),
+    surface = Color(0xFF141414),
+    onSurface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFF232323),
+    onSurfaceVariant = Color(0xFF9A9A9A),
+    outline = Color(0xFF3A3A3A),
+    error = Color(0xFFFF5A52)
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF1F5D45),
+    primary = Color(0xFFF25C05),
     onPrimary = Color(0xFFFFFFFF),
-    secondary = Color(0xFF5E7067),
+    secondary = Color(0xFF6B6B6B),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFEEF2EE),
-    onBackground = Color(0xFF13201A),
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF13201A),
-    surfaceVariant = Color(0xFFE3EAE4),
-    onSurfaceVariant = Color(0xFF5E7067),
-    outline = Color(0xFFB9C6BD),
-    error = Color(0xFFB3261E)
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF000000),
+    surface = Color(0xFFF4F4F5),
+    onSurface = Color(0xFF000000),
+    surfaceVariant = Color(0xFFE6E6E8),
+    onSurfaceVariant = Color(0xFF6B6B6B),
+    outline = Color(0xFFC8C8CC),
+    error = Color(0xFFC81E1E)
 )
 
 /** Text fields are soft filled wells with the label inside, no outline. */
@@ -479,7 +479,7 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
     )
 }
 
-/** Atlas's presence: a sphere of gold light over deep green that breathes, and quickens when listening or thinking. */
+/** Atlas's presence: a glowing orange sphere that breathes, and quickens and brightens when listening or thinking. */
 @Composable
 fun Orb(state: String, diameter: Dp = 148.dp) {
     val period = when (state) {
@@ -488,17 +488,17 @@ fun Orb(state: String, diameter: Dp = 148.dp) {
         "speaking" -> 1000
         else -> 3000
     }
+    // White-hot where the light falls, orange through the body, ember-dark in the shadow.
     val light = when (state) {
-        "listening" -> Color(0xFFB9F2C9)
-        "speaking" -> Color(0xFFFFF4D6)
-        else -> Color(0xFFF4D488)
+        "listening", "speaking" -> Color(0xFFFFFFFF)
+        else -> Color(0xFFFFE2C4)
     }
     val body = when (state) {
-        "listening" -> Color(0xFF2FA36B)
-        "thinking" -> Color(0xFFE3B655)
-        else -> Color(0xFFC9952B)
+        "listening" -> Color(0xFFFF8A3D)
+        "speaking" -> Color(0xFFFFA057)
+        else -> Color(0xFFFF6B1A)
     }
-    val deep = if (state == "listening") Color(0xFF0F3B2A) else Color(0xFF1F5D45)
+    val deep = if (state == "idle") Color(0xFF5A1E00) else Color(0xFF7A2B00)
     key(period) {
         val transition = rememberInfiniteTransition(label = "orb")
         val pulse by transition.animateFloat(
