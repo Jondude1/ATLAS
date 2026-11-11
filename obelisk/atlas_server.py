@@ -95,6 +95,16 @@ ACCOUNT_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_ACCOUNT_CHECK_INTERVAL_S", 
 _account_alerts_seen: set = set()
 _account_task: Optional[asyncio.Task] = None
 
+# House Steward (#23): voice-built grocery/supply lists (a plain DB-backed
+# list, since items come and go by voice, not from a hand-edited file) plus
+# maintenance clocks (vault file + cadence math, same shape as Money
+# Sentinel) that announce when due, not when dead.
+HOUSE_MAINTENANCE_FILE = Path(
+    os.environ.get("ATLAS_HOUSE_MAINTENANCE_FILE", str(VAULT / "Atlas" / "house_maintenance.md"))
+).expanduser()
+HOUSE_MAINTENANCE_CHECK_HOUR = int(os.environ.get("ATLAS_HOUSE_MAINTENANCE_CHECK_HOUR", "8"))
+_house_maintenance_task: Optional[asyncio.Task] = None
+
 # Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
 # person/car/dog/cat on its cameras today, no printer-specific camera or
 # zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
@@ -136,6 +146,7 @@ async def _atlas_lifespan(app):
             _schedule_sunday_brief()
             _schedule_outage_watch()
             _schedule_account_watch()
+            _schedule_house_maintenance()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -148,6 +159,7 @@ async def _atlas_lifespan(app):
         _schedule_sunday_brief()
         _schedule_outage_watch()
         _schedule_account_watch()
+        _schedule_house_maintenance()
         yield
 
 
@@ -335,6 +347,18 @@ def init_hub_db():
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_category ON captures(category)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_key ON captures(key)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS house_list_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_name TEXT NOT NULL DEFAULT 'grocery',
+                item TEXT NOT NULL,
+                added_at INTEGER NOT NULL,
+                done_at INTEGER
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_house_list ON house_list_items(list_name, done_at)")
         conn.commit()
 
 
@@ -384,6 +408,15 @@ class Capture(BaseModel):
     text: str
     kind: str = "note"  # idea | note | remind, as spoken
     key: Optional[str] = None
+
+
+class HouseListItem(BaseModel):
+    item: str
+    list_name: str = "grocery"
+
+
+class HouseListDone(BaseModel):
+    ids: list[int]
 
 
 def _now_ms() -> int:
@@ -1180,6 +1213,129 @@ async def account_check():
     return await _check_account_alerts()
 
 
+@app.post("/atlas/house/list/item", dependencies=[Depends(require_token)])
+def house_list_add(i: HouseListItem):
+    with hub_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO house_list_items (list_name, item, added_at) VALUES (?, ?, ?)",
+            (i.list_name, i.item, _now_ms()),
+        )
+        conn.commit()
+        item_id = cur.lastrowid
+    return {"id": item_id}
+
+
+@app.get("/atlas/house/list", dependencies=[Depends(require_token)])
+def house_list(list_name: str = "grocery", include_done: bool = False):
+    with hub_db() as conn:
+        if include_done:
+            rows = conn.execute(
+                "SELECT * FROM house_list_items WHERE list_name = ? ORDER BY added_at DESC", (list_name,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM house_list_items WHERE list_name = ? AND done_at IS NULL ORDER BY added_at ASC",
+                (list_name,),
+            ).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
+@app.post("/atlas/house/list/item/done", dependencies=[Depends(require_token)])
+def house_list_done(d: HouseListDone):
+    with hub_db() as conn:
+        conn.executemany(
+            "UPDATE house_list_items SET done_at = ? WHERE id = ? AND done_at IS NULL",
+            [(_now_ms(), i) for i in d.ids],
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+def _parse_maintenance_line(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 3 or not parts[0]:
+        return None
+    item, cadence_raw, last_done_raw = parts[0], parts[1], parts[2]
+    try:
+        cadence_days = int(float(cadence_raw))
+    except ValueError:
+        return None
+    try:
+        last_done = datetime.strptime(last_done_raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return {"item": item, "cadence_days": cadence_days, "last_done": last_done_raw, "_last_done": last_done}
+
+
+def _read_house_maintenance() -> list[dict]:
+    if not HOUSE_MAINTENANCE_FILE.exists():
+        return []
+    items = []
+    for line in HOUSE_MAINTENANCE_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parsed = _parse_maintenance_line(line)
+        if parsed:
+            items.append(parsed)
+    return items
+
+
+async def _check_house_maintenance() -> dict:
+    today = datetime.now().date()
+    filed = 0
+    items = _read_house_maintenance()
+    for it in items:
+        next_due = it["_last_done"] + timedelta(days=it["cadence_days"])
+        if today >= next_due:
+            await report(
+                Report(
+                    app="house",
+                    title=f"{it['item']} is due",
+                    body=f"Every {it['cadence_days']} days, last done {it['last_done']}",
+                    priority="normal",
+                    key=f"maintenance:{it['item']}:{it['last_done']}",
+                )
+            )
+            filed += 1
+    return {"checked": len(items), "filed": filed}
+
+
+async def _house_maintenance_loop():
+    while True:
+        await asyncio.sleep(_seconds_until_next_hour(HOUSE_MAINTENANCE_CHECK_HOUR))
+        try:
+            await _check_house_maintenance()
+        except Exception:
+            pass
+
+
+def _schedule_house_maintenance():
+    global _house_maintenance_task
+    if _house_maintenance_task is not None and not _house_maintenance_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _house_maintenance_task = loop.create_task(_house_maintenance_loop())
+
+
+@app.get("/atlas/house/maintenance", dependencies=[Depends(require_token)])
+def house_maintenance():
+    return {
+        "items": [
+            {"item": i["item"], "cadence_days": i["cadence_days"], "last_done": i["last_done"]}
+            for i in _read_house_maintenance()
+        ]
+    }
+
+
+@app.post("/atlas/house/maintenance/check", dependencies=[Depends(require_token)])
+async def house_maintenance_check():
+    return await _check_house_maintenance()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -1943,6 +2099,36 @@ async def mcp_outage_check() -> dict:
 async def mcp_account_check() -> dict:
     """Check for new account sign-in alerts logged in the vault; files any unseen ones as urgent."""
     return await account_check()
+
+
+@mcp.tool
+def mcp_house_list_add(item: str, list_name: str = "grocery") -> dict:
+    """Add an item to a household list (grocery, supplies, etc.), built by voice."""
+    return house_list_add(HouseListItem(item=item, list_name=list_name))
+
+
+@mcp.tool
+def mcp_house_list(list_name: str = "grocery", include_done: bool = False) -> dict:
+    """List a household list's items, open by default."""
+    return house_list(list_name=list_name, include_done=include_done)
+
+
+@mcp.tool
+def mcp_house_list_done(ids: list[int]) -> dict:
+    """Mark household list items done/bought by id."""
+    return house_list_done(HouseListDone(ids=ids))
+
+
+@mcp.tool
+def mcp_house_maintenance() -> dict:
+    """List household maintenance clocks (HVAC filter, car service, etc.) read from the vault."""
+    return house_maintenance()
+
+
+@mcp.tool
+async def mcp_house_maintenance_check() -> dict:
+    """Check maintenance clocks now; reports anything due or overdue."""
+    return await house_maintenance_check()
 
 
 @mcp.tool

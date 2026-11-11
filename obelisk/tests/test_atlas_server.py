@@ -944,6 +944,78 @@ def test_account_check_handles_missing_file_and_malformed_lines(atlas):
     assert resp.json() == {"checked": 0, "filed": 0}
 
 
+def test_house_list_add_list_and_mark_done(atlas):
+    mod, client = atlas
+    milk_id = client.post("/atlas/house/list/item", json={"item": "milk"}).json()["id"]
+    client.post("/atlas/house/list/item", json={"item": "eggs"})
+    client.post("/atlas/house/list/item", json={"item": "filter", "list_name": "supplies"})
+
+    grocery = client.get("/atlas/house/list").json()["items"]
+    assert {i["item"] for i in grocery} == {"milk", "eggs"}
+
+    supplies = client.get("/atlas/house/list", params={"list_name": "supplies"}).json()["items"]
+    assert len(supplies) == 1
+
+    client.post("/atlas/house/list/item/done", json={"ids": [milk_id]})
+    grocery_open = client.get("/atlas/house/list").json()["items"]
+    assert {i["item"] for i in grocery_open} == {"eggs"}
+
+    grocery_all = client.get("/atlas/house/list", params={"include_done": True}).json()["items"]
+    assert len(grocery_all) == 2
+
+
+def test_house_maintenance_check_flags_a_due_item(atlas):
+    mod, client = atlas
+    mod.HOUSE_MAINTENANCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    last_done = (mod.datetime.now().date() - mod.timedelta(days=100)).strftime("%Y-%m-%d")
+    mod.HOUSE_MAINTENANCE_FILE.write_text(f"- HVAC filter | 90 | {last_done}\n", encoding="utf-8")
+
+    resp = client.post("/atlas/house/maintenance/check")
+    assert resp.json() == {"checked": 1, "filed": 1}
+
+    reports = client.get("/atlas/reports", params={"app": "house"}).json()["reports"]
+    assert len(reports) == 1
+    assert "HVAC filter" in reports[0]["title"]
+
+
+def test_house_maintenance_check_skips_items_not_yet_due(atlas):
+    mod, client = atlas
+    mod.HOUSE_MAINTENANCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    last_done = (mod.datetime.now().date() - mod.timedelta(days=10)).strftime("%Y-%m-%d")
+    mod.HOUSE_MAINTENANCE_FILE.write_text(f"- HVAC filter | 90 | {last_done}\n", encoding="utf-8")
+
+    resp = client.post("/atlas/house/maintenance/check")
+    assert resp.json() == {"checked": 1, "filed": 0}
+    assert client.get("/atlas/reports", params={"app": "house"}).json()["reports"] == []
+
+
+def test_house_maintenance_check_is_idempotent_until_last_done_changes(atlas):
+    mod, client = atlas
+    mod.HOUSE_MAINTENANCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    old_done = (mod.datetime.now().date() - mod.timedelta(days=100)).strftime("%Y-%m-%d")
+    mod.HOUSE_MAINTENANCE_FILE.write_text(f"- HVAC filter | 90 | {old_done}\n", encoding="utf-8")
+
+    client.post("/atlas/house/maintenance/check")
+    client.post("/atlas/house/maintenance/check")
+    reports = client.get("/atlas/reports", params={"app": "house"}).json()["reports"]
+    assert len(reports) == 1
+
+    new_done = mod.datetime.now().date().strftime("%Y-%m-%d")
+    mod.HOUSE_MAINTENANCE_FILE.write_text(f"- HVAC filter | 90 | {new_done}\n", encoding="utf-8")
+    resp = client.post("/atlas/house/maintenance/check")
+    assert resp.json() == {"checked": 1, "filed": 0}  # not due again yet
+
+
+def test_house_maintenance_list_and_missing_file(atlas):
+    mod, client = atlas
+    assert client.get("/atlas/house/maintenance").json() == {"items": []}
+
+    mod.HOUSE_MAINTENANCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.HOUSE_MAINTENANCE_FILE.write_text("- Car oil change | 180 | 2026-08-01\n", encoding="utf-8")
+    items = client.get("/atlas/house/maintenance").json()["items"]
+    assert items == [{"item": "Car oil change", "cadence_days": 180, "last_done": "2026-08-01"}]
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
