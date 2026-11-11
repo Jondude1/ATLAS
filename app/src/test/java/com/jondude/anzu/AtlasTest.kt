@@ -633,7 +633,7 @@ class AtlasTest {
         assertTrue(com.jondude.anzu.assist.Mcp.servers().none { it.name == "Home Assistant" })
         Prefs.haToken = "t"
         val ha = com.jondude.anzu.assist.Mcp.servers().first { it.name == "Home Assistant" }
-        assertEquals("http://homeassistant-1.tail8dab0b.ts.net/api/mcp", ha.url)
+        assertEquals("http://100.68.172.113/api/mcp", ha.url)
         com.jondude.anzu.assist.Mcp.setEnabled("Home Assistant", false)
         assertFalse(com.jondude.anzu.assist.Mcp.servers().first { it.name == "Home Assistant" }.enabled)
         Prefs.haToken = ""
