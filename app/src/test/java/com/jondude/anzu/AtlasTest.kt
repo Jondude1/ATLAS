@@ -432,7 +432,7 @@ class AtlasTest {
         Glasses.buddieStream.value = "off"
         Glasses.active.value = "glasses"
         assertTrue(Wear.senderOnly())                      // open-ear: don't read messages aloud
-        assertEquals(0.85f, Wear.volume(), 0.001f)
+        assertEquals(1.2f, Wear.volume(), 0.001f)              // open-ear starts a little boosted
         assertTrue(Wear.eyeBreaks())
         assertFalse(Wear.repliesViaStream())
         assertTrue(Wear.promptLine().contains("open-ear"))
@@ -445,7 +445,7 @@ class AtlasTest {
         Glasses.active.value = "buddie"
         assertEquals(2, Wear.chattiness())
         assertFalse(Wear.senderOnly())                     // private: read the whole message
-        assertEquals(1f, Wear.volume(), 0.001f)
+        assertEquals(1.6f, Wear.volume(), 0.001f)
         assertFalse(Wear.eyeBreaks())
         assertTrue(Wear.promptLine().contains("Only he can hear you"))
         assertFalse(Wear.repliesViaStream())               // stream not running yet
