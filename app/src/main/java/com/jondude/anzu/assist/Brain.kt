@@ -608,6 +608,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
         if (Hub.configured()) {
+            a.put(tool("athena_run", "Run one command on Athena (Windows; PowerShell or cmd, and docker). Always asks Jon first. Use for things like restarting a container (docker restart jellyfin), checking logs (docker logs --tail 20 sonarr) or disk space. Report the gist of the output in a sentence, not the raw text.",
+                JSONObject().put("command", str("The exact command to run on Athena.")), listOf("command")))
             a.put(tool("athena_status", "What's running on Athena, Jon's Windows server: its Docker containers (Jellyfin, the *arr apps, Frigate, Nextcloud, Audiobookshelf, Piped, Node-RED and more), which are down, uptime and disk."))
         }
         if (Hub.configured() || Hermes.configured()) {
@@ -792,6 +794,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     msg
+                }
+            }
+            "athena_run" -> {
+                val cmd = input.optString("command").trim()
+                if (cmd.isBlank()) "No command given."
+                else if (!confirm("Run this on Athena: $cmd?")) "Not run: Jon didn't approve."
+                else Hub.athenaRun(cmd).let { r ->
+                    Store.logAction("Ran on Athena: ${cmd.take(80)}")
+                    (if (r.ok) "Done (exit ${r.exit}). " else if (r.exit >= 0) "It ran but failed (exit ${r.exit}). " else "") + r.out.take(1500)
                 }
             }
             "athena_status" -> Hub.athenaStatus().let { st ->
