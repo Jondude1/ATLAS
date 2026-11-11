@@ -785,9 +785,9 @@ class AtlasTest {
         assertEquals("https://api.anthropic.com/v1/messages", tailnet("https://api.anthropic.com/v1/messages"))
         val S = com.jondude.anzu.assist.Systems
         assertEquals("Jellyfin", S.find("jellyfin")!!.name)
-        val up = S.all.map { S.Check(it, true, 200) }
+        val up = S.all.map { com.jondude.anzu.assist.Systems.Check(it, true, 200) }
         assertEquals("Everything's answering: all ${S.all.size} services are up.", S.sentence(up))
-        val oneDown = up.mapIndexed { i, c -> if (c.service.name == "Frigate") S.Check(c.service, false, -1) else c }
+        val oneDown = up.mapIndexed { i, c -> if (c.service.name == "Frigate") com.jondude.anzu.assist.Systems.Check(c.service, false, -1) else c }
         assertEquals("All up except Frigate on Athena.", S.sentence(oneDown))
     }
 }
