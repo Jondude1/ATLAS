@@ -22,6 +22,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -425,7 +427,7 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
 fun Tile(modifier: Modifier, tint: Color = Panel, content: @Composable () -> Unit) {
     Column(
         modifier.clip(RoundedCornerShape(16.dp)).background(tint).padding(16.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) { content() }
 }
 
@@ -559,14 +561,15 @@ fun HomeScreen(resumes: Int) {
         }
     }
 
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+    val viewport = maxHeight
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).heightIn(min = viewport)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { LargeTitle(Prefs.name.uppercase()) }
-        }
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        LargeTitle(Prefs.name.uppercase())
+        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(20.dp))
             Orb(state, 200.dp)
             // No running transcript here: one quiet status line, and a typed answer only while it's fresh.
@@ -588,8 +591,9 @@ fun HomeScreen(resumes: Int) {
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Tile(Modifier.weight(1.5f).height(92.dp).clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Tile(Modifier.weight(1.5f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
                 Text("Wearing", color = Muted, fontSize = 13.sp)
                 Column {
                     Text(
@@ -612,7 +616,7 @@ fun HomeScreen(resumes: Int) {
                     )
                 }
             }
-            Tile(Modifier.weight(1f).height(92.dp), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
+            Tile(Modifier.weight(1f).fillMaxHeight(), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
                 Text("Battery", color = Muted, fontSize = 13.sp)
                 Text(
                     if (connected && battery >= 0) "$battery%" else "–",
@@ -699,7 +703,9 @@ fun HomeScreen(resumes: Int) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
+        }
+    }
     }
 
     if (devicesOpen) {
