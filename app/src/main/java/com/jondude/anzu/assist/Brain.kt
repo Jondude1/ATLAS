@@ -544,6 +544,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 if (b.urgent.isNotEmpty()) append("Urgent and not yet told to Jon: ").append(b.urgent.joinToString("; ") { "${it.app}: ${it.title}" }).append('\n')
                 append("For anything beyond the brief, use ask_hub rather than guessing.\n")
             }
+            append("\nHelios is Jon's coordinator agent: it oversees the builders working on you (this app and the hub on Obelisk) and has read-only access to Obelisk and Athena. helios_status reads its latest update; ask_helios passes it a message.\n")
+            append("What Jon says often arrives through a lossy speech recognizer, so names can come through as sound-alikes: \"failures\", \"Hilo's\", \"heal ious\" are probably Helios; \"obelisk\" may be spelled Obalisk; \"at less\" or \"outlas\" is Atlas; \"a theena\" is Athena; \"herpes\" is Hermes. Read for the most plausible meaning, and if a name is unclear, ask.\n")
             append("\nJon's machines on his tailnet: Obelisk (${com.jondude.anzu.OBELISK}) runs the hub, Ollama and Hermes; Athena (${com.jondude.anzu.ATHENA}) is his Windows desktop; Home Assistant is ${com.jondude.anzu.HOME_ASSISTANT.removePrefix("http://")}.\n")
             Mcp.summary().takeIf { it.isNotBlank() }?.let {
                 append("\nSystems you're connected to, whose tools you can use directly (their tool names start with x_): ").append(it).append('\n')
@@ -606,6 +608,11 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         if (Hub.configured()) {
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
+        }
+        a.put(tool("helios_status", "Helios's latest status update (Helios is Jon's coordinator agent overseeing the builders). Use for 'what's Helios saying', 'status update from Helios', 'how's the build going'. Summarize it in two or three spoken sentences."))
+        if (Hub.configured()) {
+            a.put(tool("ask_helios", "Pass a message or question to Helios. It's delivered through the hub and Helios answers on its next check, not instantly; tell Jon that.",
+                JSONObject().put("message", str("What to tell or ask Helios, in full.")), listOf("message")))
         }
         a.put(tool("service_status", "Whether Jon's self-hosted services are up, checked live over his tailnet: the hub, Ollama and HomeAgent on Obelisk, Home Assistant, and on Athena Jellyfin, Audiobookshelf, Frigate, Jellyseerr, Overseerr, Nextcloud, Node-RED, ESPHome, Radarr, Sonarr, Lidarr, Prowlarr, LazyLibrarian. Leave name empty to check all.",
             JSONObject().put("name", str("One service to check, or empty for all.")), emptyList()))
@@ -796,6 +803,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     msg
+                }
+            }
+            "helios_status" -> Helios.latest() ?: "I couldn't get Helios's latest update right now."
+            "ask_helios" -> {
+                val m = input.optString("message").trim()
+                if (m.isBlank()) "No message given." else {
+                    Hub.report("atlas", "For Helios: ${m.take(80)}", m, key = "to-helios-${System.currentTimeMillis()}")
+                    Store.logAction("Asked Helios: ${m.take(80)}")
+                    "Passed to Helios through the hub. It answers on its next check, usually within half an hour."
                 }
             }
             "service_status" -> kotlinx.coroutines.runBlocking {
@@ -1394,5 +1410,36 @@ object People {
             lines += about
         }
         return if (lines.isEmpty()) "" else "\nPeople he just mentioned, and what you know about them:\n" + lines.joinToString("\n") + "\n"
+    }
+}
+
+
+/** Helios, the coordinator: its updates are public comments on the project's coordination issue, so reading them needs no key. */
+object Helios {
+    private const val ISSUE = "https://api.github.com/repos/Jondude1/Anzu-1/issues/1/comments"
+
+    /** Picks Helios's newest comment from the issue's comment JSON (oldest first, as GitHub returns them). */
+    fun pick(json: String): String? = try {
+        val arr = JSONArray(json)
+        (arr.length() - 1 downTo 0).map { arr.getJSONObject(it) }
+            .firstOrNull { val b = it.optString("body"); b.contains("— Helios") || b.contains("## Helios") }
+            ?.let { o ->
+                val body = o.optString("body")
+                    .replace(Regex("```[\\s\\S]*?```"), " (output omitted) ")
+                    .replace(Regex("[#*`>_]+"), "")
+                    .replace(Regex("\\s+"), " ").trim()
+                "Helios, at ${o.optString("created_at").substringAfter('T').take(5)} UTC: " + body.take(2500)
+            }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. Helios's latest update in the last day, or null. */
+    fun latest(): String? = try {
+        val since = java.time.Instant.now().minusSeconds(86_400).toString()
+        val (code, body) = Net.get("$ISSUE?since=$since&per_page=100", mapOf("Accept" to "application/vnd.github+json"), 10_000)
+        if (code in 200..299) pick(body) else null
+    } catch (e: Exception) {
+        null
     }
 }

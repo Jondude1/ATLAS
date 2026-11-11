@@ -790,4 +790,14 @@ class AtlasTest {
         val oneDown = up.mapIndexed { i, c -> if (c.service.name == "Frigate") com.jondude.anzu.assist.Systems.Check(c.service, false, -1) else c }
         assertEquals("All up except Frigate on Athena.", S.sentence(oneDown))
     }
+
+    @Test
+    fun heliosLatestUpdateIsPicked() {
+        val json = """[{"created_at":"2026-11-11T13:46:48Z","body":"## Helios coordinator check\nAll green.\n— Helios (coordinator)"},
+                      {"created_at":"2026-11-11T13:50:00Z","body":"## Cloud session: thing\n_Cloud session_"}]"""
+        val s = com.jondude.anzu.assist.Helios.pick(json)!!
+        assertTrue(s.startsWith("Helios, at 13:46 UTC:"))
+        assertTrue(s.contains("All green."))
+        assertNull(com.jondude.anzu.assist.Helios.pick("[]"))
+    }
 }
