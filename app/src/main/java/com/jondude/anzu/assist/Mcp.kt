@@ -136,7 +136,7 @@ object Mcp {
     private class Reply(val code: Int, val body: String, val type: String?, val session: String?)
 
     private fun post(server: McpServer, payload: JSONObject, timeoutMs: Int): Reply {
-        val conn = URL(server.url.trim()).openConnection() as HttpURLConnection
+        val conn = URL(com.jondude.anzu.tailnet(server.url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 8_000

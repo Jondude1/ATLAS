@@ -32,7 +32,7 @@ object Net {
         method: String, url: String, headers: Map<String, String>,
         body: String? = null, timeoutMs: Int = 30_000
     ): Pair<Int, String> {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 8_000
@@ -56,7 +56,7 @@ object Net {
     fun requestBytes(
         method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int = 30_000
     ): Pair<Int, ByteArray> {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 8_000
@@ -77,7 +77,7 @@ object Net {
 
     /** Blocking POST of raw bytes. Returns (status, body). */
     fun postBytes(url: String, bytes: ByteArray, timeoutMs: Int = 30_000): Pair<Int, String> {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 8_000
@@ -607,6 +607,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
+        a.put(tool("service_status", "Whether Jon's self-hosted services are up, checked live over his tailnet: the hub and Ollama on Obelisk, Home Assistant, and on Athena Jellyfin, Audiobookshelf, Frigate, Jellyseerr, Overseerr, Nextcloud, Node-RED, ESPHome, Radarr, Sonarr, Lidarr, Prowlarr, LazyLibrarian. Leave name empty to check all.",
+            JSONObject().put("name", str("One service to check, or empty for all.")), emptyList()))
         if (Hub.configured()) {
             a.put(tool("athena_run", "Run one command on Athena (Windows; PowerShell or cmd, and docker). Always asks Jon first. Use for things like restarting a container (docker restart jellyfin), checking logs (docker logs --tail 20 sonarr) or disk space. Report the gist of the output in a sentence, not the raw text.",
                 JSONObject().put("command", str("The exact command to run on Athena.")), listOf("command")))
@@ -795,6 +797,12 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     }
                     msg
                 }
+            }
+            "service_status" -> kotlinx.coroutines.runBlocking {
+                val one = input.optString("name").takeIf { it.isNotBlank() }?.let { Systems.find(it) }
+                val checks = Systems.check(if (one != null) listOf(one) else Systems.all)
+                if (one != null) "${one.name} on ${one.machine} is ${if (checks[0].up) "up" else "not answering"}."
+                else Systems.sentence(checks) + " Up: " + checks.filter { it.up }.joinToString { it.service.name }
             }
             "athena_run" -> {
                 val cmd = input.optString("command").trim()

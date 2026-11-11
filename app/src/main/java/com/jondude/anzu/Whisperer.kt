@@ -110,7 +110,7 @@ object Whisperer {
     private fun open(start: String): HttpURLConnection {
         var url = start
         repeat(6) {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
             conn.instanceFollowRedirects = false
             conn.connectTimeout = 15_000
             conn.readTimeout = 60_000

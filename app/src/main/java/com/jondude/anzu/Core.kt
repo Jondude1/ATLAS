@@ -44,15 +44,35 @@ class LongPref(private val key: String, private val def: Long) {
     operator fun setValue(t: Any?, p: KProperty<*>, v: Long) = Prefs.sp.edit().putLong(key, v).apply()
 }
 
-// Jon's machines on his tailnet. Built in so nothing has to be typed.
+// Jon's machines on his tailnet. Built in so nothing has to be typed. Tailnet IPs are stable and don't depend on
+// MagicDNS, which isn't always active on the phone; the names are kept for display and as a fallback map.
 /** The hub on Obelisk. */
-const val OBELISK_HUB = "http://obalisk.tail8dab0b.ts.net:8765"
+const val OBELISK_HUB = "http://100.65.202.81:8765"
 /** Home Assistant (port 80). */
-const val HOME_ASSISTANT = "http://homeassistant-1.tail8dab0b.ts.net"
+const val HOME_ASSISTANT = "http://100.68.172.113"
 /** Athena, the Windows desktop. */
-const val ATHENA = "athena.tail8dab0b.ts.net"
+const val ATHENA = "100.88.113.24"
 /** Obelisk, the local AI node (Ollama, Hermes, the hub). */
-const val OBELISK = "obalisk.tail8dab0b.ts.net"
+const val OBELISK = "100.65.202.81"
+
+/** MagicDNS names → tailnet IPs, so an address typed or saved by name still works when the name won't resolve. */
+val TAILNET = mapOf(
+    "obalisk.tail8dab0b.ts.net" to "100.65.202.81",
+    "obalisk" to "100.65.202.81",
+    "athena.tail8dab0b.ts.net" to "100.88.113.24",
+    "athena" to "100.88.113.24",
+    "homeassistant-1.tail8dab0b.ts.net" to "100.68.172.113",
+    "homeassistant-1" to "100.68.172.113"
+)
+
+/** Rewrites a URL whose host is one of Jon's tailnet names to its IP. Anything else is returned unchanged. */
+fun tailnet(url: String): String = try {
+    val u = java.net.URI(url.trim())
+    val ip = u.host?.lowercase()?.let { TAILNET[it] }
+    if (ip == null) url.trim() else java.net.URI(u.scheme, u.userInfo, ip, u.port, u.path, u.query, u.fragment).toString()
+} catch (_: Exception) {
+    url.trim()
+}
 
 object Prefs {
     lateinit var sp: SharedPreferences
@@ -73,6 +93,15 @@ object Prefs {
             val e = sp.edit().putBoolean("networkDefaultsV1", true)
             if (sp.getString("obeliskUrl", "").isNullOrBlank()) e.putString("obeliskUrl", OBELISK_HUB)
             if (sp.getString("haUrl", "").isNullOrBlank()) e.putString("haUrl", HOME_ASSISTANT)
+            e.apply()
+        }
+        if (!sp.getBoolean("networkByIpV2", false)) {
+            // Older builds saved the MagicDNS names; move them to the IPs.
+            val e = sp.edit().putBoolean("networkByIpV2", true)
+            listOf("obeliskUrl", "haUrl", "ollamaUrl", "hermesUrl").forEach { k ->
+                val v = sp.getString(k, null)
+                if (!v.isNullOrBlank()) e.putString(k, tailnet(v))
+            }
             e.apply()
         }
         if (!sp.getBoolean("renamedToAtlas", false)) {

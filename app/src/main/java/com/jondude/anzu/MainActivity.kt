@@ -424,6 +424,7 @@ private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
     "Home Assistant" to (Icons.Filled.Home to "Your house and what needs a spoken okay"),
     "Connections" to (Icons.Filled.Share to "Everything Atlas can reach and control"),
     "Athena" to (Icons.Filled.Build to "Containers on Athena, and a command line to it"),
+    "Systems" to (Icons.Filled.Share to "Every service on Obelisk, Athena and the house, checked live"),
     "Hermes and your vault" to (Icons.Filled.Build to "Hand-offs to Hermes, Obsidian"),
     "Obelisk and local models" to (Icons.Filled.Lock to "Your own server and models"),
     "App" to (Icons.Filled.Info to "Version, updates, usage")
@@ -534,7 +535,7 @@ fun knowsLine(
 }
 
 private fun reachable(url: String): Boolean = try {
-    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    val c = java.net.URL(tailnet(url)).openConnection() as java.net.HttpURLConnection
     c.connectTimeout = 3000; c.readTimeout = 3000
     val ok = c.responseCode > 0
     c.disconnect(); ok
@@ -617,6 +618,43 @@ fun Orb(state: String, diameter: Dp = 240.dp) {
             }
             "speaking" -> drawCircle(orange, base * swell, c, style = stroke)
             else -> drawCircle(grey.copy(alpha = breath), base, c, style = stroke)
+        }
+    }
+}
+
+/** Every built-in service: a sentence first, then each one with an Open link. */
+@Composable
+fun SystemsPanel() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checks by remember { mutableStateOf<List<com.jondude.anzu.assist.Systems.Check>?>(null) }
+    fun refresh() = scope.launch { checks = com.jondude.anzu.assist.Systems.check() }
+    LaunchedEffect(Unit) { refresh() }
+    val c = checks
+    Text(
+        if (c == null) "Checking your systems…" else com.jondude.anzu.assist.Systems.sentence(c),
+        color = Cream, fontSize = 18.sp, lineHeight = 26.sp
+    )
+    SoftButton(onClick = { checks = null; refresh() }) { Text("Check again") }
+    c?.groupBy { it.service.machine }?.forEach { (machine, list) ->
+        Text(machine, color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp))
+        list.forEach { ch ->
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ch.service.url))) } catch (_: Exception) {}
+                }.padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (ch.up) Gold else MaterialTheme.colorScheme.error))
+                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                    Text(ch.service.name, color = Cream, fontSize = 16.sp)
+                    Text(
+                        if (ch.up) ch.service.what + (if (ch.code == 401) " · needs a key to use" else "") else "not answering",
+                        color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+                    )
+                }
+                Text("Open", color = Muted, fontSize = 14.sp)
+            }
         }
     }
 }
@@ -1420,6 +1458,8 @@ fun SettingsScreen() {
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }
+
+        Section("Systems") { SystemsPanel() }
 
         Section("Athena") { AthenaPanel() }
 

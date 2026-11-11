@@ -777,4 +777,17 @@ class AtlasTest {
         assertEquals(emptyList<String>(), P.names("What time is it on Friday?", mem))
         assertEquals(listOf("Dave runs the D&D game on Fridays"), P.facts("Dave", mem))
     }
+
+    @Test
+    fun tailnetNamesBecomeIpsAndSystemsSpeak() {
+        assertEquals("http://100.65.202.81:8765/atlas/brief", tailnet("http://obalisk.tail8dab0b.ts.net:8765/atlas/brief"))
+        assertEquals("http://100.68.172.113/api/mcp", tailnet("http://homeassistant-1.tail8dab0b.ts.net/api/mcp"))
+        assertEquals("https://api.anthropic.com/v1/messages", tailnet("https://api.anthropic.com/v1/messages"))
+        val S = com.jondude.anzu.assist.Systems
+        assertEquals("Jellyfin", S.find("jellyfin")!!.name)
+        val up = S.all.map { S.Check(it, true, 200) }
+        assertEquals("Everything's answering: all ${S.all.size} services are up.", S.sentence(up))
+        val oneDown = up.mapIndexed { i, c -> if (c.service.name == "Frigate") S.Check(c.service, false, -1) else c }
+        assertEquals("All up except Frigate on Athena.", S.sentence(oneDown))
+    }
 }
