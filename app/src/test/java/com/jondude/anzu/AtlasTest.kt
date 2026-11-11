@@ -741,4 +741,13 @@ class AtlasTest {
         listOf("say that again", "Atlas, repeat that", "what did you say?", "come again").forEach { assertTrue(it, S.isRepeatRequest(it)) }
         assertFalse(S.isRepeatRequest("repeat that to Jenna tomorrow"))
     }
+
+    @Test
+    fun bargeInStopsOnlyWhenMeant() {
+        assertEquals(true to null, Barge.decide("stop", "Atlas"))
+        assertEquals(true to null, Barge.decide("Atlas, stop.", "Atlas"))
+        assertEquals(true to "what time is it?", Barge.decide("Atlas, what time is it?", "Atlas").let { it.first to it.second?.lowercase() })
+        assertEquals(false to null, Barge.decide("I was telling him to stop by the store later today", "Atlas"))
+        assertEquals(false to null, Barge.decide("", "Atlas"))
+    }
 }

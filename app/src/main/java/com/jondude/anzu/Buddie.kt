@@ -929,8 +929,10 @@ object BuddieLink {
 
     private fun onUtterance(u: Utterance) {
         val ctx = appCtx ?: return
-        // While Atlas itself is talking or listening, what the earbuds hear is mostly Atlas.
-        if (Glasses.atlasState.value != "idle") return
+        // While Atlas itself is talking or listening, what the earbuds hear is mostly Atlas. The one exception is
+        // barge-in: if the bone-conduction sensor says Jon himself is talking over Atlas, listen for "stop" or the wake word.
+        val bargeIn = Glasses.atlasState.value == "speaking" && BuddieStats.sensorSeen && u.selfRatio > 0.5f
+        if (Glasses.atlasState.value != "idle" && !bargeIn) return
         BuddieStats.segments++
         // Keep the latest segment so it can be played back from Settings to judge the audio.
         try {
@@ -946,6 +948,17 @@ object BuddieLink {
         val mine = if (sensor) u.selfRatio > 0.3f else true
         val meeting = Glasses.meeting.value
         if (!mine && !meeting && !Prefs.buddieAmbient) return
+        if (bargeIn) {
+            Atlas.scope.launch {
+                val text = Transcriber.transcribe(ctx, u.pcm)?.trim().orEmpty()
+                val (stop, next) = Barge.decide(text, Prefs.name)
+                if (!stop) return@launch
+                BuddieStats.lastHeard = text
+                Speaker.stop()
+                if (!next.isNullOrBlank()) Atlas.heard(ctx, next)
+            }
+            return
+        }
         Atlas.scope.launch {
             order.withLock {
                 val text = Transcriber.transcribe(ctx, u.pcm)?.trim().orEmpty()
@@ -983,5 +996,22 @@ object BuddieLink {
                 }
             }
         }
+    }
+}
+
+
+/** Talking over Atlas: "stop" (with or without its name) just stops it; its name plus a request stops it and asks. */
+object Barge {
+    private val stopWords = Regex("^\\W*(stop|quiet|shush|hush|enough|hold on|wait|never ?mind|ok(ay)?,? stop)\\b", RegexOption.IGNORE_CASE)
+
+    fun decide(text: String, name: String): Pair<Boolean, String?> {
+        val t = text.trim()
+        if (t.isEmpty()) return false to null
+        val cmd = Wake.extract(t, name)
+        if (cmd != null) {
+            val c = cmd.trim()
+            return true to (if (c.isEmpty() || stopWords.containsMatchIn(c)) null else c)
+        }
+        return (stopWords.containsMatchIn(t) && t.split(Regex("\\s+")).size <= 4) to null
     }
 }

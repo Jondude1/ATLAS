@@ -142,11 +142,15 @@ object Speaker : TextToSpeech.OnInitListener {
     }
 
     /** Premium voice: fetch the audio, then play it. False means fall back to the phone voice. */
+    @Volatile
+    private var cloudDone: CompletableDeferred<Unit>? = null
+
     private suspend fun sayCloud(text: String, volume: Float): Boolean {
         val audio = withContext(Dispatchers.IO) { CloudVoice.synth(text) } ?: return false
         val file = java.io.File(appCtx.cacheDir, "speech.mp3")
         withContext(Dispatchers.IO) { file.writeBytes(audio) }
         val done = CompletableDeferred<Unit>()
+        cloudDone = done
         val mp = android.media.MediaPlayer()
         return try {
             mp.setAudioAttributes(attrs)
@@ -214,6 +218,7 @@ object Speaker : TextToSpeech.OnInitListener {
             player?.stop()
         } catch (_: Exception) {
         }
+        cloudDone?.complete(Unit)
         tts?.stop()
         waiters.values.forEach { it.complete(Unit) }
         waiters.clear()
