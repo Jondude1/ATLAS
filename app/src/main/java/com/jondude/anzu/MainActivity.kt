@@ -355,6 +355,8 @@ fun AppRoot(resumes: Int) {
                 ) {
                     Text("${Prefs.name} is asking", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
                     Text(a.question, color = Cream, fontSize = 18.sp, lineHeight = 26.sp)
+                    val nod by com.jondude.anzu.assist.Approvals.nodAvailable.collectAsState()
+                    if (nod) Text("Nod to approve, shake your head to decline.", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { com.jondude.anzu.assist.Approvals.answer(a.id, true) },
@@ -1502,6 +1504,12 @@ fun SettingsScreen() {
                     2 -> "Listens through the phone's own mics; replies still play in your buds or glasses."
                     else -> "Listens through whatever you're wearing, or the phone if nothing is."
                 } + if (lastMic.isNotBlank()) " Last listened through: $lastMic." else "",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
+            val ctxHt = LocalContext.current
+            val headTracker = remember { com.jondude.anzu.assist.HeadGesture.tracker(ctxHt)?.name }
+            Text(
+                if (headTracker != null) "Head tracking: $headTracker. Nod to approve, shake to decline." else "Head tracking: none from your current headset, so approvals use the card or a spoken yes.",
                 color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
             )
             val wakeNow by WakeListener.state.collectAsState()

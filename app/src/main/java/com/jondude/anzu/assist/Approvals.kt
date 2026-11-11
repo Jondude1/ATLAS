@@ -24,6 +24,8 @@ object Approvals {
     }
 
     val pending = MutableStateFlow<Ask?>(null)
+    /** True while a pending approval can be answered with a nod or shake. */
+    val nodAvailable = MutableStateFlow(false)
     private const val CHANNEL = "atlas_approvals"
     const val ACTION = "com.jondude.anzu.APPROVAL"
     private const val WAIT_MS = 120_000L
@@ -33,7 +35,10 @@ object Approvals {
         pending.value?.answer?.complete(false) // only one question at a time; an older one lapses
         pending.value = a
         notify(ctx.applicationContext, a)
-        val ok = withTimeoutOrNull(WAIT_MS) { a.answer.await() } ?: false
+        // A nod approves, a shake declines, when the headset reports head motion.
+        val stopNod = HeadGesture.listen(ctx.applicationContext) { yes -> a.answer.complete(yes) }
+        nodAvailable.value = stopNod != null
+        val ok = try { withTimeoutOrNull(WAIT_MS) { a.answer.await() } ?: false } finally { stopNod?.invoke(); nodAvailable.value = false }
         if (pending.value === a) pending.value = null
         cancel(ctx.applicationContext)
         val verdict = if (ok) "Approved" else if (a.answer.isCompleted) "Declined" else "Lapsed (no answer)"

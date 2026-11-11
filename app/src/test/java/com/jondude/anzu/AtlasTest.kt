@@ -963,4 +963,21 @@ class AtlasTest {
         repeat(12) { G.background(200.0, t + 20_000 + it * 1_000L) }; assertFalse(G.loud)
         G.reset()
     }
+
+    @Test
+    fun nodAndShakeAreRecognised() {
+        val H = com.jondude.anzu.assist.HeadGesture
+        fun wave(axisPitch: Boolean, amp: Float, cycles: Float, ms: Long = 1200, other: Float = 0.02f) =
+            (0..24).map { i ->
+                val t = i * ms / 24
+                val v = amp * kotlin.math.sin(2 * Math.PI * cycles * i / 24).toFloat()
+                val o = other * kotlin.math.sin(2 * Math.PI * i / 24).toFloat()
+                if (axisPitch) H.Sample(t, v, o) else H.Sample(t, o, v)
+            }
+        assertEquals("nod", H.detect(wave(true, 0.3f, 1.5f)))
+        assertEquals("shake", H.detect(wave(false, 0.35f, 1.5f)))
+        assertNull(H.detect(wave(true, 0.05f, 1.5f)))                 // tiny bob while walking
+        assertNull(H.detect(wave(true, 0.3f, 0.4f)))                  // looking down once isn't a nod
+        assertNull(H.detect(wave(true, 0.3f, 1.5f, other = 0.3f)))    // circling the head: neither
+    }
 }
