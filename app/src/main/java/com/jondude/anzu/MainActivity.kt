@@ -155,7 +155,7 @@ private var isDark by mutableStateOf(true)
 
 // Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = Color(0xFFFF5C00)
+private val Gold: Color get() = if (com.jondude.anzu.assist.Discretion.grayscale()) Color(0xFF9A9A9A) else Color(0xFFFF5C00)
 private val OnGold: Color get() = Color(0xFF000000)
 private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
 private val Muted: Color get() = if (isDark) Color(0xFF888888) else Color(0xFF777777)
@@ -903,6 +903,20 @@ fun HomeScreen(resumes: Int) {
             color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp)
         )
         Spacer(Modifier.height(12.dp))
+        val heldNow by Glasses.heldItems.collectAsState()
+        if (heldNow.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Held for later" + (com.jondude.anzu.assist.Discretion.current()?.let { " · $it" } ?: ""),
+                    color = Cream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                )
+                Text("Clear", color = Muted, fontSize = 14.sp, modifier = Modifier.clickable { Glasses.takeHeld() }.padding(8.dp))
+            }
+            heldNow.takeLast(6).reversed().forEach { line ->
+                Text(line, color = Muted, fontSize = 16.sp, lineHeight = 22.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(16.dp))
+                Spacer(Modifier.height(8.dp))
+            }
+        }
         if (!awake && Prefs.apiKey.isNotBlank()) {
             Button(enabled = !waking, modifier = Modifier.fillMaxWidth().height(52.dp), onClick = {
                 waking = true
@@ -1243,6 +1257,11 @@ fun SettingsScreen() {
         }
 
         Section("Presence") {
+            Text("Keeping it down", color = Cream, fontSize = 16.sp)
+            Text("At the D&D table, with guests over, after bedtime and during work hours, ${Prefs.name} holds low-priority things as cards on Home instead of speaking. Urgent things and your own questions still come through. Say \"${Prefs.name}, guests are here\" to turn on guest mode.", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
+            ToggleRow("During work hours (weekdays ${Prefs.workStart}:00–${Prefs.workEnd}:00)", null, Prefs.workDiscretion) { Prefs.workDiscretion = it }
+            ToggleRow("Grayscale after bedtime (${Prefs.bedtimeHour}:00–${Prefs.wakeHour}:00)", null, Prefs.grayscaleNight) { Prefs.grayscaleNight = it }
+
             ToggleRow("Speak up on its own", "Random check-ins, thoughts and questions through the day", Prefs.proactive) { Prefs.proactive = it }
             Text("How often it speaks is set per wearable below.", color = Muted, fontSize = 12.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

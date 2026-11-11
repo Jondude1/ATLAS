@@ -879,4 +879,20 @@ class AtlasTest {
         assertEquals("off", d(on = false).why)
         assertTrue(d(allowed = false).why.contains("open Atlas once"))
     }
+
+    @Test
+    fun discretionKnowsWhenToKeepItDown() {
+        val D = com.jondude.anzu.assist.Discretion
+        fun r(hour: Int = 14, weekday: Boolean = false, event: String? = null, meeting: Boolean = false, guests: Boolean = false, work: Boolean = true) =
+            D.reason(hour, weekday, event, meeting, guests, 23, 7, work, 8, 17)
+        assertNull(r())                                              // Saturday afternoon: speak freely
+        assertEquals("at the table", r(event = "D&D — Curse of Strahd"))
+        assertEquals("at the table", r(meeting = true))
+        assertEquals("guests over", r(guests = true))
+        assertEquals("lights out", r(hour = 23)); assertEquals("lights out", r(hour = 3))
+        assertNull(r(hour = 7))
+        assertEquals("work hours", r(hour = 10, weekday = true))
+        assertNull(r(hour = 10, weekday = true, work = false))
+        assertNull(r(event = "Dentist"))
+    }
 }

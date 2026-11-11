@@ -638,6 +638,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         a.put(tool("undo", "Reverse the last action you took, where possible."))
         a.put(tool("quiet", "Stop speaking up on your own for a while.",
             JSONObject().put("minutes", num("How long to stay quiet.")), listOf("minutes")))
+        a.put(tool("guests", "Jon has company (or it's over). While guests are over you hold low-priority things as cards instead of speaking; urgent things still come through.",
+            JSONObject().put("hours", num("How long, in hours; 0 means they've gone. Default until midnight.")), emptyList()))
         a.put(tool("status", "Check your own systems: glasses battery and link, Obelisk, Home Assistant, latency."))
         if (HomeAssistant.configured()) {
             a.put(tool("home_assistant", "Control Jon's smart home by plain-language command.",
@@ -900,6 +902,16 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 Prefs.quietUntil = System.currentTimeMillis() + (input.optDouble("minutes", 60.0) * 60_000).toLong()
                 lastUndo = { Prefs.quietUntil = before; "Quiet time cancelled." }
                 "Okay, staying quiet."
+            }
+            "guests" -> {
+                val h = input.optDouble("hours", -1.0)
+                if (h == 0.0) { Prefs.guestsUntil = 0; "Got it, back to normal." }
+                else {
+                    val until = if (h > 0) System.currentTimeMillis() + (h * 3_600_000).toLong() else
+                        java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, 1); set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0) }.timeInMillis
+                    Prefs.guestsUntil = until
+                    "Okay. I'll keep things to cards while they're here."
+                }
             }
             "status" -> statusReport()
             "home_state" -> HomeAssistant.summary()

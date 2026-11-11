@@ -547,6 +547,7 @@ class GlassesService : Service() {
             return
         }
         if (!inActiveHours() || !interruptible()) return
+        if (com.jondude.anzu.assist.Discretion.current(this) != null) return // no unprompted chatter at the table, at work, with guests or at lights-out
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         if (Prefs.journal && hour >= Prefs.journalHour && Prefs.lastJournalDay != today()) {
             Prefs.lastJournalDay = today()

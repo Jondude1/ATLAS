@@ -193,6 +193,12 @@ object Atlas {
      */
     fun polite(text: String, maxWaitMs: Long = 10 * 60_000L, source: String = "") {
         // A kind of line Jon keeps cutting off gets a soft bell and a place in the brief instead of speech.
+        // At the table, with guests, at lights-out or during work: hold it as a card instead of speaking.
+        Discretion.current()?.let { why ->
+            if (why == "work hours") Earcons.play("notice")
+            Glasses.hold(text)
+            return
+        }
         if (Interrupts.muted(source)) {
             Earcons.play("notice")
             Glasses.hold(text)

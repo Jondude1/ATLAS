@@ -195,6 +195,14 @@ object Prefs {
     var micSource by IntPref("micSource", 0)
     /** Hands-free "Atlas" through a headset or the phone (WakeListener). On by default. */
     var wakeListen by BoolPref("wakeListen", true)
+    // Context Discretion
+    var guestsUntil by LongPref("guestsUntil", 0L)
+    var bedtimeHour by IntPref("bedtimeHour", 23)
+    var wakeHour by IntPref("wakeHourMorning", 7)
+    var workDiscretion by BoolPref("workDiscretion", true)
+    var workStart by IntPref("workStart", 8)
+    var workEnd by IntPref("workEnd", 17)
+    var grayscaleNight by BoolPref("grayscaleNight", true)
     var lastWake by LongPref("lastWake", 0L)
     var lastWakeSource by StrPref("lastWakeSource", "")
 
@@ -621,13 +629,18 @@ object Glasses {
         held.add(line)
         while (held.size > 30) held.removeAt(0)
         heldCount.value = held.size
+        heldItems.value = held.toList()
     }
+
+    /** The held lines themselves, for the cards on Home. */
+    val heldItems = MutableStateFlow<List<String>>(emptyList())
 
     @Synchronized
     fun takeHeld(): List<String> {
         val h = held.toList()
         held.clear()
         heldCount.value = 0
+        heldItems.value = emptyList()
         return h
     }
 
