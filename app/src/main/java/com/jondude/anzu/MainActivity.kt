@@ -1049,7 +1049,7 @@ fun SettingsScreen() {
             ToggleRow("Discreet", "People nearby can hear open-ear speakers: short replies, and nothing private said out loud", Prefs.discreetGlasses) { Prefs.discreetGlasses = it }
             ToggleRow("Notifications: sender only", "Say who it's from, not what it says", Prefs.senderOnlyGlasses) { Prefs.senderOnlyGlasses = it }
 
-            Text("In the Buddie earbuds or Pixel Buds (private)", fontWeight = FontWeight.Bold)
+            Text("In the earbuds (private)", fontWeight = FontWeight.Bold)
             Text("Speaks up " + often[chatBuds.toInt().coerceIn(0, 2)])
             Slider(value = chatBuds, onValueChange = { chatBuds = it; Prefs.chattinessBuds = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Volume ${volBuds.toInt()}%")
