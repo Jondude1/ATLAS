@@ -850,9 +850,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 }
             }
             else -> {
-                val t = Mcp.find(name) ?: return "Unknown tool."
-                val what = "${t.server} ${t.name} ${input}"
-                when (zone(what)) {
+                val t = Mcp.find(name)
+                if (t == null) "Unknown tool." else when (zone("${t.server} ${t.name} ${input}")) {
                     2 -> "Refused: that touches something Jon has blocked from voice control."
                     1 -> if (confirm("Okay to have ${t.server} do this: ${t.name.replace('_', ' ')}?")) {
                         Store.logAction("${t.server}: ${t.name} (confirmed)")
