@@ -21,6 +21,15 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -46,7 +55,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -59,7 +67,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -145,48 +152,97 @@ private var isDark by mutableStateOf(true)
 
 // Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = if (isDark) Color(0xFFFF5C00) else Color(0xFFFF5C00)
+private val Gold: Color get() = Color(0xFFFF5C00)
 private val OnGold: Color get() = Color(0xFF000000)
-private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
-private val Muted: Color get() = if (isDark) Color(0xFF8E8E93) else Color(0xFF6B6B6B)
-private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-private val Panel: Color get() = if (isDark) Color(0xFF161616) else Color(0xFFF5F5F5)
-private val Fill: Color get() = if (isDark) Color(0xFF242424) else Color(0xFFE8E8E8)
-private val Hairline: Color get() = if (isDark) Color(0xFF333333) else Color(0xFFD9D9D9)
+private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF110E0C)
+private val Muted: Color get() = if (isDark) Color(0xFFA3968F) else Color(0xFF6B605A)
+private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFF2EFEA)
+private val Panel: Color get() = if (isDark) Color(0xFF120F0D) else Color(0xFFE6E1DC)
+private val Fill: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
+private val Hairline: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
+private val Dim: Color get() = if (isDark) Color(0xFF732E00) else Color(0xFFFFA366)
 
-/** The display face (Bricolage Grotesque) for titles and Atlas's own words. */
+/** Chamfered corners, like machined hardware: used on buttons and inputs. Panels are plain rectangles. */
+private val Chamfer = androidx.compose.foundation.shape.CutCornerShape(topEnd = 4.dp, bottomStart = 4.dp)
+private val Flat = androidx.compose.ui.graphics.RectangleShape
+
+/** Space Mono everywhere: the whole app reads as one telemetry console. */
 private val Display = FontFamily(
-    Font(R.font.bricolage_bold, FontWeight.Bold),
-    Font(R.font.bricolage_medium, FontWeight.Medium)
+    Font(R.font.space_mono_regular, FontWeight.Normal),
+    Font(R.font.space_mono_regular, FontWeight.Medium),
+    Font(R.font.space_mono_bold, FontWeight.SemiBold),
+    Font(R.font.space_mono_bold, FontWeight.Bold)
 )
+
+private val ConsoleType = androidx.compose.material3.Typography().let { t ->
+    androidx.compose.material3.Typography(
+        displayLarge = t.displayLarge.copy(fontFamily = Display), displayMedium = t.displayMedium.copy(fontFamily = Display),
+        displaySmall = t.displaySmall.copy(fontFamily = Display), headlineLarge = t.headlineLarge.copy(fontFamily = Display),
+        headlineMedium = t.headlineMedium.copy(fontFamily = Display), headlineSmall = t.headlineSmall.copy(fontFamily = Display),
+        titleLarge = t.titleLarge.copy(fontFamily = Display), titleMedium = t.titleMedium.copy(fontFamily = Display),
+        titleSmall = t.titleSmall.copy(fontFamily = Display), bodyLarge = t.bodyLarge.copy(fontFamily = Display),
+        bodyMedium = t.bodyMedium.copy(fontFamily = Display), bodySmall = t.bodySmall.copy(fontFamily = Display),
+        labelLarge = t.labelLarge.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.2.sp),
+        labelMedium = t.labelMedium.copy(fontFamily = Display), labelSmall = t.labelSmall.copy(fontFamily = Display)
+    )
+}
+private val ConsoleShapes = androidx.compose.material3.Shapes(
+    extraSmall = Flat, small = Flat, medium = Flat, large = Flat, extraLarge = Flat
+)
+
+/** Every button in the app: chamfered, never a pill. */
+@Composable
+private fun Button(
+    onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
+    colors: androidx.compose.material3.ButtonColors = ButtonDefaults.buttonColors(),
+    elevation: androidx.compose.material3.ButtonElevation? = null,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) = androidx.compose.material3.Button(
+    onClick = onClick, modifier = modifier, enabled = enabled, shape = Chamfer, colors = colors, elevation = elevation, content = content
+)
+
+/** A hardware toggle: an empty square when off, filled orange with a black centre when on. */
+@Composable
+private fun Switch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, colors: androidx.compose.material3.SwitchColors? = null) {
+    Box(
+        Modifier.size(48.dp).clickable(role = androidx.compose.ui.semantics.Role.Switch) { onCheckedChange(!checked) },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier.size(24.dp).background(if (checked) Gold else Color.Transparent)
+                .border(1.dp, if (checked) Gold else Muted),
+            contentAlignment = Alignment.Center
+        ) { if (checked) Box(Modifier.size(8.dp).background(OnGold)) }
+    }
+}
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFFF5C00),
     onPrimary = Color(0xFF000000),
-    secondary = Color(0xFF9A9A9A),
+    secondary = Color(0xFFA3968F),
     onSecondary = Color(0xFF000000),
     background = Color(0xFF000000),
     onBackground = Color(0xFFFFFFFF),
-    surface = Color(0xFF141414),
+    surface = Color(0xFF120F0D),
     onSurface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFF232323),
-    onSurfaceVariant = Color(0xFF9A9A9A),
-    outline = Color(0xFF3A3A3A),
+    surfaceVariant = Color(0xFF1E1815),
+    onSurfaceVariant = Color(0xFFA3968F),
+    outline = Color(0xFFA3968F),
     error = Color(0xFFFF5A52)
 )
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFFFF5C00),
     onPrimary = Color(0xFF000000),
-    secondary = Color(0xFF6B6B6B),
+    secondary = Color(0xFF6B605A),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFFFFFFF),
-    onBackground = Color(0xFF000000),
-    surface = Color(0xFFF4F4F5),
-    onSurface = Color(0xFF000000),
-    surfaceVariant = Color(0xFFE6E6E8),
-    onSurfaceVariant = Color(0xFF6B6B6B),
-    outline = Color(0xFFC8C8CC),
+    background = Color(0xFFF2EFEA),
+    onBackground = Color(0xFF110E0C),
+    surface = Color(0xFFE6E1DC),
+    onSurface = Color(0xFF110E0C),
+    surfaceVariant = Color(0xFFD5CFC9),
+    onSurfaceVariant = Color(0xFF6B605A),
+    outline = Color(0xFF6B605A),
     error = Color(0xFFC81E1E)
 )
 
@@ -231,7 +287,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             isDark = isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (isDark) DarkColors else LightColors) {
+            MaterialTheme(colorScheme = if (isDark) DarkColors else LightColors, typography = ConsoleType, shapes = ConsoleShapes) {
                 AppRoot(resumes.intValue)
             }
         }
@@ -259,22 +315,30 @@ fun AppRoot(resumes: Int) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // A flat bar: icons only, and orange marks where you are.
+            // A flat bar: a short orange line sits above the tab you are on.
             val items = listOf(
-                "Atlas" to Icons.Filled.Home,
-                "Notes" to Icons.Filled.Create,
-                "Whisper" to Icons.Filled.Notifications,
-                "Settings" to Icons.Filled.Settings
+                "Atlas" to Icons.Outlined.Home,
+                "Notes" to Icons.Outlined.Create,
+                "Whisper" to Icons.Outlined.Notifications,
+                "Settings" to Icons.Outlined.Settings
             )
             Column(Modifier.fillMaxWidth().background(Ground)) {
                 HorizontalDivider(color = Hairline, thickness = 1.dp)
-                Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().height(64.dp)) {
                     items.forEachIndexed { i, (label, icon) ->
-                        Box(
+                        Column(
                             Modifier.weight(1f).height(64.dp).clickable { tab = i },
-                            contentAlignment = Alignment.Center
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(icon, contentDescription = label, tint = if (tab == i) Gold else Muted, modifier = Modifier.size(26.dp))
+                            Box(Modifier.width(28.dp).height(2.dp).background(if (tab == i) Gold else Color.Transparent))
+                            Spacer(Modifier.height(10.dp))
+                            Icon(icon, contentDescription = label, tint = if (tab == i) Gold else Muted, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                (if (i == 0) "Home" else label).uppercase(), fontSize = 10.sp, letterSpacing = 0.5.sp,
+                                color = if (tab == i) Cream else Muted,
+                                modifier = Modifier.clearAndSetSemantics { }
+                            )
                         }
                     }
                 }
@@ -286,7 +350,7 @@ fun AppRoot(resumes: Int) {
             if (rel != null && !dismissed) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = Flat,
                     colors = CardDefaults.cardColors(containerColor = Panel)
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -318,8 +382,8 @@ fun AppRoot(resumes: Int) {
 @Composable
 fun LargeTitle(text: String) {
     Text(
-        text, fontFamily = Display, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Cream,
-        letterSpacing = (-0.5).sp, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp)
+        text.uppercase(), fontFamily = Display, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Cream,
+        letterSpacing = 2.4.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
     )
 }
 
@@ -351,22 +415,24 @@ fun Section(title: String, content: @Composable () -> Unit) {
         val (icon, subtitle) = settingsIndex[title] ?: (Icons.Filled.Settings to "")
         Column(Modifier.fillMaxWidth().clickable { nav.open(title) }) {
             Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(24.dp))
-                Column(Modifier.weight(1f).padding(start = 20.dp, end = 12.dp)) {
+                Box(Modifier.size(32.dp).background(Panel), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+                }
+                Column(Modifier.weight(1f).padding(start = 16.dp, end = 12.dp)) {
                     Text(title, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
+                Text(">", color = Muted, fontSize = 16.sp)
             }
-            HorizontalDivider(color = Hairline, thickness = 1.dp, modifier = Modifier.padding(start = 44.dp))
+            HorizontalDivider(color = Hairline, thickness = 1.dp)
         }
         return
     }
     if (nav != null && nav.page != title) return
     Column {
         if (nav == null) Text(
-            title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 20.sp,
-            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp, top = 6.dp)
+            "// " + title.uppercase().replace(' ', '_'), color = Gold, fontSize = 10.sp, letterSpacing = 0.5.sp,
+            modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
         )
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             content()
@@ -406,7 +472,7 @@ fun EmptyHint(text: String) {
 fun Bubble(speaker: String, text: String, mine: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
-            Modifier.fillMaxWidth(0.86f).clip(RoundedCornerShape(16.dp))
+            Modifier.fillMaxWidth(0.86f).clip(Flat)
                 .background(if (mine) Fill else Panel).padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Text(speaker, color = if (mine) Gold else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -415,22 +481,44 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
     }
 }
 
-/** A small outlined action: 40dp tall, hairline border, no fill. */
+/** A tiny overhead label, like BATT // on an instrument. */
 @Composable
-fun QuietButton(label: String, onClick: () -> Unit) {
-    androidx.compose.material3.OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.height(40.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Hairline),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cream)
-    ) { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
+fun Label(text: String, color: Color = Muted) {
+    Text(text, color = color, fontSize = 10.sp, letterSpacing = 0.5.sp, maxLines = 1)
 }
+
+/** One cell of the telemetry grid: label above, value below. */
+@Composable
+fun Readout(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = Cream) {
+    Column(modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Label(label)
+        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+/** An outlined console action, e.g. [ FORCE ]. */
+@Composable
+fun ConsoleButton(label: String, tint: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    androidx.compose.material3.OutlinedButton(
+        onClick = onClick, modifier = modifier.height(48.dp), shape = Chamfer,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tint),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = tint)
+    ) { Text(label, maxLines = 1) }
+}
+
+private fun reachable(url: String): Boolean = try {
+    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    c.connectTimeout = 3000; c.readTimeout = 3000
+    val ok = c.responseCode > 0
+    c.disconnect(); ok
+} catch (e: Exception) { false }
 
 /** One cell of the home screen's grid. */
 @Composable
 fun Tile(modifier: Modifier, tint: Color = Panel, content: @Composable () -> Unit) {
     Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(tint).padding(16.dp),
+        modifier.clip(Flat).background(tint).padding(16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) { content() }
 }
@@ -463,46 +551,69 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
         singleLine = lines == 1,
         minLines = lines,
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        shape = RoundedCornerShape(16.dp),
+        shape = Flat,
         colors = fieldColors(),
         modifier = Modifier.fillMaxWidth()
     )
 }
 
-/** Atlas's presence: a flat orange ring with a slow heartbeat. When it listens, thinks or speaks, rings ripple outward. */
+/**
+ * The scope: a thin ring with four crosshair ticks. Idle, one dot orbits the rim. Listening, a dashed
+ * ring turns in the centre. Thinking, three bars rise and fall. Speaking, a waveform runs across.
+ */
 @Composable
-fun Orb(state: String, diameter: Dp = 148.dp) {
-    val active = state != "idle"
-    val period = when (state) {
-        "listening" -> 1400
-        "thinking" -> 800
-        "speaking" -> 1100
-        else -> 3200
-    }
+fun Orb(state: String, diameter: Dp = 240.dp) {
     val orange = Color(0xFFFF5C00)
-    key(period) {
-        val transition = rememberInfiniteTransition(label = "orb")
-        val beat by transition.animateFloat(
-            initialValue = 0f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "beat"
-        )
-        val ripple by transition.animateFloat(
-            initialValue = 0f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Restart), label = "ripple"
-        )
-        Canvas(Modifier.size(diameter)) {
-            val c = Offset(size.width / 2, size.height / 2)
-            val base = size.minDimension * 0.27f
-            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-            if (active) {
-                // three rings travelling outward, fading as they go
-                for (k in 0 until 3) {
-                    val t = (ripple + k / 3f) % 1f
-                    drawCircle(orange.copy(alpha = (1f - t) * 0.55f), base + t * (size.minDimension / 2 - base), c, style = stroke)
-                }
-                drawCircle(orange, base * (0.34f + 0.06f * beat), c)
+    val rim = if (isDark) Color(0xFF3A302B) else Color(0xFFBDB5AE)
+    val transition = rememberInfiniteTransition(label = "scope")
+    val orbit by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(5000, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "orbit"
+    )
+    val wave by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "wave"
+    )
+    Canvas(Modifier.size(diameter)) {
+        val c = Offset(size.width / 2, size.height / 2)
+        val r = size.minDimension / 2 - 4.dp.toPx()
+        val tau = (2 * Math.PI).toFloat()
+        drawCircle(rim, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
+        for (k in 0 until 4) {
+            val a = k * tau / 4
+            val dx = kotlin.math.cos(a); val dy = kotlin.math.sin(a)
+            drawLine(rim, Offset(c.x + dx * r, c.y + dy * r), Offset(c.x + dx * (r - 8.dp.toPx()), c.y + dy * (r - 8.dp.toPx())), 1.dp.toPx())
+        }
+        when (state) {
+            "listening" -> {
+                val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 10.dp.toPx()), wave * 20.dp.toPx())
+                drawCircle(orange, r * 0.42f, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), pathEffect = dash))
             }
-            drawCircle(orange.copy(alpha = if (active) 1f else 0.6f + 0.4f * beat), base * (1f + 0.03f * beat), c, style = stroke)
+            "thinking" -> {
+                for (k in 0 until 3) {
+                    val t = 0.5f + 0.5f * kotlin.math.sin(tau * (wave * (k + 2) + k * 0.31f))
+                    val h = 10.dp.toPx() + 70.dp.toPx() * t
+                    val x = c.x + (k - 1) * 14.dp.toPx()
+                    drawLine(orange, Offset(x, c.y - h / 2), Offset(x, c.y + h / 2), 4.dp.toPx())
+                }
+            }
+            "speaking" -> {
+                val path = androidx.compose.ui.graphics.Path()
+                val half = r * 0.7f
+                val swell = 0.55f + 0.45f * kotlin.math.sin(tau * wave * 3)
+                for (i in 0..60) {
+                    val u = i / 60f
+                    val envelope = kotlin.math.sin(Math.PI.toFloat() * u)
+                    val y = c.y + 26.dp.toPx() * swell * envelope * kotlin.math.sin(tau * (u * 3f - wave * 4))
+                    val x = c.x - half + 2 * half * u
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path, orange, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+            }
+            else -> {
+                val a = orbit * tau - tau / 4
+                drawCircle(orange, 2.5.dp.toPx(), Offset(c.x + kotlin.math.cos(a) * r, c.y + kotlin.math.sin(a) * r))
+            }
         }
     }
 }
@@ -556,6 +667,25 @@ fun HomeScreen(resumes: Int) {
         }
     }
 
+    // Real links only: the hub on Obelisk and Home Assistant, checked once a minute while this screen is up.
+    var hubUp by remember { mutableStateOf<Boolean?>(null) }
+    var haUp by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(resumes) {
+        while (true) {
+            hubUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                reachable(Prefs.obeliskUrl.trim().trimEnd('/') + "/atlas/status")
+            }
+            haUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { reachable(Prefs.haUrl.trim()) }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+    // Days since ATLAS was first installed.
+    val sol = remember {
+        try {
+            ((System.currentTimeMillis() - ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime) / 86_400_000L).toInt()
+        } catch (e: Exception) { 0 }
+    }
+
     fun send() {
         val t = typed.trim()
         if (t.isNotEmpty()) {
@@ -572,84 +702,99 @@ fun HomeScreen(resumes: Int) {
             .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Layout from the design review: title, the ring centred with one status line,
-        // then metrics, quick actions, and the message field resting at the bottom.
-        Text(
-            Prefs.name.uppercase(), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream,
-            modifier = Modifier.padding(top = 16.dp)
-        )
+        // A telemetry console: title bar, the scope, a grid of readouts, the command line, three actions.
+        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                Prefs.name.uppercase() + "_SYS", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Cream,
+                letterSpacing = 2.sp, modifier = Modifier.weight(1f)
+            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Label("SOL: " + String.format(Locale.US, "%03d", sol), Gold)
+                Label("LINK: " + when (hubUp) { true -> "UP"; false -> "DOWN"; else -> "--" })
+            }
+        }
         Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            // Tapping the ring starts talking.
+            // Tapping the scope starts talking.
             Box(
                 Modifier.clip(CircleShape).clickable(onClickLabel = "Talk") { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }
-            ) { Orb(state, 168.dp) }
+            ) { Orb(state, 240.dp) }
             Spacer(Modifier.height(16.dp))
-            Text(
-                when (state) {
-                    "listening" -> "Listening"
-                    "thinking" -> "Thinking"
-                    "speaking" -> "Speaking"
-                    else -> if (connected) "With you" else "Standing by"
-                },
-                fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Cream
+            Label(
+                "STATUS: " + when (state) {
+                    "listening" -> "RX_OPEN"
+                    "thinking" -> "PROCESSING"
+                    "speaking" -> "TX_OPEN"
+                    else -> "AWAITING"
+                }
             )
             if (replyUntil > 0 && said.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(said, color = Muted, fontSize = 16.sp, lineHeight = 23.sp, textAlign = TextAlign.Center)
+                Text(said, color = Cream, fontSize = 14.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
             }
         }
         Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Tile(Modifier.weight(1f).height(80.dp).clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
-                Text("Wearing", color = Muted, fontSize = 12.sp)
-                Text(
+        Column(Modifier.fillMaxWidth().border(1.dp, Hairline)) {
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                Readout(
+                    "SENSORS //",
                     when {
-                        !connected -> "Nothing"
+                        !connected -> "Offline"
                         activeWear == "buddie" -> "Earbuds"
                         else -> "Glasses"
                     },
-                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream, maxLines = 1
+                    Modifier.weight(1f).clickable { devicesOpen = true }
+                )
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
+                Readout(
+                    "PWR //", if (connected && battery >= 0) "$battery%" else "--", Modifier.weight(1f),
+                    if (connected && battery in 0..20) MaterialTheme.colorScheme.error else Cream
                 )
             }
-            Tile(Modifier.weight(1f).height(80.dp)) {
-                Text("Battery", color = Muted, fontSize = 12.sp)
-                Text(
-                    if (connected && battery >= 0) "$battery%" else "–",
-                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp,
-                    color = if (connected && battery in 0..20) MaterialTheme.colorScheme.error else Cream
-                )
+            HorizontalDivider(color = Hairline, thickness = 1.dp)
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                Readout("EXT_LINK //", when (haUp) { true -> "Active"; false -> "Down"; else -> "--" }, Modifier.weight(1f))
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
+                Readout("MIC //", if (armed) "Armed" else "Muted", Modifier.weight(1f))
             }
         }
         Spacer(Modifier.height(24.dp))
-        val quiet = quietUntil > System.currentTimeMillis()
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QuietButton("Speak up") { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
-            QuietButton(if (quiet) "Resume" else "Quiet 1h") {
-                Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
-                quietUntil = Prefs.quietUntil
-            }
-        }
-        if (quiet) Text(
-            "Staying quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))}.",
-            color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)
-        )
-        Spacer(Modifier.height(16.dp))
-        androidx.compose.material3.OutlinedTextField(
+        TextField(
             value = typed,
             onValueChange = { typed = it },
-            placeholder = { Text("Type to ${Prefs.name}", color = Muted) },
+            placeholder = { Text("> enter_cmd...", color = Muted, fontSize = 14.sp) },
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = Display, fontSize = 14.sp),
             singleLine = true, // so Enter on a hardware or wrist keyboard sends
-            shape = RoundedCornerShape(28.dp),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Transparent, focusedContainerColor = Color.Transparent,
-                unfocusedBorderColor = Hairline, focusedBorderColor = Gold, cursorColor = Gold
+            shape = Chamfer,
+            colors = TextFieldDefaults.colors(
+                unfocusedContainerColor = Panel, focusedContainerColor = Panel,
+                unfocusedIndicatorColor = Gold, focusedIndicatorColor = Gold, cursorColor = Gold
             ),
             trailingIcon = {
-                IconButton(onClick = { send() }) { Icon(Icons.Filled.Send, contentDescription = "Send", tint = Gold) }
+                IconButton(onClick = { send() }, modifier = Modifier.semantics { contentDescription = "Send" }) {
+                    Text(">", color = Gold, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                }
             },
             modifier = Modifier.fillMaxWidth().height(56.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() })
+        )
+        Spacer(Modifier.height(24.dp))
+        val quiet = quietUntil > System.currentTimeMillis()
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) },
+                modifier = Modifier.weight(1f).height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
+            ) { Text("[ TALK ]", maxLines = 1) }
+            ConsoleButton("[ FORCE ]", Gold, Modifier.weight(1f)) { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
+            ConsoleButton(if (quiet) "[ RESUME ]" else "[ MUTE_1H ]", Muted, Modifier.weight(1f)) {
+                Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
+                quietUntil = Prefs.quietUntil
+            }
+        }
+        if (quiet) Label(
+            "MUTED UNTIL " + SimpleDateFormat("HH:mm", Locale.US).format(Date(quietUntil)),
+            Muted
         )
         Spacer(Modifier.height(12.dp))
         if (!awake && Prefs.apiKey.isNotBlank()) {
@@ -757,7 +902,7 @@ fun HomeScreen(resumes: Int) {
                     devices.forEach { (name, address) ->
                         Text(
                             name, color = Cream, fontSize = 16.sp,
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
+                            modifier = Modifier.fillMaxWidth().clip(Flat).clickable {
                                 Prefs.deviceName = name
                                 Prefs.deviceAddress = address
                                 deviceName = name
@@ -787,7 +932,7 @@ fun NotesScreen() {
             TextField(
                 value = draft, onValueChange = { draft = it },
                 label = { Text("New note") }, modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(28.dp),
+                shape = Chamfer,
                 colors = TextFieldDefaults.colors(
                     unfocusedContainerColor = Panel, focusedContainerColor = Panel,
                     unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
@@ -802,7 +947,8 @@ fun NotesScreen() {
         }
         notes.forEachIndexed { i, n ->
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                Modifier.fillMaxWidth().drawBehind { drawRect(Color(0xFFFF5C00), size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height)) }
+                    .padding(start = 14.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
@@ -823,7 +969,7 @@ fun NotesScreen() {
                     }
                     listItems.forEachIndexed { i, item ->
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { Store.listToggle(name, i) }.padding(vertical = 8.dp),
+                            Modifier.fillMaxWidth().clip(Flat).clickable { Store.listToggle(name, i) }.padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -916,11 +1062,11 @@ fun WhisperScreen() {
         items(apps, key = { it.pkg }) { app ->
             val on = app.pkg in allowed
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().clip(Flat).background(Panel).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (app.icon != null) Image(app.icon, contentDescription = null, modifier = Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)))
-                else Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Fill))
+                if (app.icon != null) Image(app.icon, contentDescription = null, modifier = Modifier.size(34.dp).clip(Flat))
+                else Box(Modifier.size(34.dp).clip(Flat).background(Fill))
                 Text(app.label, Modifier.weight(1f).padding(horizontal = 14.dp), color = Cream, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Switch(
                     checked = on,
@@ -1116,7 +1262,7 @@ fun SettingsScreen() {
                             items(options) { (id, label) ->
                                 Text(
                                     label, color = Cream, fontSize = 16.sp,
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
+                                    modifier = Modifier.fillMaxWidth().clip(Flat).clickable {
                                     when (pick) {
                                         "voice" -> {
                                             Prefs.voiceName = id; chosen = id

@@ -57,15 +57,15 @@ for tab in Notes Whisper Settings Atlas; do
 done
 
 # Type a message with no API key: Atlas should answer honestly instead of crashing.
-tap "Type to Atlas" || fail "message box not found: $(texts)"
+tap "&gt; enter_cmd..." || fail "message box not found: $(texts)"
 adb shell input text "hello"; adb shell input keyevent 66
 sleep 6
 has "reach a model" || fail "typed message got no reply: $(texts)"
 check "Typed message answered"
 
 # Unprompted speech: the Speak up button should produce a line.
-has "Speak up" || { adb shell input keyevent 4; sleep 2; }   # close the on-screen keyboard
-tap "Speak up" || fail "Speak up button not found: $(texts)"
+has "[ FORCE ]" || { adb shell input keyevent 4; sleep 2; }   # close the on-screen keyboard
+tap "[ FORCE ]" || fail "Speak up button not found: $(texts)"
 sleep 8
 has "reach a model" && fail "Speak up produced nothing new: $(texts)"
 check "Spoke up on its own"
