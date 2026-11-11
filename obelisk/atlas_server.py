@@ -387,6 +387,48 @@ async def ask(a: Ask):
     return {"answer": " ".join(words[:ASK_MAX_WORDS])}
 
 
+DELEGATE_TIMEOUT_S = 240
+HERMES_BIN = os.environ.get("ATLAS_HERMES_BIN", str(Path.home() / ".local/bin/hermes"))
+
+
+class Delegate(BaseModel):
+    task: str
+
+
+async def _run_hermes_oneshot(task: str) -> str:
+    """Runs `hermes -z <task>` one-shot and returns its stdout, or a short
+    explanation of what went wrong. Never raises and never blocks past the
+    delegate timeout — Hermes is a CLI agent, not a standing server, so a
+    subprocess is the straightforward way to hand it a job and get an answer."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            HERMES_BIN,
+            "-z",
+            task,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=DELEGATE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return "Hermes didn't answer in time."
+        if proc.returncode != 0:
+            detail = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
+            return f"Hermes couldn't run that: {detail[:200]}"
+        return stdout.decode(errors="ignore").strip() or "Hermes didn't say anything back."
+    except FileNotFoundError:
+        return "Hermes isn't installed on this node."
+
+
+@app.post("/atlas/delegate", dependencies=[Depends(require_token)])
+async def delegate(d: Delegate):
+    answer = await _run_hermes_oneshot(d.task)
+    await report(Report(app="Hermes", title=d.task[:120], body=answer, key=None))
+    return {"answer": answer}
+
+
 @app.get("/atlas/reports", dependencies=[Depends(require_token)])
 def list_reports(app: Optional[str] = None, since: Optional[int] = None, limit: int = 50):
     query = "SELECT * FROM reports WHERE 1=1"
@@ -425,6 +467,12 @@ def mcp_brief() -> dict:
 async def mcp_ask(question: str) -> dict:
     """Ask the hub a question; it answers from recent reports and the vault without using Claude tokens."""
     return await ask(Ask(question=question))
+
+
+@mcp.tool
+async def mcp_delegate(task: str) -> dict:
+    """Hand a job to Hermes on this node and wait for its answer (up to a few minutes)."""
+    return await delegate(Delegate(task=task))
 
 
 @mcp.tool

@@ -140,6 +140,34 @@ def test_ask_uses_parser_when_available(atlas, monkeypatch):
     assert resp.json()["answer"] == "The garage has been open since 3pm."
 
 
+def test_delegate_forwards_to_hermes_and_files_a_report(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_hermes(task):
+        return f"done: {task}"
+
+    monkeypatch.setattr(mod, "_run_hermes_oneshot", fake_hermes)
+    resp = client.post("/atlas/delegate", json={"task": "water the plants"})
+    assert resp.status_code == 200
+    assert resp.json()["answer"] == "done: water the plants"
+
+    reports = client.get("/atlas/reports", params={"app": "Hermes"}).json()["reports"]
+    assert len(reports) == 1
+    assert reports[0]["body"] == "done: water the plants"
+
+
+def test_delegate_survives_hermes_being_unreachable(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_hermes(task):
+        return "Hermes isn't installed on this node."
+
+    monkeypatch.setattr(mod, "_run_hermes_oneshot", fake_hermes)
+    resp = client.post("/atlas/delegate", json={"task": "water the plants"})
+    assert resp.status_code == 200
+    assert "isn't installed" in resp.json()["answer"]
+
+
 def test_token_required_when_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
     monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
