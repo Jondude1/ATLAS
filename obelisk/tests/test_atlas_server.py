@@ -142,6 +142,52 @@ def test_ask_uses_parser_when_available(atlas, monkeypatch):
     assert resp.json()["answer"] == "The garage has been open since 3pm."
 
 
+def test_ask_vault_answers_strictly_from_notes_not_reports(atlas, monkeypatch):
+    mod, client = atlas
+    vault = mod.VAULT
+    vault.mkdir(parents=True, exist_ok=True)
+    (vault / "2026-11-10.md").write_text("The spare key is hidden under the back deck planter.\n", encoding="utf-8")
+    client.post("/atlas/report", json={"app": "home", "title": "Garage left open"})
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    resp = client.post("/atlas/ask-vault", json={"question": "where is the spare key"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "spare key" in body["answer"].lower()
+    assert "Garage" not in body["answer"]
+    assert "2026-11-10" in body["notes"]
+
+
+def test_ask_vault_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+    vault = mod.VAULT
+    vault.mkdir(parents=True, exist_ok=True)
+    (vault / "notes.md").write_text("The wifi password is on the fridge.\n", encoding="utf-8")
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "The wifi password's on the fridge."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    resp = client.post("/atlas/ask-vault", json={"question": "wifi password"})
+    assert resp.json()["answer"] == "The wifi password's on the fridge."
+
+
+def test_ask_vault_says_so_when_nothing_matches(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    resp = client.post("/atlas/ask-vault", json={"question": "anything at all"})
+    body = resp.json()
+    assert "couldn't find" in body["answer"].lower()
+    assert body["notes"] == []
+
+
 def test_delegate_forwards_to_hermes_and_files_a_report(atlas, monkeypatch):
     mod, client = atlas
 

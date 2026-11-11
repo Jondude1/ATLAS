@@ -173,7 +173,7 @@ def where():
     return {"device": state["device"], "since": state["since"]}
 
 
-def _search_vault(q: str, limit: int = 8):
+def _search_vault_hits(q: str, limit: int = 8) -> list[dict]:
     terms = [t for t in re.split(r"\W+", q.lower()) if len(t) > 2]
     hits = []
     if terms and VAULT.exists():
@@ -184,11 +184,15 @@ def _search_vault(q: str, limit: int = 8):
                     low = line.lower()
                     score = sum(1 for t in terms if t in low)
                     if score:
-                        hits.append((score, f"{path.stem}: {line.strip()[:260]}"))
+                        hits.append({"note": path.stem, "line": line.strip()[:260], "score": score})
             except OSError:
                 continue
-    hits.sort(key=lambda h: -h[0])
-    return [h[1] for h in hits[:limit]]
+    hits.sort(key=lambda h: -h["score"])
+    return hits[:limit]
+
+
+def _search_vault(q: str, limit: int = 8) -> list[str]:
+    return [f"{h['note']}: {h['line']}" for h in _search_vault_hits(q, limit)]
 
 
 @app.get("/atlas/search")
@@ -1227,6 +1231,42 @@ async def ask(a: Ask):
     return {"answer": " ".join(words[:ASK_MAX_WORDS])}
 
 
+@app.post("/atlas/ask-vault", dependencies=[Depends(require_token)])
+async def ask_vault(a: Ask):
+    # Unlike /atlas/ask, this never looks at the reports table — it answers
+    # strictly from the Obsidian vault, with each excerpt labelled by the
+    # note it came from so the model (and the person) can see the source.
+    hits = _search_vault_hits(a.question, limit=8)
+    vault_text = "\n".join(f"[{h['note']}] {h['line']}" for h in hits)
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Answer the question using only the vault excerpts given, each labelled "
+                    "with the note it's from. Mention which note an answer came from when it's "
+                    "natural to. Plain spoken English, at most 80 words. If nothing in the "
+                    "excerpts answers it, say so briefly rather than guessing."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Question: {a.question}\n\nVault excerpts:\n{vault_text or '(no matching notes)'}",
+            },
+        ],
+        max_tokens=160,
+        timeout_s=25,
+    )
+    if reply is None:
+        reply = (
+            "; ".join(f"from {h['note']}: {h['line']}" for h in hits[:3])
+            if hits
+            else "I couldn't find anything in the vault about that."
+        )
+    words = reply.split()
+    return {"answer": " ".join(words[:ASK_MAX_WORDS]), "notes": sorted({h["note"] for h in hits})}
+
+
 DELEGATE_TIMEOUT_S = 240
 HERMES_BIN = os.environ.get("ATLAS_HERMES_BIN", str(Path.home() / ".local/bin/hermes"))
 
@@ -1570,6 +1610,12 @@ def mcp_brief() -> dict:
 async def mcp_ask(question: str) -> dict:
     """Ask the hub a question; it answers from recent reports and the vault without using Claude tokens."""
     return await ask(Ask(question=question))
+
+
+@mcp.tool
+async def mcp_ask_vault(question: str) -> dict:
+    """Ask the Obsidian vault a question; answers strictly from notes, not recent reports, citing which note."""
+    return await ask_vault(Ask(question=question))
 
 
 @mcp.tool
