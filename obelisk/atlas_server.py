@@ -105,6 +105,7 @@ async def _atlas_lifespan(app):
             _schedule_money_check()
             _schedule_print_watch()
             _schedule_filament_check()
+            _schedule_athena_container_watch()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -112,6 +113,7 @@ async def _atlas_lifespan(app):
         _schedule_money_check()
         _schedule_print_watch()
         _schedule_filament_check()
+        _schedule_athena_container_watch()
         yield
 
 
@@ -1145,6 +1147,17 @@ ATHENA_MAX_OUTPUT = 20000
 _athena_cache = {"containers": [], "uptime": "", "disk": "", "updated": 0}
 _athena_task: Optional[asyncio.Task] = None
 
+# Container CPR (#19): detect-and-report only, never an automatic restart —
+# Athena already runs autoheal for actual healing on containers with health
+# checks; the hub's job is proactively telling Jon/ATLAS when something
+# needed attention, healed or not. The one mutating action (restart) stays
+# an explicit, name-validated endpoint for a person to trigger, not
+# something this watch calls on its own.
+ATHENA_CONTAINER_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_ATHENA_CONTAINER_CHECK_INTERVAL_S", "300"))
+_CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+_container_health_state: dict[str, bool] = {}  # name -> is_down
+_athena_container_task: Optional[asyncio.Task] = None
+
 
 def require_athena_token(authorization: Optional[str] = Header(default=None)):
     """Stricter than require_token: an exec channel stays closed until the
@@ -1276,6 +1289,93 @@ async def athena_status():
         "disk": _athena_cache.get("disk", ""),
         "updated": _athena_cache.get("updated", 0),
     }
+
+
+def _is_container_down(status: str) -> bool:
+    status = status.strip()
+    if not status.startswith("Up"):
+        return True
+    return "unhealthy" in status.lower()
+
+
+async def _check_athena_containers() -> dict:
+    exit_code, out, _ = await _run_athena_ssh(
+        'docker ps -a --format "{{.Names}}|{{.Status}}"', ATHENA_STATUS_TIMEOUT_S
+    )
+    if exit_code != 0:
+        return {"ok": False, "checked": 0, "filed": 0}
+    filed = 0
+    seen = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        name, status = (p.strip() for p in line.split("|", 1))
+        if not name:
+            continue
+        seen.add(name)
+        down = _is_container_down(status)
+        was_down = _container_health_state.get(name)
+        if was_down is not None and down != was_down:
+            if down:
+                title, body = f"{name} needs attention", f"Status: {status}"
+            else:
+                title, body = f"{name} is back up", f"Status: {status}"
+            await report(
+                Report(app="athena", title=title, body=body, priority="normal", key=f"athena-container:{name}")
+            )
+            filed += 1
+        _container_health_state[name] = down
+    return {"ok": True, "checked": len(seen), "filed": filed}
+
+
+async def _athena_container_loop():
+    while True:
+        await asyncio.sleep(ATHENA_CONTAINER_CHECK_INTERVAL_S)
+        try:
+            await _check_athena_containers()
+        except Exception:
+            pass
+
+
+def _schedule_athena_container_watch():
+    global _athena_container_task
+    if _athena_container_task is not None and not _athena_container_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _athena_container_task = loop.create_task(_athena_container_loop())
+
+
+class AthenaContainerRestart(BaseModel):
+    name: str
+
+
+@app.post("/atlas/athena/containers/check", dependencies=[Depends(require_athena_token)])
+async def athena_containers_check():
+    return await _check_athena_containers()
+
+
+@app.post("/atlas/athena/containers/restart", dependencies=[Depends(require_athena_token)])
+async def athena_container_restart(r: AthenaContainerRestart):
+    # Explicit, person-triggered only — the background watch above never
+    # calls this itself. Name is validated against Docker's own naming
+    # rule before it ever reaches the SSH command string (defense against
+    # command injection through this field).
+    name = r.name.strip()
+    if not _CONTAINER_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="invalid container name")
+    exit_code, out, err = await _run_athena_ssh(f"docker restart {name}", ATHENA_EXEC_TIMEOUT_S)
+    try:
+        title = f"Restarted {name}" if exit_code == 0 else f"Restart failed: {name}"
+        await report(
+            Report(app="athena", title=title, body=(out or err).strip()[:500] or f"exit {exit_code}", key=None)
+        )
+    except Exception:
+        pass
+    return {"ok": exit_code == 0, "exit": exit_code, "stdout": out, "stderr": err}
 
 
 @app.get("/atlas/reports", dependencies=[Depends(require_token)])
@@ -1412,6 +1512,18 @@ async def mcp_filament_check() -> dict:
 async def mcp_delegate(task: str) -> dict:
     """Hand a job to Hermes on this node and wait for its answer (up to a few minutes)."""
     return await delegate(Delegate(task=task))
+
+
+@mcp.tool
+async def mcp_athena_containers_check() -> dict:
+    """Check Athena's containers for anything down or unhealthy now; reports on any change since last check."""
+    return await athena_containers_check()
+
+
+@mcp.tool
+async def mcp_athena_container_restart(name: str) -> dict:
+    """Restart a named container on Athena. Explicit action only — never run automatically."""
+    return await athena_container_restart(AthenaContainerRestart(name=name))
 
 
 @mcp.tool

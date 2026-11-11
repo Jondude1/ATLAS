@@ -719,6 +719,99 @@ def test_athena_status_parses_docker_output(atlas):
     assert "120GB" in parsed["disk"]
 
 
+def test_athena_container_check_reports_only_on_transition(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
+    monkeypatch.setenv("ATLAS_TOKEN", "secret123")
+    sys.modules.pop("atlas_server", None)
+    mod = importlib.import_module("atlas_server")
+
+    container_readings = iter(
+        [
+            "jellyfin|Up 3 days\nbazarr|Up 3 days",
+            "jellyfin|Up 3 days\nbazarr|Exited (1) 2 minutes ago",
+            "jellyfin|Up 3 days\nbazarr|Exited (1) 5 minutes ago",
+            "jellyfin|Up 3 days\nbazarr|Up 1 second",
+        ]
+    )
+
+    async def fake_ssh(command, timeout_s):
+        # The background athena-status refresh also calls this at startup
+        # (plain "docker ps", uptime, disk) — only the "-a" container check
+        # command should consume from the queued readings above.
+        if "docker ps -a" in command:
+            return 0, next(container_readings), ""
+        return 0, "", ""
+
+    monkeypatch.setattr(mod, "_run_athena_ssh", fake_ssh)
+    with TestClient(mod.app) as client:
+        headers = {"Authorization": "Bearer secret123"}
+        baseline = client.post("/atlas/athena/containers/check", headers=headers).json()
+        assert baseline["filed"] == 0  # first-ever reading has nothing to compare against
+
+        went_down = client.post("/atlas/athena/containers/check", headers=headers).json()
+        assert went_down["filed"] == 1
+        reports = client.get("/atlas/reports", params={"app": "athena"}, headers=headers).json()["reports"]
+        assert "attention" in reports[0]["title"].lower()
+
+        still_down = client.post("/atlas/athena/containers/check", headers=headers).json()
+        assert still_down["filed"] == 0  # no duplicate while unchanged
+
+        came_back = client.post("/atlas/athena/containers/check", headers=headers).json()
+        assert came_back["filed"] == 1
+        reports = client.get("/atlas/reports", params={"app": "athena"}, headers=headers).json()["reports"]
+        assert "back up" in reports[0]["title"].lower()  # same dedupe key: replaces the down-report
+
+
+def test_athena_container_restart_rejects_unsafe_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
+    monkeypatch.setenv("ATLAS_TOKEN", "secret123")
+    sys.modules.pop("atlas_server", None)
+    mod = importlib.import_module("atlas_server")
+
+    async def fake_ssh(command, timeout_s):
+        # The background athena-status refresh calls this too at startup
+        # with unrelated commands; only "docker restart" must never appear.
+        if command.startswith("docker restart"):
+            raise AssertionError("should never reach SSH with an unsafe name")
+        return 0, "", ""
+
+    monkeypatch.setattr(mod, "_run_athena_ssh", fake_ssh)
+    with TestClient(mod.app) as client:
+        headers = {"Authorization": "Bearer secret123"}
+        resp = client.post(
+            "/atlas/athena/containers/restart",
+            json={"name": "jellyfin; rm -rf /"},
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+
+def test_athena_container_restart_runs_and_files_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
+    monkeypatch.setenv("ATLAS_TOKEN", "secret123")
+    sys.modules.pop("atlas_server", None)
+    mod = importlib.import_module("atlas_server")
+
+    async def fake_ssh(command, timeout_s):
+        if command.startswith("docker restart"):
+            assert command == "docker restart bazarr"
+            return 0, "bazarr\n", ""
+        return 0, "", ""  # the background athena-status refresh, unrelated
+
+    monkeypatch.setattr(mod, "_run_athena_ssh", fake_ssh)
+    with TestClient(mod.app) as client:
+        headers = {"Authorization": "Bearer secret123"}
+        resp = client.post("/atlas/athena/containers/restart", json={"name": "bazarr"}, headers=headers)
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        reports = client.get("/atlas/reports", params={"app": "athena"}, headers=headers).json()["reports"]
+        assert any("restarted" in r["title"].lower() for r in reports)
+
+
 def test_token_required_when_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
     monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
