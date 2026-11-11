@@ -77,6 +77,17 @@ FRIGATE_URL = os.environ.get("ATLAS_FRIGATE_URL", "http://100.88.113.24:5000")
 PRINT_CAMERA = os.environ.get("ATLAS_PRINT_CAMERA", "garage_cam")
 PRINT_WATCH_INTERVAL_S = int(os.environ.get("ATLAS_PRINT_WATCH_INTERVAL_S", "300"))
 
+# Filament & Queue Conductor v1. No design detail existed for this item (no
+# OctoPrint/Moonraker/Spoolman found anywhere on the tailnet or in Athena's
+# containers to integrate with), so this follows the Money Sentinel
+# precedent: hand-maintained vault files, documented plainly, flagged in
+# the issue as an assumption pending correction.
+FILAMENT_FILE = Path(
+    os.environ.get("ATLAS_FILAMENT_FILE", str(VAULT / "Atlas" / "filament.md"))
+).expanduser()
+QUEUE_FILE = Path(os.environ.get("ATLAS_QUEUE_FILE", str(VAULT / "Atlas" / "print_queue.md"))).expanduser()
+FILAMENT_CHECK_HOUR = int(os.environ.get("ATLAS_FILAMENT_CHECK_HOUR", "7"))  # local 24h clock
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -93,12 +104,14 @@ async def _atlas_lifespan(app):
             _schedule_captures_nightly()
             _schedule_money_check()
             _schedule_print_watch()
+            _schedule_filament_check()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
         _schedule_captures_nightly()
         _schedule_money_check()
         _schedule_print_watch()
+        _schedule_filament_check()
         yield
 
 
@@ -295,6 +308,7 @@ _money_task: Optional[asyncio.Task] = None
 _catch_up_cache = {"last_shown_at": 0}
 _print_watch_task: Optional[asyncio.Task] = None
 _print_watch_state = {"last_ok": None}
+_filament_task: Optional[asyncio.Task] = None
 
 
 class Report(BaseModel):
@@ -917,6 +931,120 @@ async def print_watch_check():
     return await _check_print_camera()
 
 
+def _parse_filament_line(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 4 or not parts[0]:
+        return None
+    material, color, remaining_raw, total_raw = parts[0], parts[1], parts[2], parts[3]
+    try:
+        remaining_g = float(remaining_raw)
+        total_g = float(total_raw)
+    except ValueError:
+        return None
+    return {"material": material, "color": color, "remaining_g": remaining_g, "total_g": total_g}
+
+
+def _read_filament_spools() -> list[dict]:
+    if not FILAMENT_FILE.exists():
+        return []
+    spools = []
+    for line in FILAMENT_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parsed = _parse_filament_line(line)
+        if parsed:
+            spools.append(parsed)
+    return spools
+
+
+def _parse_queue_line(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 4 or not parts[0]:
+        return None
+    name, material, grams_raw, status = parts[0], parts[1], parts[2], parts[3]
+    try:
+        estimated_g = float(grams_raw)
+    except ValueError:
+        return None
+    return {"name": name, "material": material, "estimated_g": estimated_g, "status": status.strip().lower()}
+
+
+def _read_print_queue() -> list[dict]:
+    if not QUEUE_FILE.exists():
+        return []
+    jobs = []
+    for line in QUEUE_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parsed = _parse_queue_line(line)
+        if parsed:
+            jobs.append(parsed)
+    return jobs
+
+
+async def _check_filament_for_queue() -> dict:
+    remaining_by_material: dict[str, float] = {}
+    for s in _read_filament_spools():
+        remaining_by_material[s["material"]] = remaining_by_material.get(s["material"], 0) + s["remaining_g"]
+    needed_by_material: dict[str, float] = {}
+    for j in _read_print_queue():
+        if j["status"] == "queued":
+            needed_by_material[j["material"]] = needed_by_material.get(j["material"], 0) + j["estimated_g"]
+    filed = 0
+    for material, needed_g in needed_by_material.items():
+        available_g = remaining_by_material.get(material, 0)
+        if needed_g > available_g:
+            short_by = needed_g - available_g
+            await report(
+                Report(
+                    app="filament",
+                    title=f"Not enough {material} for the queue",
+                    body=f"Queue needs {needed_g:.0f}g, {available_g:.0f}g on hand, short by {short_by:.0f}g",
+                    priority="normal",
+                    key=f"filament-short:{material}",
+                )
+            )
+            filed += 1
+    return {"materials_checked": len(needed_by_material), "filed": filed}
+
+
+async def _filament_nightly_loop():
+    while True:
+        await asyncio.sleep(_seconds_until_next_hour(FILAMENT_CHECK_HOUR))
+        try:
+            await _check_filament_for_queue()
+        except Exception:
+            pass
+
+
+def _schedule_filament_check():
+    global _filament_task
+    if _filament_task is not None and not _filament_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _filament_task = loop.create_task(_filament_nightly_loop())
+
+
+@app.get("/atlas/filament/spools", dependencies=[Depends(require_token)])
+def filament_spools():
+    return {"spools": _read_filament_spools()}
+
+
+@app.get("/atlas/print/queue", dependencies=[Depends(require_token)])
+def print_queue():
+    return {"queue": _read_print_queue()}
+
+
+@app.post("/atlas/filament/check", dependencies=[Depends(require_token)])
+async def filament_check():
+    return await _check_filament_for_queue()
+
+
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
 async def ask(a: Ask):
     with hub_db() as conn:
@@ -1260,6 +1388,24 @@ async def mcp_print_preflight() -> dict:
 async def mcp_print_watch_check() -> dict:
     """Check the print-area camera's liveness now and report if it just went offline or came back."""
     return await print_watch_check()
+
+
+@mcp.tool
+def mcp_filament_spools() -> dict:
+    """List filament spools and remaining grams, read from the vault's filament file."""
+    return filament_spools()
+
+
+@mcp.tool
+def mcp_print_queue() -> dict:
+    """List the print queue, read from the vault's print-queue file."""
+    return print_queue()
+
+
+@mcp.tool
+async def mcp_filament_check() -> dict:
+    """Check whether on-hand filament covers the queued jobs; reports any material that's short."""
+    return await filament_check()
 
 
 @mcp.tool

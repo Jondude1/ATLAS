@@ -565,6 +565,80 @@ def test_print_watch_reports_only_on_transition(atlas, monkeypatch):
     assert "offline" in reports[0]["title"].lower()
 
 
+def test_filament_check_flags_a_shortage(atlas):
+    mod, client = atlas
+    mod.FILAMENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.FILAMENT_FILE.write_text("- PLA | Black | 50 | 1000\n", encoding="utf-8")
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 200 | queued\n", encoding="utf-8")
+
+    resp = client.post("/atlas/filament/check")
+    assert resp.json() == {"materials_checked": 1, "filed": 1}
+
+    reports = client.get("/atlas/reports", params={"app": "filament"}).json()["reports"]
+    assert len(reports) == 1
+    assert "PLA" in reports[0]["title"]
+    assert "150" in reports[0]["body"]  # short by 200 - 50
+
+
+def test_filament_check_ok_when_enough_on_hand(atlas):
+    mod, client = atlas
+    mod.FILAMENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.FILAMENT_FILE.write_text("- PLA | Black | 900 | 1000\n", encoding="utf-8")
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 200 | queued\n", encoding="utf-8")
+
+    resp = client.post("/atlas/filament/check")
+    assert resp.json() == {"materials_checked": 1, "filed": 0}
+    assert client.get("/atlas/reports", params={"app": "filament"}).json()["reports"] == []
+
+
+def test_filament_check_ignores_jobs_not_queued(atlas):
+    mod, client = atlas
+    mod.FILAMENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.FILAMENT_FILE.write_text("- PLA | Black | 10 | 1000\n", encoding="utf-8")
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 500 | printing\n- Old job | PLA | 500 | done\n", encoding="utf-8")
+
+    resp = client.post("/atlas/filament/check")
+    assert resp.json() == {"materials_checked": 0, "filed": 0}
+
+
+def test_filament_check_is_idempotent_for_the_same_shortage(atlas):
+    mod, client = atlas
+    mod.FILAMENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.FILAMENT_FILE.write_text("- PLA | Black | 10 | 1000\n", encoding="utf-8")
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 200 | queued\n", encoding="utf-8")
+
+    client.post("/atlas/filament/check")
+    client.post("/atlas/filament/check")
+
+    reports = client.get("/atlas/reports", params={"app": "filament"}).json()["reports"]
+    assert len(reports) == 1
+
+
+def test_filament_spools_and_queue_list_endpoints(atlas):
+    mod, client = atlas
+    mod.FILAMENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.FILAMENT_FILE.write_text("- PETG | Clear | 300 | 1000\n", encoding="utf-8")
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Enclosure | PETG | 150 | queued\n", encoding="utf-8")
+
+    spools = client.get("/atlas/filament/spools").json()["spools"]
+    assert spools == [{"material": "PETG", "color": "Clear", "remaining_g": 300.0, "total_g": 1000.0}]
+
+    queue = client.get("/atlas/print/queue").json()["queue"]
+    assert queue == [{"name": "Enclosure", "material": "PETG", "estimated_g": 150.0, "status": "queued"}]
+
+
+def test_filament_check_handles_missing_files(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/filament/check")
+    assert resp.status_code == 200
+    assert resp.json() == {"materials_checked": 0, "filed": 0}
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
