@@ -1209,6 +1209,56 @@ def test_slicer_tune_no_tweak_for_unrecognized_symptom_when_model_is_down(atlas,
     assert body == {"changed": False, "reason": "No specific tweak suggested for that symptom."}
 
 
+def test_departure_check_clear_to_go_when_nothing_outstanding(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}}
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/departure/check").json()
+    assert body["summary"] == "Clear to go."
+    assert any("No unacked urgent" in c for c in body["checklist"])
+    assert any("Calendar/weather/traffic/car" in e for e in body["exceptions"])
+
+
+def test_departure_check_flags_unacked_urgent_items(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {mod.PRINT_CAMERA: {"enabled": True}}}
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/report", json={"app": "home", "title": "Pipe burst", "priority": "urgent"})
+
+    body = client.get("/atlas/departure/check").json()
+    assert "Check before you go" in body["summary"]
+    assert any("Pipe burst" in e for e in body["exceptions"])
+
+
+def test_departure_check_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {}}
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "Clear to go, nothing outstanding."
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/departure/check").json()
+    assert body["summary"] == "Clear to go, nothing outstanding."
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

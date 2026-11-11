@@ -1516,6 +1516,74 @@ def set_urgent_only_mode(on: bool = True):
     return {"urgent_only": _brief_mode["urgent_only"]}
 
 
+async def _compose_departure_check() -> dict:
+    # Same fusion/flag split as Leave-Home (#29): calendar, weather, traffic
+    # and car status are all app-side (phone GPS/calendar, no ClearDash/OBD
+    # reachable here) -- flagged explicitly, never faked. In particular,
+    # never invent a travel-time call; this hub has no traffic data at all.
+    print_state = await print_preflight()
+    queued = [j for j in _read_print_queue() if j["status"] == "queued"]
+    with hub_db() as conn:
+        urgent_rows = conn.execute(
+            "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
+        ).fetchall()
+
+    checklist = []
+    exceptions = []
+
+    if print_state.get("ok"):
+        checklist.append(f"Print area camera ({print_state['camera']}): watching")
+    else:
+        exceptions.append(f"Print area: {print_state.get('reason', 'not available')}")
+
+    if queued:
+        checklist.append(f"Print queue: {len(queued)} job(s) waiting")
+
+    if urgent_rows:
+        exceptions.append(
+            f"{len(urgent_rows)} unacked urgent item(s): " + "; ".join(r["title"] for r in urgent_rows[:3])
+        )
+    else:
+        checklist.append("No unacked urgent items")
+
+    exceptions.append(
+        "Calendar/weather/traffic/car status: not reachable from this hub -- the app supplies those for the final call"
+    )
+
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Compose a short 'clear to go' style departure check from the checklist "
+                    "and flagged items given. Lead with 'Clear to go' if nothing in the "
+                    "checklist is a problem, otherwise name the exception. Do not invent a "
+                    "travel-time recommendation -- you have no traffic data. Plain spoken "
+                    "English, one short sentence, no markdown."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "Checklist:\n" + "\n".join(checklist) + "\n\nFlagged:\n" + "\n".join(exceptions),
+            },
+        ],
+        max_tokens=80,
+        timeout_s=30,
+    )
+    if reply is None:
+        reply = (
+            "Clear to go."
+            if not urgent_rows and print_state.get("ok", True)
+            else "Check before you go: " + "; ".join(exceptions[:2])
+        )
+    return {"summary": reply, "checklist": checklist, "exceptions": exceptions}
+
+
+@app.get("/atlas/departure/check", dependencies=[Depends(require_token)])
+async def departure_check():
+    return await _compose_departure_check()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -2441,6 +2509,12 @@ def mcp_list_routines() -> dict:
 async def mcp_run_routine(name: str) -> dict:
     """Run a named routine: executes hub-actionable steps (printer status, brief mode), names the rest for app/HA."""
     return await run_routine(RoutineRun(name=name))
+
+
+@mcp.tool
+async def mcp_departure_check() -> dict:
+    """Run the departure checklist (printer, open urgent items); composes a 'clear to go' line, exceptions only."""
+    return await departure_check()
 
 
 @mcp.tool
