@@ -20,9 +20,10 @@ object Discretion {
     /** Why to keep it down right now, or null. Pure, so it can be tested. */
     fun reason(
         hour: Int, weekday: Boolean, eventNow: String?, meeting: Boolean, guests: Boolean,
-        bedtime: Int, wakeHour: Int, workOn: Boolean, workStart: Int, workEnd: Int
+        bedtime: Int, wakeHour: Int, workOn: Boolean, workStart: Int, workEnd: Int, conversation: Boolean = false
     ): String? = when {
         guests -> "guests over"
+        conversation -> "in a conversation"
         meeting || (eventNow != null && tableWords.containsMatchIn(eventNow)) -> "at the table"
         lightsOut(hour, bedtime, wakeHour) -> "lights out"
         workOn && weekday && hour in workStart until workEnd -> "work hours"
@@ -70,6 +71,7 @@ object Discretion {
             eventNow = ctx?.let { eventNow(it) },
             meeting = Glasses.meeting.value,
             guests = System.currentTimeMillis() < Prefs.guestsUntil,
+            conversation = SocialGrace.inConversation,
             bedtime = Prefs.bedtimeHour, wakeHour = Prefs.wakeHour,
             workOn = Prefs.workDiscretion, workStart = Prefs.workStart, workEnd = Prefs.workEnd
         )

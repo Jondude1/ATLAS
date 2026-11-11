@@ -947,4 +947,20 @@ class AtlasTest {
         assertEquals("Co-pilot on. Next up: Dentist at 3:00 PM. I'll keep it short.", C.hello("Dentist at 3:00 PM"))
         C.reset()
     }
+
+    @Test
+    fun socialGraceHearsConversationsAndNoise() {
+        val G = com.jondude.anzu.assist.SocialGrace
+        G.reset()
+        val t = 2_000_000_000L
+        G.heardOther(null, 0.5f, t); assertFalse(G.inConversation)             // a cough isn't a conversation
+        G.heardOther(null, 1.5f, t + 1_000); assertFalse(G.inConversation)
+        G.heardOther(null, 2.0f, t + 8_000); assertTrue(G.inConversation)
+        assertEquals("in a conversation", com.jondude.anzu.assist.Discretion.reason(14, false, null, false, false, 23, 7, false, 8, 17, conversation = true))
+        G.tick(null, t + 20_000); assertTrue(G.inConversation)
+        G.tick(null, t + 40_000); assertFalse(G.inConversation)
+        repeat(12) { G.background(4000.0, t + it * 1_000L) }; assertTrue(G.loud)   // table saw for 11 s
+        repeat(12) { G.background(200.0, t + 20_000 + it * 1_000L) }; assertFalse(G.loud)
+        G.reset()
+    }
 }

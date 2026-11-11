@@ -205,6 +205,8 @@ object Prefs {
     var grayscaleNight by BoolPref("grayscaleNight", true)
     // Co-Pilot Mode
     var coPilot by BoolPref("coPilot", true)
+    // Social Grace
+    var duckForConversation by BoolPref("duckForConversation", true)
     var drivingUntil by LongPref("drivingUntil", 0L)
     var lastWake by LongPref("lastWake", 0L)
     var lastWakeSource by StrPref("lastWakeSource", "")

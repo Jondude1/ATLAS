@@ -890,6 +890,7 @@ object BuddieLink {
                 for (i in 0 until 3) {
                     val pcm = codec.decodeBlock(v, 1 + i * PcaCodec.BLOCK)
                     segmenter.feed(pcm, now < selfUntil)?.let { onUtterance(it) }
+                    com.jondude.anzu.assist.SocialGrace.background(segmenter.floor)
                 }
             }
             BuddiePacket.SIZE -> {
@@ -973,6 +974,8 @@ object BuddieLink {
         val sensor = BuddieStats.sensorSeen
         val mine = if (sensor) u.selfRatio > 0.3f else true
         val meeting = Glasses.meeting.value
+        // Someone else talking near him: that's a conversation, so duck music and keep briefs to cards.
+        if (sensor && !mine) com.jondude.anzu.assist.SocialGrace.heardOther(ctx, u.pcm.size / 16000f)
         if (!mine && !meeting && !Prefs.buddieAmbient) return
         if (bargeIn) {
             Atlas.scope.launch {
@@ -1006,7 +1009,11 @@ object BuddieLink {
                     return@withLock
                 }
                 if (mine) {
-                    val cmd = if (Prefs.wakeWord) Wake.extract(text, Prefs.name) else null
+                    // On a call or next to loud machinery the wake word is muted, so noise can't fake an "Atlas".
+                    val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val muted = com.jondude.anzu.assist.SocialGrace.loud || am.mode == android.media.AudioManager.MODE_IN_CALL ||
+                        (am.mode == android.media.AudioManager.MODE_IN_COMMUNICATION && Glasses.atlasState.value == "idle")
+                    val cmd = if (Prefs.wakeWord && !muted) Wake.extract(text, Prefs.name) else null
                     if (cmd != null) {
                         Atlas.heard(ctx, cmd)
                         return@withLock

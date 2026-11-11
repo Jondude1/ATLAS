@@ -470,6 +470,7 @@ class GlassesService : Service() {
         }
         updateWakeLock()
         Atlas.flushPolite()
+        com.jondude.anzu.assist.SocialGrace.tick(this)
         // The hub, by ear. Urgent earns speech (two clear notes first), but never over a call: it waits, unacknowledged,
         // until the call ends. Anything else new earns one soft bell and a line in the next brief, outside quiet time.
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {

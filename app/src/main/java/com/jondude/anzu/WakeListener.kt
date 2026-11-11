@@ -184,6 +184,10 @@ object WakeListener {
                 while (running && !heard) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) { sleep(50); continue }
+                    var sum = 0.0
+                    for (k in 0 until n) sum += buf[k].toDouble() * buf[k]
+                    com.jondude.anzu.assist.SocialGrace.background(Math.sqrt(sum / n))
+                    if (com.jondude.anzu.assist.SocialGrace.loud) { state.value = "paused: too loud around you"; continue }
                     val f = FloatArray(n) { buf[it] / 32768f }
                     stream.acceptWaveform(f, 16000)
                     while (kws.isReady(stream)) {
