@@ -7,4 +7,6 @@ local.properties
 /.env.local
 app/libs/
 obelisk/.venv/
-obelisk/__pycache__/
+obelisk/**/__pycache__/
+obelisk/.pytest_cache/
+obelisk/*.db

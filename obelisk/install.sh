@@ -8,6 +8,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="$HERE/.venv"
 VAULT="${ATLAS_VAULT:-$HOME/Documents/Hermes}"
 PORT="${ATLAS_PORT:-8765}"
+LLM_URL="${ATLAS_LLM_URL:-http://localhost:11434/v1}"
+LLM_MODEL="${ATLAS_LLM_MODEL:-mistral-nemo}"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="$UNIT_DIR/atlas-server.service"
 
@@ -34,6 +36,9 @@ Type=simple
 WorkingDirectory=$HERE
 Environment=ATLAS_VAULT=$VAULT
 Environment=ATLAS_WHISPER=base.en
+Environment=ATLAS_LLM_URL=$LLM_URL
+Environment=ATLAS_LLM_MODEL=$LLM_MODEL
+Environment=ATLAS_TOKEN=${ATLAS_TOKEN:-}
 ExecStart=$VENV/bin/uvicorn atlas_server:app --host 0.0.0.0 --port $PORT
 Restart=on-failure
 RestartSec=5
