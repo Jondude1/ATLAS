@@ -254,6 +254,98 @@ def test_open_loop_ack_closes_it_and_the_next_one_rides(atlas, monkeypatch):
     assert any(o["id"] == first and o["acked_at"] is not None for o in closed)
 
 
+def test_capture_and_list(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/capture", json={"text": "need more PLA filament", "kind": "note"})
+    assert resp.status_code == 200
+    capture_id = resp.json()["id"]
+    assert capture_id > 0
+
+    captures = client.get("/atlas/captures").json()["captures"]
+    assert len(captures) == 1
+    assert captures[0]["text"] == "need more PLA filament"
+    assert captures[0]["kind"] == "note"
+    assert captures[0]["category"] is None
+
+
+def test_capture_key_replaces_earlier_capture(atlas):
+    mod, client = atlas
+    client.post("/atlas/capture", json={"text": "idea: shop banner", "key": "banner-idea"})
+    client.post("/atlas/capture", json={"text": "idea: shop banner v2", "key": "banner-idea"})
+
+    captures = client.get("/atlas/captures").json()["captures"]
+    assert len(captures) == 1
+    assert captures[0]["text"] == "idea: shop banner v2"
+
+
+def test_captures_sort_uses_local_model_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "house"
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/capture", json={"text": "fix the garage door opener"})
+
+    resp = client.post("/atlas/captures/sort")
+    assert resp.status_code == 200
+    assert resp.json() == {"sorted": 1}
+
+    captures = client.get("/atlas/captures").json()["captures"]
+    assert captures[0]["category"] == "house"
+    assert captures[0]["sorted_at"] is not None
+
+
+def test_captures_sort_falls_back_to_keywords_when_model_is_down(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/capture", json={"text": "restock Etsy shop listing photos"})
+    client.post("/atlas/capture", json={"text": "mow the yard this weekend"})
+    client.post("/atlas/capture", json={"text": "sketch out the new app onboarding flow"})
+
+    client.post("/atlas/captures/sort")
+
+    by_text = {c["text"]: c["category"] for c in client.get("/atlas/captures").json()["captures"]}
+    assert by_text["restock Etsy shop listing photos"] == "shop"
+    assert by_text["mow the yard this weekend"] == "house"
+    assert by_text["sketch out the new app onboarding flow"] == "projects"
+
+
+def test_captures_sort_only_touches_uncategorized(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "projects"
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/capture", json={"text": "one"})
+    first_sort = client.post("/atlas/captures/sort").json()
+    assert first_sort == {"sorted": 1}
+
+    second_sort = client.post("/atlas/captures/sort").json()
+    assert second_sort == {"sorted": 0}
+
+
+def test_captures_filtered_by_category(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "shop"
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/capture", json={"text": "shop thing"})
+    client.post("/atlas/captures/sort")
+
+    shop_only = client.get("/atlas/captures", params={"category": "shop"}).json()["captures"]
+    house_only = client.get("/atlas/captures", params={"category": "house"}).json()["captures"]
+    assert len(shop_only) == 1
+    assert len(house_only) == 0
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

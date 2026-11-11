@@ -31,7 +31,7 @@ import re
 import sqlite3
 import time
 from contextlib import asynccontextmanager, closing, contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +52,8 @@ BRIEF_DEBOUNCE_S = 30
 BRIEF_MAX_WORDS = 120
 ASK_MAX_WORDS = 80
 OPEN_LOOPS_PER_BRIEF = 2  # oldest first; stays in the running list until acked
+CAPTURE_CATEGORIES = ("shop", "house", "projects")
+CAPTURES_SORT_HOUR = int(os.environ.get("ATLAS_CAPTURES_SORT_HOUR", "2"))  # local 24h clock
 
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
@@ -66,9 +68,11 @@ async def _atlas_lifespan(app):
     try:
         async with _mcp_app.lifespan(app):
             _schedule_athena_refresh()
+            _schedule_captures_nightly()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
+        _schedule_captures_nightly()
         yield
 
 
@@ -237,6 +241,21 @@ def init_hub_db():
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_open_loops_acked ON open_loops(acked_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_open_loops_key ON open_loops(key)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS captures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'note',
+                created_at INTEGER NOT NULL,
+                category TEXT,
+                sorted_at INTEGER,
+                key TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_category ON captures(category)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_key ON captures(key)")
         conn.commit()
 
 
@@ -245,6 +264,7 @@ init_hub_db()
 _brief_cache = {"brief": "", "updated": 0}
 _brief_lock = asyncio.Lock()
 _brief_task: Optional[asyncio.Task] = None
+_captures_task: Optional[asyncio.Task] = None
 
 
 class Report(BaseModel):
@@ -272,6 +292,12 @@ class OpenLoop(BaseModel):
 
 class OpenLoopAck(BaseModel):
     ids: list[int]
+
+
+class Capture(BaseModel):
+    text: str
+    kind: str = "note"  # idea | note | remind, as spoken
+    key: Optional[str] = None
 
 
 def _now_ms() -> int:
@@ -526,6 +552,120 @@ def open_loop_ack(a: OpenLoopAck):
         o for o in _brief_cache.get("open_loops", []) if o["id"] not in set(a.ids)
     ]
     return {"ok": True}
+
+
+def _fallback_capture_category(text: str) -> str:
+    lowered = text.lower()
+    shop_words = ("order", "etsy", "listing", "customer", "shop", "ship", "inventory")
+    house_words = ("house", "home", "garage", "laundry", "kitchen", "yard", "repair", "chore")
+    if any(w in lowered for w in shop_words):
+        return "shop"
+    if any(w in lowered for w in house_words):
+        return "house"
+    return "projects"
+
+
+async def _classify_capture(text: str) -> str:
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Sort this quick-captured note into exactly one category: shop, house, "
+                    "or projects. Reply with only that one word, nothing else."
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+        max_tokens=5,
+        timeout_s=20,
+    )
+    if reply:
+        lowered = reply.lower()
+        for category in CAPTURE_CATEGORIES:
+            if category in lowered:
+                return category
+    return _fallback_capture_category(text)
+
+
+async def _sort_captures() -> dict:
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM captures WHERE category IS NULL ORDER BY created_at ASC"
+        ).fetchall()
+    for r in rows:
+        category = await _classify_capture(r["text"])
+        with hub_db() as conn:
+            conn.execute(
+                "UPDATE captures SET category = ?, sorted_at = ? WHERE id = ?",
+                (category, _now_ms(), r["id"]),
+            )
+            conn.commit()
+    return {"sorted": len(rows)}
+
+
+def _seconds_until_next_sort_hour() -> float:
+    now = datetime.now()
+    target = now.replace(hour=CAPTURES_SORT_HOUR, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def _captures_nightly_loop():
+    while True:
+        await asyncio.sleep(_seconds_until_next_sort_hour())
+        try:
+            await _sort_captures()
+        except Exception:
+            pass
+
+
+def _schedule_captures_nightly():
+    global _captures_task
+    if _captures_task is not None and not _captures_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _captures_task = loop.create_task(_captures_nightly_loop())
+
+
+@app.post("/atlas/capture", dependencies=[Depends(require_token)])
+def capture(c: Capture):
+    with hub_db() as conn:
+        if c.key:
+            conn.execute("DELETE FROM captures WHERE key = ?", (c.key,))
+        cur = conn.execute(
+            "INSERT INTO captures (text, kind, created_at, key) VALUES (?, ?, ?, ?)",
+            (c.text, c.kind, _now_ms(), c.key),
+        )
+        conn.commit()
+        capture_id = cur.lastrowid
+    return {"id": capture_id}
+
+
+@app.get("/atlas/captures", dependencies=[Depends(require_token)])
+def list_captures(category: Optional[str] = None, since: Optional[int] = None, limit: int = 50):
+    query = "SELECT * FROM captures WHERE 1=1"
+    params: list = []
+    if category:
+        query += " AND category = ?"
+        params.append(category)
+    if since is not None:
+        query += " AND created_at >= ?"
+        params.append(since)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    with hub_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return {"captures": [dict(r) for r in rows]}
+
+
+@app.post("/atlas/captures/sort", dependencies=[Depends(require_token)])
+async def captures_sort():
+    return await _sort_captures()
 
 
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
@@ -817,6 +957,24 @@ def mcp_open_loops(include_closed: bool = False, limit: int = 50) -> dict:
 def mcp_open_loop_ack(ids: list[int]) -> dict:
     """Close one or more open loops by id."""
     return open_loop_ack(OpenLoopAck(ids=ids))
+
+
+@mcp.tool
+def mcp_capture(text: str, kind: str = "note", key: str | None = None) -> dict:
+    """Quick-capture an idea, note, or reminder; sorted into shop/house/projects overnight."""
+    return capture(Capture(text=text, kind=kind, key=key))
+
+
+@mcp.tool
+def mcp_captures(category: str | None = None, since: int | None = None, limit: int = 50) -> dict:
+    """List quick-captures, optionally filtered by sorted category (shop/house/projects)."""
+    return list_captures(category=category, since=since, limit=limit)
+
+
+@mcp.tool
+async def mcp_captures_sort() -> dict:
+    """Run the nightly capture-sort job now instead of waiting for the scheduled hour."""
+    return await captures_sort()
 
 
 @mcp.tool
