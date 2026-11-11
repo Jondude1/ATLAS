@@ -54,7 +54,8 @@ class CorinTest {
         assertEquals("buddie", wearableKind("Buddie-1234", "BB", ""))
         assertEquals("buddie", wearableKind("Buddie", "BB", "AA"))
         assertEquals("glasses", wearableKind("Renamed", "AA", "AA"))
-        assertNull(wearableKind("Pixel Buds Pro", "CC", "AA"))
+        assertEquals("pixelbuds", wearableKind("Jon's Pixel Buds Pro 2", "CC", "AA"))
+        assertNull(wearableKind("CMF Watch Pro 2-C599", "EE", "AA"))
         assertNull(wearableKind("Some Anzu clone", "DD", "AA"))
     }
 
@@ -420,6 +421,15 @@ class CorinTest {
         Glasses.buddieStream.value = "listening"
         assertTrue(Wear.repliesViaStream())
         assertTrue(Wear.switchLine().startsWith("Earbuds"))
+
+        // Pixel Buds are private like the Buddie buds, but have no always-on stream.
+        Glasses.active.value = "pixelbuds"
+        assertTrue(Wear.onBuds())
+        assertFalse(Wear.senderOnly())
+        assertFalse(Wear.repliesViaStream())
+        assertFalse(Wear.eyeBreaks())
+        assertTrue(Wear.promptLine().contains("Pixel Buds Pro 2"))
+        assertTrue(Wear.switchLine().startsWith("Pixel Buds"))
 
         Glasses.active.value = ""
         Glasses.buddieStream.value = "off"

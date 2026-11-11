@@ -149,7 +149,9 @@ data class Item(val text: String, val done: Boolean)
 
 /** How Corin behaves depending on which wearable it's in. */
 object Wear {
-    fun onBuds(): Boolean = Glasses.active.value == "buddie"
+    /** Any in-ear, private wearable: the Buddie earbuds or the Pixel Buds. */
+    fun onBuds(): Boolean = Glasses.active.value == "buddie" || Glasses.active.value == "pixelbuds"
+    fun onPixelBuds(): Boolean = Glasses.active.value == "pixelbuds"
     fun onGlasses(): Boolean = Glasses.active.value == "glasses"
 
     /** Unprompted-speech frequency for the active wearable (0 to 2). */
@@ -166,12 +168,13 @@ object Wear {
     }.coerceIn(0.2f, 1f)
 
     /** With the buds' always-on stream running, replies come through it instead of opening a call-style mic. */
-    fun repliesViaStream(): Boolean = onBuds() && Glasses.buddieStream.value == "listening"
+    fun repliesViaStream(): Boolean = Glasses.active.value == "buddie" && Glasses.buddieStream.value == "listening"
 
     /** Eye-break nudges only make sense with the screen glasses on. */
     fun eyeBreaks(): Boolean = onGlasses()
 
     fun label(): String = when {
+        onPixelBuds() -> "Pixel Buds: private"
         onBuds() -> "earbuds: private"
         onGlasses() -> if (Prefs.discreetGlasses) "glasses: open-ear, discreet" else "glasses: open-ear"
         else -> ""
@@ -179,6 +182,7 @@ object Wear {
 
     /** What the model is told about the situation. */
     fun promptLine(): String = when {
+        onPixelBuds() -> "You're in his Pixel Buds Pro 2 right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. These have good sound and noise cancelling, so he may be listening to something or out and about; he can answer you right after you speak."
         onBuds() -> "You're in his Buddie earbuds right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. He can talk to you hands-free by saying your name, and he may be out and about."
         onGlasses() -> "You're in his Razer Anzu glasses right now. They are open-ear speakers, so people near him can hear you" +
             (if (Prefs.discreetGlasses) ": keep it to one or two short sentences, and don't say private details out loud (money, health, personal messages, anything about other people); say there's something private and offer to save it for the earbuds or his phone instead." else ": keep it to one or two short sentences.") +
@@ -187,7 +191,11 @@ object Wear {
     }
 
     /** The line Corin says when he swaps wearables mid-session. */
-    fun switchLine(): String = if (onBuds()) "Earbuds. It's just us now." else "Glasses on. I'll keep it discreet."
+    fun switchLine(): String = when {
+        onPixelBuds() -> "Pixel Buds. It's just us now."
+        onBuds() -> "Earbuds. It's just us now."
+        else -> "Glasses on. I'll keep it discreet."
+    }
 }
 
 /** Rough daily token meter so API spend stays visible. */

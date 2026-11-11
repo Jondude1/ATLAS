@@ -191,6 +191,7 @@ class GlassesService : Service() {
         val text = when {
             !Glasses.connected.value -> "Waiting for the glasses or earbuds"
             quiet -> "With you, staying quiet"
+            Wear.onPixelBuds() -> "With you in the Pixel Buds"
             Wear.onBuds() -> "With you in the earbuds"
             else -> "With you in the glasses"
         }
@@ -256,7 +257,8 @@ class GlassesService : Service() {
             }
         }
         Glasses.wearing.value = listOfNotNull(
-            "glasses".takeIf { it in kinds }, "Buddie earbuds".takeIf { "buddie" in kinds }
+            "glasses".takeIf { it in kinds }, "Buddie earbuds".takeIf { "buddie" in kinds },
+            "Pixel Buds".takeIf { "pixelbuds" in kinds }
         ).joinToString(" and ")
     }
 
@@ -334,7 +336,7 @@ class GlassesService : Service() {
         refreshNotification()
         updateWakeLock()
         Motion.start(this)
-        Obelisk.presence(if (Glasses.wearing.value.startsWith("Buddie")) "earbuds" else "glasses")
+        Obelisk.presence(if (Wear.onBuds()) "earbuds" else "glasses")
         scope.launch {
             delay(5_000) // let the audio route settle
             readBattery()
@@ -662,10 +664,11 @@ class NotifyListener : NotificationListenerService() {
     }
 }
 
-/** Classifies a Bluetooth device by name and address: "glasses", "buddie", or null. */
+/** Classifies a Bluetooth device by name and address: "glasses", "buddie", "pixelbuds", or null. */
 fun wearableKind(name: String, address: String, savedGlassesAddress: String): String? = when {
     savedGlassesAddress.isNotBlank() && address == savedGlassesAddress -> "glasses"
     name.contains("buddie", ignoreCase = true) -> "buddie"
+    name.contains("pixel buds", ignoreCase = true) -> "pixelbuds"
     savedGlassesAddress.isBlank() && name.contains("anzu", ignoreCase = true) -> "glasses"
     else -> null
 }

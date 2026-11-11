@@ -485,12 +485,18 @@ fun HomeScreen(resumes: Int) {
                         when {
                             !connected -> "Nothing"
                             activeWear == "buddie" -> "Earbuds"
+                            activeWear == "pixelbuds" -> "Pixel Buds"
                             else -> "Glasses"
                         },
                         fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream
                     )
                     Text(
-                        if (!connected) "Put them on and I'm there" else if (activeWear == "buddie") "Private, hands-free" else "Open-ear, discreet",
+                        when {
+                            !connected -> "Put them on and I'm there"
+                            activeWear == "buddie" -> "Private, hands-free"
+                            activeWear == "pixelbuds" -> "Private"
+                            else -> "Open-ear, discreet"
+                        },
                         color = Muted, fontSize = 13.sp
                     )
                 }
@@ -856,7 +862,7 @@ fun SettingsScreen() {
             ToggleRow("Discreet", "People nearby can hear open-ear speakers: short replies, and nothing private said out loud", Prefs.discreetGlasses) { Prefs.discreetGlasses = it }
             ToggleRow("Notifications: sender only", "Say who it's from, not what it says", Prefs.senderOnlyGlasses) { Prefs.senderOnlyGlasses = it }
 
-            Text("In the earbuds (private)", fontWeight = FontWeight.Bold)
+            Text("In the Buddie earbuds or Pixel Buds (private)", fontWeight = FontWeight.Bold)
             Text("Speaks up " + often[chatBuds.toInt().coerceIn(0, 2)])
             Slider(value = chatBuds, onValueChange = { chatBuds = it; Prefs.chattinessBuds = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Volume ${volBuds.toInt()}%")
