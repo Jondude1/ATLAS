@@ -187,6 +187,10 @@ val REQUESTED = arrayOf(
     Manifest.permission.POST_NOTIFICATIONS,
     Manifest.permission.ACCESS_FINE_LOCATION,
     Manifest.permission.READ_CALENDAR,
+    Manifest.permission.WRITE_CALENDAR,
+    Manifest.permission.READ_CONTACTS,
+    Manifest.permission.SEND_SMS,
+    Manifest.permission.CALL_PHONE,
     Manifest.permission.ACTIVITY_RECOGNITION
 )
 
@@ -594,10 +598,11 @@ fun HomeScreen(resumes: Int) {
             }
         }
 
-        if (missing.isNotEmpty() || !listenerOn || !unrestricted || Prefs.apiKey.isBlank()) {
+        val overlay = remember(resumes) { Settings.canDrawOverlays(ctx) }
+        if (missing.isNotEmpty() || !listenerOn || !unrestricted || !overlay || Prefs.apiKey.isBlank()) {
             Section("Setup") {
                 if (missing.isNotEmpty()) {
-                    Text("Bluetooth, microphone, notifications, location (find my glasses) and calendar access.")
+                    Text("Bluetooth, microphone, notifications, location, calendar, contacts, and sending texts and calls on your say-so.")
                     Button(onClick = { launcher.launch(REQUESTED) }) { Text("Grant permissions") }
                 }
                 if (!listenerOn) {
@@ -616,6 +621,15 @@ fun HomeScreen(resumes: Int) {
                         } catch (_: Exception) {
                         }
                     }) { Text("Allow background running") }
+                }
+                if (!overlay) {
+                    Text("Allow display over other apps so ${Prefs.name} can open apps, start navigation and set alarms while the phone is in your pocket.")
+                    Button(onClick = {
+                        try {
+                            ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+                        } catch (_: Exception) {
+                        }
+                    }) { Text("Allow opening apps") }
                 }
                 if (Prefs.apiKey.isBlank()) Text("Add your Anthropic API key in Settings so ${Prefs.name} can think.")
             }
@@ -1063,6 +1077,35 @@ fun SettingsScreen() {
             PrefField("Speech service", Prefs.haTtsService) { Prefs.haTtsService = it.trim() }
             PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
             PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }
+        }
+
+        Section("Hermes and your vault") {
+            Text("${Prefs.name} handles the conversation itself and hands bigger, tool-heavy jobs to Hermes on Athena, then reports back.", color = Muted, fontSize = 13.sp)
+            PrefField("Hermes API address (ends in /v1)", Prefs.hermesUrl) { Prefs.hermesUrl = it.trim() }
+            PrefField("Hermes API key (if it needs one)", Prefs.hermesKey, secret = true) { Prefs.hermesKey = it.trim() }
+            PrefField("Model name to send", Prefs.hermesModel) { Prefs.hermesModel = it.trim() }
+            var vault by remember { mutableStateOf(Prefs.vaultUri) }
+            val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+                if (uri != null) {
+                    try {
+                        ctx.contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    } catch (_: Exception) {
+                    }
+                    Prefs.vaultUri = uri.toString()
+                    vault = Prefs.vaultUri
+                }
+            }
+            Text(
+                if (vault.isBlank()) "Obsidian vault: none chosen. Pick the vault folder on this phone and ${Prefs.name} can search it, read notes, and keep each day's conversation in a Corin folder there."
+                else "Obsidian vault: " + Uri.decode(vault).substringAfterLast(':'),
+                color = Muted, fontSize = 13.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SoftButton(onClick = { pickVault.launch(null) }) { Text(if (vault.isBlank()) "Choose vault folder" else "Change folder") }
+                if (vault.isNotBlank()) SoftButton(onClick = { Prefs.vaultUri = ""; vault = "" }) { Text("Disconnect") }
+            }
         }
 
         Section("Obelisk and local models") {

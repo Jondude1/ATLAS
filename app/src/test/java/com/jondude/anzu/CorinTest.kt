@@ -461,6 +461,22 @@ class CorinTest {
         assertEquals("hello there", JSONObject(c.third).getString("input"))
     }
 
+    // ---------- reach: phone, calendar, Hermes ----------
+    @Test
+    fun reachHelpersParse() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        // a typed number is used as is; a name needs contacts access, which the test doesn't have
+        assertEquals("814-555-0100", com.jondude.anzu.assist.Phone.findContact(ctx, "814-555-0100")!!.second)
+        assertNull(com.jondude.anzu.assist.Phone.findContact(ctx, "Jenna"))
+        val t = com.jondude.anzu.assist.Phone.parseWhen("2026-11-12 14:30")!!
+        assertEquals("2026-11-12 14:30", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(t)))
+        assertNull(com.jondude.anzu.assist.Phone.parseWhen("next Tuesday"))
+        assertEquals("Done. Two files moved.", com.jondude.anzu.assist.Hermes.parseReply("""{"choices":[{"message":{"role":"assistant","content":" Done. Two files moved. "}}]}"""))
+        assertEquals("", com.jondude.anzu.assist.Hermes.parseReply("oops"))
+        assertFalse(com.jondude.anzu.assist.Vault.configured())
+        assertTrue(com.jondude.anzu.assist.Phone.media(ctx, "juggle").startsWith("I can play"))
+    }
+
     // ---------- updater / usage ----------
     @Test
     fun updaterReadsBuildNumbers() {

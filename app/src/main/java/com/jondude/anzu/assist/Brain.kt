@@ -533,7 +533,7 @@ object Brain {
                 """
 Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on his desktop, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             if (Prefs.aboutMe.isNotBlank()) append("\nAbout Jon (from him): ").append(Prefs.aboutMe.trim()).append('\n')
@@ -572,6 +572,29 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             JSONObject().put("name", str("Place name.")), listOf("name")))
         a.put(tool("remind_at_place", "Remind Jon of something the next time he arrives at a saved place.",
             JSONObject().put("place", str("A saved place name.")).put("text", str("What to remind him.")), listOf("place", "text")))
+        a.put(tool("media", "Control what's playing on the phone.",
+            JSONObject().put("action", str("play, pause, next, previous, volume_up or volume_down")), listOf("action")))
+        a.put(tool("send_text", "Send a text message to a contact or number. Jon is asked to confirm out loud.",
+            JSONObject().put("to", str("Contact name or phone number.")).put("message", str("The message, in his voice.")), listOf("to", "message")))
+        a.put(tool("call", "Place a phone call to a contact or number. Jon is asked to confirm out loud.",
+            JSONObject().put("to", str("Contact name or phone number.")), listOf("to")))
+        a.put(tool("open_app", "Open an app on the phone by name.", JSONObject().put("name", str("App name.")), listOf("name")))
+        a.put(tool("navigate", "Start driving directions in Maps.", JSONObject().put("destination", str("Place or address.")), listOf("destination")))
+        a.put(tool("set_alarm", "Set a clock alarm.",
+            JSONObject().put("hour", num("0 to 23")).put("minute", num("0 to 59")).put("label", str("What it's for.")), listOf("hour", "minute")))
+        a.put(tool("agenda", "Read the calendar for a day.", JSONObject().put("day_offset", num("0 for today, 1 for tomorrow, and so on.")), listOf("day_offset")))
+        a.put(tool("create_event", "Add an event to Jon's calendar.",
+            JSONObject().put("title", str("Event title.")).put("start", str("Local start time as YYYY-MM-DD HH:MM (24 hour)."))
+                .put("minutes", num("Length in minutes.")).put("location", str("Optional place.")), listOf("title", "start")))
+        if (Vault.configured()) {
+            a.put(tool("vault_search", "Search Jon's Obsidian vault.", JSONObject().put("query", str("Keywords.")), listOf("query")))
+            a.put(tool("vault_read", "Read the start of a note in the vault.", JSONObject().put("note", str("Note name.")), listOf("note")))
+            a.put(tool("vault_note", "Append a line to today's Corin note in the vault.", JSONObject().put("text", str("What to write.")), listOf("text")))
+        }
+        if (Hermes.configured()) {
+            a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes on Jon's desktop. Runs in the background; you report the result when it comes back.",
+                JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
+        }
         a.put(tool("meeting_start", "Start taking notes on a meeting or session (needs the Buddie earbuds stream)."))
         a.put(tool("meeting_stop", "Stop the meeting recording and save summarized notes."))
         a.put(tool("weather", "Current conditions and today's forecast where Jon is."))
@@ -614,6 +637,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             append(if (ms >= 0) "Home Assistant reachable, $ms milliseconds. " else "Home Assistant unreachable. ")
         }
         if (Local.configured()) append("Local model tier configured. ")
+        append(if (Hermes.configured()) "Hermes is linked. " else "Hermes is not linked. ")
+        append(if (Vault.configured()) "Obsidian vault is linked. " else "No Obsidian vault chosen. ")
         append("Buddie earbuds stream: ${Glasses.buddieStream.value}. ")
     }
 
@@ -691,6 +716,79 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     Store.logAction("Set a reminder for $place: ${input.optString("text").take(60)}")
                     "Reminder set for the next time he arrives at $place."
                 }
+            }
+            "media" -> Phone.media(ctx, input.optString("action"))
+            "send_text" -> {
+                val who = Phone.findContact(ctx, input.optString("to"))
+                val message = input.optString("message")
+                if (who == null) "I couldn't find ${input.optString("to")} in his contacts (or contacts access isn't granted)."
+                else if (message.isBlank()) "There's no message to send."
+                else if (!confirm("Text ${who.first}: $message. Send it?")) "Not sent: Jon didn't give a spoken okay."
+                else {
+                    val r = Phone.sendText(ctx, who.second, message)
+                    if (r == "Sent.") Store.logAction("Texted ${who.first}: ${message.take(60)}")
+                    lastUndo = null
+                    r
+                }
+            }
+            "call" -> {
+                val who = Phone.findContact(ctx, input.optString("to"))
+                if (who == null) "I couldn't find ${input.optString("to")} in his contacts (or contacts access isn't granted)."
+                else if (!confirm("Call ${who.first}?")) "Not calling: Jon didn't give a spoken okay."
+                else {
+                    Store.logAction("Called ${who.first}")
+                    lastUndo = null
+                    Phone.call(ctx, who.second)
+                }
+            }
+            "open_app" -> Phone.openApp(ctx, input.optString("name"))
+            "navigate" -> Phone.navigate(ctx, input.optString("destination"))
+            "set_alarm" -> Phone.setAlarm(ctx, input.optInt("hour", 7), input.optInt("minute", 0), input.optString("label", "Alarm"))
+            "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0))
+            "create_event" -> {
+                val start = Phone.parseWhen(input.optString("start"))
+                if (start == null) "I need the start time as YYYY-MM-DD HH:MM."
+                else {
+                    val (msg, uri) = Phone.createEvent(ctx, input.optString("title"), start, input.optInt("minutes", 60), input.optString("location"))
+                    if (uri != null) {
+                        Store.logAction("Calendar: $msg")
+                        lastUndo = {
+                            try {
+                                ctx.contentResolver.delete(uri, null, null)
+                                "Event removed."
+                            } catch (e: Exception) {
+                                "Couldn't remove the event."
+                            }
+                        }
+                    }
+                    msg
+                }
+            }
+            "vault_search" -> Vault.search(ctx, input.optString("query")).take(2400)
+            "vault_read" -> Vault.readNote(ctx, input.optString("note"))
+            "vault_note" -> if (Vault.appendDaily(ctx, "- " + input.optString("text"))) {
+                Store.logAction("Wrote to the vault: ${input.optString("text").take(60)}")
+                "Written to today's note."
+            } else "Couldn't write to the vault."
+            "ask_hermes" -> {
+                val task = input.optString("task")
+                Store.logAction("Asked Hermes: ${task.take(80)}")
+                Corin.scope.launch(Dispatchers.IO) {
+                    try {
+                        val answer = Hermes.ask(task)
+                        Store.addNote("Hermes: ${task.take(80)}\n$answer")
+                        record("[Hermes finished: $task]", answer, "")
+                        val spoken = try {
+                            ask("You are ${Prefs.name}. Put this result from your colleague Hermes into two or three spoken sentences for Jon: no markdown, most useful part first.", answer.take(6000), 220)
+                        } catch (e: Exception) {
+                            answer.take(400)
+                        }
+                        Corin.announce("Hermes is back. $spoken The full answer is in your notes.")
+                    } catch (e: Exception) {
+                        Corin.announce("Hermes didn't come through on that. ${e.message ?: ""}")
+                    }
+                }
+                "Handed to Hermes; you'll report back when it answers."
             }
             "meeting_start" -> {
                 if (Glasses.buddieStream.value != "listening") "Meeting notes need the Buddie earbuds stream, which is ${Glasses.buddieStream.value}."
@@ -811,6 +909,21 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
         Store.appendLog(Prefs.name, answer)
         Obelisk.log(Prefs.name, answer)
+        mirrorToVault(userSpeaker, user, answer)
+    }
+
+    @Volatile
+    var appContext: Context? = null
+
+    /** Keeps the day's conversation in the Obsidian vault too, when one is chosen. */
+    private fun mirrorToVault(userSpeaker: String, user: String, answer: String) {
+        val ctx = appContext ?: return
+        if (!Vault.configured()) return
+        Corin.scope.launch(Dispatchers.IO) {
+            val time = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+            if (userSpeaker.isNotEmpty()) Vault.appendDaily(ctx, "- $time **$userSpeaker**: ${user.replace('\n', ' ')}")
+            Vault.appendDaily(ctx, "- $time **${Prefs.name}**: ${answer.replace('\n', ' ')}")
+        }
     }
 
     /** Jon said (or typed) something; Corin answers. */

@@ -10,7 +10,7 @@ mkdir -p shots
 shot() { adb exec-out screencap -p > "shots/$1.png" 2>/dev/null || true; }
 adb shell cmd uimode night yes || true
 adb install -r "$APK" || fail "install failed"
-for p in BLUETOOTH_CONNECT BLUETOOTH_SCAN RECORD_AUDIO POST_NOTIFICATIONS ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION READ_CALENDAR ACTIVITY_RECOGNITION; do
+for p in BLUETOOTH_CONNECT BLUETOOTH_SCAN RECORD_AUDIO POST_NOTIFICATIONS ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION READ_CALENDAR WRITE_CALENDAR READ_CONTACTS SEND_SMS CALL_PHONE ACTIVITY_RECOGNITION; do
   adb shell pm grant $PKG android.permission.$p || true
 done
 adb logcat -c
@@ -90,12 +90,12 @@ tap "Settings"; sleep 2
 seen=""
 for i in $(seq 1 30); do
   dump
-  for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+  for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Hermes and your vault" "Obelisk and local models" App; do
     case "$seen" in *"[$sec]"*) ;; *) grep -q "text=\"$sec\"" ui.xml && seen="$seen[$sec]";; esac
   done
   adb shell input swipe 12 1500 12 600 300; sleep 1
 done
-for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Obelisk and local models" App; do
+for sec in Brain Identity Presence "Glasses and earbuds" Voice Listening "Buddie earbuds" "Home Assistant" "Hermes and your vault" "Obelisk and local models" App; do
   case "$seen" in *"[$sec]"*) ;; *) fail "Settings section missing: $sec";; esac
 done
 check "Settings scrolled"

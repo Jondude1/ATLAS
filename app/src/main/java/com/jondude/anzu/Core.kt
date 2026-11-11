@@ -17,6 +17,7 @@ class App : Application() {
         Prefs.init(this)
         Store.init(this)
         Speaker.init(this)
+        com.jondude.anzu.assist.Brain.appContext = this
     }
 }
 
@@ -99,6 +100,10 @@ object Prefs {
     var buddieBleAddress by StrPref("buddieBleAddress", "")
     var wakeWord by BoolPref("wakeWord", true)
     var callNotes by BoolPref("callNotes", false)
+    var vaultUri by StrPref("vaultUri", "")
+    var hermesUrl by StrPref("hermesUrl", "")
+    var hermesKey by StrPref("hermesKey", "")
+    var hermesModel by StrPref("hermesModel", "hermes-agent")
     var buddieFastLink by BoolPref("buddieFastLink", false)
     var buddieCompressedFirst by BoolPref("buddieCompressedFirst", false)
     var commuteAlerts by BoolPref("commuteAlerts", true)
