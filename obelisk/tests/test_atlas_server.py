@@ -1440,6 +1440,115 @@ def test_sunday_brief_includes_weighin_line_only_when_opted_in(atlas, monkeypatc
     assert "180.5" in body["brief"]
 
 
+def test_camera_ask_answers_from_a_snapshot(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_snapshot(camera, timeout_s=10):
+        assert camera == "front_porch"
+        return b"fake-jpeg-bytes"
+
+    async def fake_vision_chat(image_bytes, question, timeout_s=90):
+        assert image_bytes == b"fake-jpeg-bytes"
+        assert "clear" in question.lower()
+        return "Yes, the porch is clear."
+
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    monkeypatch.setattr(mod, "_vision_chat", fake_vision_chat)
+    resp = client.post("/atlas/camera/ask", json={"camera": "front_porch", "question": "Is the porch clear?"})
+    assert resp.json() == {"answer": "Yes, the porch is clear.", "camera": "front_porch"}
+
+
+def test_camera_ask_when_snapshot_unavailable(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_snapshot(camera, timeout_s=10):
+        return None
+
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    resp = client.post("/atlas/camera/ask", json={"camera": "office", "question": "anything"}).json()
+    assert "Couldn't get a snapshot" in resp["answer"]
+
+
+def test_camera_ask_when_vision_model_is_down(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_snapshot(camera, timeout_s=10):
+        return b"bytes"
+
+    async def fake_vision_chat(image_bytes, question, timeout_s=90):
+        return None
+
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    monkeypatch.setattr(mod, "_vision_chat", fake_vision_chat)
+    resp = client.post("/atlas/camera/ask", json={"camera": "office", "question": "anything"}).json()
+    assert "isn't answering" in resp["answer"]
+
+
+def test_print_bed_clear_uses_the_print_camera(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_snapshot(camera, timeout_s=10):
+        assert camera == mod.PRINT_CAMERA
+        return b"bytes"
+
+    async def fake_vision_chat(image_bytes, question, timeout_s=90):
+        assert "print bed" in question.lower()
+        return "The bed is clear."
+
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    monkeypatch.setattr(mod, "_vision_chat", fake_vision_chat)
+    resp = client.post("/atlas/print/bed-clear").json()
+    assert resp == {"answer": "The bed is clear.", "camera": mod.PRINT_CAMERA}
+
+
+def test_camera_find_returns_the_first_matching_camera(atlas, monkeypatch):
+    mod, client = atlas
+    camera_calls = []
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {
+            "cameras": {
+                "front_porch": {"enabled": True},
+                "dog_cam": {"enabled": True},
+                "office": {"enabled": False},
+            }
+        }
+
+    async def fake_snapshot(camera, timeout_s=10):
+        camera_calls.append(camera)
+        return b"bytes"
+
+    async def fake_vision_chat(image_bytes, question, timeout_s=90):
+        return "YES, Fiona is here." if camera_calls[-1] == "dog_cam" else "NO, not here."
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    monkeypatch.setattr(mod, "_vision_chat", fake_vision_chat)
+    resp = client.post("/atlas/camera/find", json={"question": "Fiona the dog"}).json()
+    assert resp["found"] is True
+    assert resp["camera"] == "dog_cam"
+    assert "office" not in camera_calls  # disabled cameras are never checked
+
+
+def test_camera_find_reports_not_found_when_no_camera_matches(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {"front_porch": {"enabled": True}}}
+
+    async def fake_snapshot(camera, timeout_s=10):
+        return b"bytes"
+
+    async def fake_vision_chat(image_bytes, question, timeout_s=90):
+        return "NO, not visible."
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_fetch_frigate_snapshot", fake_snapshot)
+    monkeypatch.setattr(mod, "_vision_chat", fake_vision_chat)
+    resp = client.post("/atlas/camera/find", json={"question": "a spaceship"}).json()
+    assert resp == {"found": False, "camera": None, "answer": "Didn't spot that on any camera right now."}
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

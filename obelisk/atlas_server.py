@@ -25,6 +25,7 @@ Then put http://<obelisk-tailscale-name>:8765 in the app under
 Settings -> Obelisk and local models. Keep it on Tailscale only: there is no login.
 """
 import asyncio
+import base64
 import json
 import os
 import re
@@ -161,6 +162,16 @@ CHRONICLE_MAX_WORDS = 150  # a recap can run a bit longer than a spoken brief
 # killable by design, never urgent.
 CARE_MOVEMENT_COOLDOWN_S = int(os.environ.get("ATLAS_CARE_MOVEMENT_COOLDOWN_S", str(4 * 3600)))
 _care_state = {"last_movement_nudge_at": 0}
+
+# Second Set of Eyes, hub half (#7). "Point the phone" is the phone's own
+# camera -- app-side, not this hub. The hub half is the "ask about a camera
+# view" case: a local vision model (confirmed present in Ollama:
+# qwen3-vl family) answers a plain question from a Frigate snapshot.
+# "/no_think" is Qwen3's own inline control token to skip its chain-of-
+# thought preamble -- without it the model burns the whole token budget
+# thinking and returns empty content, confirmed live before relying on it.
+VISION_MODEL = os.environ.get("ATLAS_VISION_MODEL", "qwen3-vl:4b")
+VISION_TIMEOUT_S = 90
 
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
@@ -553,6 +564,15 @@ class ChronicleRecapRequest(BaseModel):
 
 class WeighIn(BaseModel):
     weight: float
+
+
+class CameraAsk(BaseModel):
+    camera: str
+    question: str
+
+
+class CameraFind(BaseModel):
+    question: str
 
 
 def _now_ms() -> int:
@@ -2009,6 +2029,81 @@ async def print_preflight():
     }
 
 
+async def _fetch_frigate_snapshot(camera: str, timeout_s: float = 10) -> Optional[bytes]:
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.get(f"{FRIGATE_URL.rstrip('/')}/api/{camera}/latest.jpg")
+            resp.raise_for_status()
+            return resp.content
+    except Exception:
+        return None
+
+
+async def _vision_chat(image_bytes: bytes, question: str, timeout_s: float = VISION_TIMEOUT_S) -> Optional[str]:
+    """Calls the local vision model with one image. Returns None (never raises) if it's down."""
+    try:
+        b64 = base64.b64encode(image_bytes).decode()
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(
+                f"{LLM_URL.rstrip('/')}/chat/completions",
+                json={
+                    "model": VISION_MODEL,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"/no_think {question} Answer in one short plain sentence.",
+                                },
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                            ],
+                        }
+                    ],
+                    "max_tokens": 300,
+                },
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            return content or None
+    except Exception:
+        return None
+
+
+async def _ask_camera(camera: str, question: str) -> dict:
+    image = await _fetch_frigate_snapshot(camera)
+    if image is None:
+        return {"answer": f"Couldn't get a snapshot from '{camera}' right now.", "camera": camera}
+    reply = await _vision_chat(image, question)
+    if reply is None:
+        return {"answer": "The vision model isn't answering right now.", "camera": camera}
+    return {"answer": " ".join(reply.split()[:ASK_MAX_WORDS]), "camera": camera}
+
+
+@app.post("/atlas/camera/ask", dependencies=[Depends(require_token)])
+async def camera_ask(a: CameraAsk):
+    return await _ask_camera(a.camera, a.question)
+
+
+@app.post("/atlas/print/bed-clear", dependencies=[Depends(require_token)])
+async def print_bed_clear():
+    return await _ask_camera(
+        PRINT_CAMERA,
+        "Is the print bed/build plate visible and clear, or is there a finished or failed print still on it?",
+    )
+
+
+@app.post("/atlas/camera/find", dependencies=[Depends(require_token)])
+async def camera_find(f: CameraFind):
+    config = await _frigate_get("/api/config")
+    cameras = [name for name, cfg in (config or {}).get("cameras", {}).items() if cfg.get("enabled")]
+    for camera in cameras:
+        result = await _ask_camera(camera, f"Does this image show: {f.question}? Start your answer with YES or NO.")
+        if result["answer"].strip().upper().startswith("YES"):
+            return {"found": True, "camera": camera, "answer": result["answer"]}
+    return {"found": False, "camera": None, "answer": "Didn't spot that on any camera right now."}
+
+
 async def _check_print_camera() -> dict:
     config = await _frigate_get("/api/config")
     camera_cfg = (config or {}).get("cameras", {}).get(PRINT_CAMERA)
@@ -2968,6 +3063,24 @@ async def mcp_care_sedentary() -> dict:
 def mcp_log_weigh_in(weight: float) -> dict:
     """Log a weigh-in, used for the opt-in weekly Sunday Brief line."""
     return log_weigh_in(WeighIn(weight=weight))
+
+
+@mcp.tool
+async def mcp_camera_ask(camera: str, question: str) -> dict:
+    """Ask a plain question about a named camera's current view (e.g. 'is the print bed clear')."""
+    return await camera_ask(CameraAsk(camera=camera, question=question))
+
+
+@mcp.tool
+async def mcp_print_bed_clear() -> dict:
+    """Check whether the print bed/build plate is visible and clear right now."""
+    return await print_bed_clear()
+
+
+@mcp.tool
+async def mcp_camera_find(question: str) -> dict:
+    """Search every enabled camera's current view for something (e.g. 'where is Fiona the dog')."""
+    return await camera_find(CameraFind(question=question))
 
 
 @mcp.tool
