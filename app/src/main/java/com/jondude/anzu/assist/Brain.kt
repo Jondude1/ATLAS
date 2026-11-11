@@ -1005,6 +1005,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     suspend fun reply(
         ctx: Context, userText: String, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
+        // "Brief me" goes straight to the hub: fast, held to its spoken length, and it works even with no model.
+        if (Hub.configured() && Spoken.isBriefRequest(userText)) {
+            val b = Hub.brief(0)
+            val text = if (b == null) "I can't reach the hub on Obelisk right now, so I don't have a brief."
+            else Spoken.brief(b.text, b.urgent.map { "${it.app}: ${it.title}" })
+            if (b != null && b.urgent.isNotEmpty()) Hub.ack(b.urgent.map { it.id })
+            record(userText, text)
+            return@withContext text
+        }
         try {
             Mcp.refresh()
         } catch (_: Exception) {
@@ -1255,5 +1264,41 @@ object Routing {
         val drive = (driveSeconds + 59) / 60
         return if (mins <= 0) "Time to leave for $title. It's about a $drive minute drive."
         else "Leave in about $mins minutes for $title. It's about a $drive minute drive."
+    }
+}
+
+
+/** Rules for what gets spoken: briefs are held to a word budget, because every word costs attention in the ear. */
+object Spoken {
+    private val briefAsk = Regex(
+        "^(\\W*(hey |ok |okay )?(atlas\\W*)?)?(brief me|(give me |what'?s |read me )?(the |my )?(morning |evening |daily )?(brief|briefing|rundown)|catch me up|what did i miss)\\W*(please)?\\W*$",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isBriefRequest(text: String): Boolean = briefAsk.matches(text.trim())
+
+    /** ~120 words in the morning, ~60 in the evening and at night, ~80 otherwise. */
+    fun budget(hour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Int = when (hour) {
+        in 5..11 -> 120
+        in 12..16 -> 80
+        else -> 60
+    }
+
+    /** Urgent first, then the brief, cut at a sentence boundary inside the budget. */
+    fun brief(text: String, urgent: List<String>, words: Int = budget()): String {
+        val parts = ArrayList<String>()
+        if (urgent.isNotEmpty()) parts += (if (urgent.size == 1) "One urgent thing: " else "${urgent.size} urgent things: ") +
+            urgent.take(3).joinToString("; ") + "."
+        if (text.isNotBlank()) parts += text.trim()
+        if (parts.isEmpty()) return "Nothing new from your systems. All quiet."
+        return trimWords(parts.joinToString(" "), words)
+    }
+
+    fun trimWords(text: String, words: Int): String {
+        val all = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (all.size <= words) return text.trim()
+        val cut = all.take(words).joinToString(" ")
+        val end = cut.lastIndexOfAny(charArrayOf('.', '!', '?'))
+        return if (end > cut.length / 2) cut.substring(0, end + 1) else "$cut…"
     }
 }

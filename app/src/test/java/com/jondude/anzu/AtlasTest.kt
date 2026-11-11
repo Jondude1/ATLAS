@@ -696,4 +696,19 @@ class AtlasTest {
         assertTrue(Earcons.notes("listen").last().first > Earcons.notes("listen").first().first) // rises
         assertTrue(Earcons.notes("done").last().first < Earcons.notes("done").first().first)     // falls
     }
+
+    @Test
+    fun spokenBriefKeepsToItsBudget() {
+        val S = com.jondude.anzu.assist.Spoken
+        listOf("brief me", "Atlas, brief me", "what's the brief?", "give me the morning briefing", "catch me up", "What did I miss")
+            .forEach { assertTrue(it, S.isBriefRequest(it)) }
+        listOf("brief me on the garage door later", "write a brief for work").forEach { assertFalse(it, S.isBriefRequest(it)) }
+        assertEquals(120, S.budget(8)); assertEquals(60, S.budget(21))
+        assertEquals("One urgent thing: house: Garage open. Two packages came.", S.brief("Two packages came.", listOf("house: Garage open"), 60))
+        val long = (1..40).joinToString(" ") { "Sentence $it is here." }
+        val cut = S.brief(long, emptyList(), 60)
+        assertTrue(cut.split(" ").size <= 60)
+        assertTrue(cut.endsWith("."))
+        assertEquals("Nothing new from your systems. All quiet.", S.brief("", emptyList()))
+    }
 }
