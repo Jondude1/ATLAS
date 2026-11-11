@@ -189,6 +189,70 @@ def test_urgent_survives_a_fresh_process_without_a_rebuild(atlas):
     assert not any(u["id"] == report_id for u in urgent)
 
 
+def test_open_loop_capture_and_list(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/open-loop", json={"text": "call the vet about Max", "source": "voice"})
+    assert resp.status_code == 200
+    loop_id = resp.json()["id"]
+    assert loop_id > 0
+
+    open_loops = client.get("/atlas/open-loops").json()["open_loops"]
+    assert len(open_loops) == 1
+    assert open_loops[0]["text"] == "call the vet about Max"
+    assert open_loops[0]["source"] == "voice"
+    assert open_loops[0]["spoken_count"] == 0
+
+
+def test_open_loop_key_replaces_earlier_loop(atlas):
+    mod, client = atlas
+    client.post("/atlas/open-loop", json={"text": "renew passport", "key": "passport"})
+    client.post("/atlas/open-loop", json={"text": "renew passport (urgent, expires soon)", "key": "passport"})
+
+    open_loops = client.get("/atlas/open-loops").json()["open_loops"]
+    assert len(open_loops) == 1
+    assert "expires soon" in open_loops[0]["text"]
+
+
+def test_open_loops_ride_the_brief_oldest_first_max_two(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    ids = []
+    for text in ["first loop", "second loop", "third loop"]:
+        ids.append(client.post("/atlas/open-loop", json={"text": text}).json()["id"])
+
+    body = client.get("/atlas/brief").json()
+    open_loops = body["open_loops"]
+    assert [o["id"] for o in open_loops] == ids[:2]
+    assert all(o["spoken_count"] == 1 for o in open_loops)
+    assert "first loop" in body["brief"]
+    assert "second loop" in body["brief"]
+    assert "third loop" not in body["brief"]
+
+
+def test_open_loop_ack_closes_it_and_the_next_one_rides(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    first = client.post("/atlas/open-loop", json={"text": "first loop"}).json()["id"]
+    second = client.post("/atlas/open-loop", json={"text": "second loop"}).json()["id"]
+    third = client.post("/atlas/open-loop", json={"text": "third loop"}).json()["id"]
+
+    client.get("/atlas/brief")  # rides first + second
+    client.post("/atlas/open-loop/ack", json={"ids": [first]})
+
+    open_loops = client.get("/atlas/brief").json()["open_loops"]
+    assert [o["id"] for o in open_loops] == [second, third]
+
+    closed = client.get("/atlas/open-loops", params={"include_closed": True}).json()["open_loops"]
+    assert any(o["id"] == first and o["acked_at"] is not None for o in closed)
+
 
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.

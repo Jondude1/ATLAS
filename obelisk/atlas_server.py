@@ -51,6 +51,7 @@ REPORT_TTL_DAYS = 30
 BRIEF_DEBOUNCE_S = 30
 BRIEF_MAX_WORDS = 120
 ASK_MAX_WORDS = 80
+OPEN_LOOPS_PER_BRIEF = 2  # oldest first; stays in the running list until acked
 
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
@@ -220,6 +221,22 @@ def init_hub_db():
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_app_key ON reports(app, key)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_at ON reports(at)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS open_loops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'voice',
+                created_at INTEGER NOT NULL,
+                acked_at INTEGER,
+                spoken_count INTEGER NOT NULL DEFAULT 0,
+                last_spoken_at INTEGER,
+                key TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_open_loops_acked ON open_loops(acked_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_open_loops_key ON open_loops(key)")
         conn.commit()
 
 
@@ -245,6 +262,16 @@ class Ack(BaseModel):
 
 class Ask(BaseModel):
     question: str
+
+
+class OpenLoop(BaseModel):
+    text: str
+    source: str = "voice"
+    key: Optional[str] = None
+
+
+class OpenLoopAck(BaseModel):
+    ids: list[int]
 
 
 def _now_ms() -> int:
@@ -284,13 +311,22 @@ def _age_str(at_ms: int, now_ms: int) -> str:
     return f"{hrs // 24} d ago"
 
 
-def _fallback_brief(rows: list[sqlite3.Row]) -> str:
-    if not rows:
-        return "Nothing to report."
+def _fallback_brief(rows: list[sqlite3.Row], loop_rows: Optional[list[sqlite3.Row]] = None) -> str:
     lines = [f"{r['app']}: {r['title']}" for r in rows[:8]]
+    if loop_rows:
+        lines.extend(f"open loop: {r['text']}" for r in loop_rows)
+    if not lines:
+        return "Nothing to report."
     text = ". ".join(lines)
     words = text.split()
     return " ".join(words[:BRIEF_MAX_WORDS])
+
+
+def _pick_resurfacing_loops(conn: sqlite3.Connection, limit: int = OPEN_LOOPS_PER_BRIEF) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM open_loops WHERE acked_at IS NULL ORDER BY created_at ASC LIMIT ?",
+        (limit,),
+    ).fetchall()
 
 
 async def _rebuild_brief():
@@ -313,11 +349,15 @@ async def _rebuild_brief():
             urgent_rows = conn.execute(
                 "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
             ).fetchall()
+            loop_rows = _pick_resurfacing_loops(conn)
 
         now_ms = _now_ms()
         reports_text = "\n".join(
             f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip()
             for r in rows
+        )
+        loops_text = "\n".join(
+            f"- [{_age_str(r['created_at'], now_ms)}] {r['text']}" for r in loop_rows
         )
         current_time = datetime.now().strftime("%A %Y-%m-%d %H:%M")
         reply = await _chat(
@@ -326,18 +366,23 @@ async def _rebuild_brief():
                     "role": "system",
                     "content": (
                         "You brief a voice assistant on what matters right now, across every app "
-                        "reporting in. Plain spoken English, at most 120 words, no markdown, no lists."
+                        "reporting in, plus up to two open loops the person still hasn't closed. "
+                        "Weave the open loops in briefly, near the end. Plain spoken English, at "
+                        "most 120 words, no markdown, no lists."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"Current time: {current_time}\n\n{reports_text or '(no reports)'}",
+                    "content": (
+                        f"Current time: {current_time}\n\n{reports_text or '(no reports)'}"
+                        + (f"\n\nOpen loops waiting:\n{loops_text}" if loop_rows else "")
+                    ),
                 },
             ],
             max_tokens=220,
             timeout_s=90,  # Fix #4: a cold local model needs longer than 20s.
         )
-        brief = reply if reply else _fallback_brief(rows)
+        brief = reply if reply else _fallback_brief(rows, loop_rows)
         _brief_cache["brief"] = brief
         _brief_cache["updated"] = _now_ms()
         _brief_cache["urgent"] = [
@@ -392,16 +437,43 @@ def brief():
         urgent_rows = conn.execute(
             "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
         ).fetchall()
+        loop_rows = _pick_resurfacing_loops(conn)
+        now_ms = _now_ms()
+        if loop_rows:
+            # Counts as "spoken" here, not in _rebuild_brief: this GET is the
+            # app actually taking the brief to read/say aloud.
+            conn.executemany(
+                "UPDATE open_loops SET spoken_count = spoken_count + 1, last_spoken_at = ? WHERE id = ?",
+                [(now_ms, r["id"]) for r in loop_rows],
+            )
+            conn.commit()
         if _brief_cache["updated"] == 0:
             rows = conn.execute("SELECT * FROM reports ORDER BY at DESC LIMIT 50").fetchall()
-            _brief_cache["brief"] = _fallback_brief(rows)
-            _brief_cache["updated"] = _now_ms()
+            _brief_cache["brief"] = _fallback_brief(rows, loop_rows)
+            _brief_cache["updated"] = now_ms
     urgent = [
         {"id": r["id"], "app": r["app"], "title": r["title"], "body": r["body"], "at": r["at"]}
         for r in urgent_rows
     ]
+    open_loops = [
+        {
+            "id": r["id"],
+            "text": r["text"],
+            "source": r["source"],
+            "created_at": r["created_at"],
+            "spoken_count": r["spoken_count"] + 1,
+            "last_spoken_at": now_ms,
+        }
+        for r in loop_rows
+    ]
     _brief_cache["urgent"] = urgent
-    return {"brief": _brief_cache["brief"], "urgent": urgent, "updated": _brief_cache["updated"]}
+    _brief_cache["open_loops"] = open_loops
+    return {
+        "brief": _brief_cache["brief"],
+        "urgent": urgent,
+        "open_loops": open_loops,
+        "updated": _brief_cache["updated"],
+    }
 
 
 @app.post("/atlas/ack", dependencies=[Depends(require_token)])
@@ -410,6 +482,49 @@ def ack(a: Ack):
         conn.executemany("UPDATE reports SET told = 1 WHERE id = ?", [(i,) for i in a.ids])
         conn.commit()
     _brief_cache["urgent"] = [u for u in _brief_cache.get("urgent", []) if u["id"] not in set(a.ids)]
+    return {"ok": True}
+
+
+@app.post("/atlas/open-loop", dependencies=[Depends(require_token)])
+def open_loop(o: OpenLoop):
+    with hub_db() as conn:
+        if o.key:
+            conn.execute("DELETE FROM open_loops WHERE key = ?", (o.key,))
+        cur = conn.execute(
+            "INSERT INTO open_loops (text, source, created_at, key) VALUES (?, ?, ?, ?)",
+            (o.text, o.source, _now_ms(), o.key),
+        )
+        conn.commit()
+        loop_id = cur.lastrowid
+    return {"id": loop_id}
+
+
+@app.get("/atlas/open-loops", dependencies=[Depends(require_token)])
+def list_open_loops(include_closed: bool = False, limit: int = 50):
+    with hub_db() as conn:
+        if include_closed:
+            rows = conn.execute(
+                "SELECT * FROM open_loops ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM open_loops WHERE acked_at IS NULL ORDER BY created_at ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return {"open_loops": [dict(r) for r in rows]}
+
+
+@app.post("/atlas/open-loop/ack", dependencies=[Depends(require_token)])
+def open_loop_ack(a: OpenLoopAck):
+    with hub_db() as conn:
+        conn.executemany(
+            "UPDATE open_loops SET acked_at = ? WHERE id = ? AND acked_at IS NULL",
+            [(_now_ms(), i) for i in a.ids],
+        )
+        conn.commit()
+    _brief_cache["open_loops"] = [
+        o for o in _brief_cache.get("open_loops", []) if o["id"] not in set(a.ids)
+    ]
     return {"ok": True}
 
 
@@ -684,6 +799,24 @@ def mcp_brief() -> dict:
 async def mcp_ask(question: str) -> dict:
     """Ask the hub a question; it answers from recent reports and the vault without using Claude tokens."""
     return await ask(Ask(question=question))
+
+
+@mcp.tool
+def mcp_open_loop(text: str, source: str = "voice", key: str | None = None) -> dict:
+    """Capture an open loop (something the person still needs to follow up on); the hub resurfaces it in briefs until acked."""
+    return open_loop(OpenLoop(text=text, source=source, key=key))
+
+
+@mcp.tool
+def mcp_open_loops(include_closed: bool = False, limit: int = 50) -> dict:
+    """List open loops still waiting on the person, or with include_closed the full history."""
+    return list_open_loops(include_closed=include_closed, limit=limit)
+
+
+@mcp.tool
+def mcp_open_loop_ack(ids: list[int]) -> dict:
+    """Close one or more open loops by id."""
+    return open_loop_ack(OpenLoopAck(ids=ids))
 
 
 @mcp.tool
