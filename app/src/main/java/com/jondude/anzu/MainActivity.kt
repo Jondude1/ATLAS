@@ -202,9 +202,11 @@ private fun Button(
     onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
     colors: androidx.compose.material3.ButtonColors = ButtonDefaults.buttonColors(),
     elevation: androidx.compose.material3.ButtonElevation? = null,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
 ) = androidx.compose.material3.Button(
-    onClick = onClick, modifier = modifier, enabled = enabled, shape = Chamfer, colors = colors, elevation = elevation, content = content
+    onClick = onClick, modifier = modifier, enabled = enabled, shape = Chamfer, colors = colors, elevation = elevation,
+    contentPadding = contentPadding, content = content
 )
 
 /** A hardware toggle: an empty square when off, filled orange with a black centre when on. */
@@ -267,6 +269,7 @@ fun SoftButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bool
         modifier = modifier,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(containerColor = Fill, contentColor = Cream),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         elevation = null
     ) { content() }
 }
