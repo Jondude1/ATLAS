@@ -559,11 +559,22 @@ fun HomeScreen(resumes: Int) {
         GlassesService.start(ctx, true)
     }
 
+    // A typed exchange shows its answer for a short while, then the screen goes quiet again.
+    var replyUntil by remember { mutableStateOf(0L) }
+    var devicesOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(replyUntil) {
+        if (replyUntil > 0) {
+            kotlinx.coroutines.delay(90_000)
+            replyUntil = 0
+        }
+    }
+
     fun send() {
         val t = typed.trim()
         if (t.isNotEmpty()) {
             Atlas.typed(ctx, t)
             typed = ""
+            replyUntil = System.currentTimeMillis() + 90_000
         }
     }
 
@@ -573,26 +584,29 @@ fun HomeScreen(resumes: Int) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { LargeTitle(Prefs.name.uppercase()) }
-            Text(
-                state, color = if (state == "idle") Muted else OnGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(if (state == "idle") Panel else Gold).padding(horizontal = 14.dp, vertical = 7.dp)
-            )
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Orb(state, 220.dp)
+            // No running transcript here: one quiet status line, and a typed answer only while it's fresh.
             Text(
-                if (said.isBlank()) "Nothing said yet." else said,
-                fontFamily = Display, fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.Medium, color = Cream,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 8.dp)
+                when (state) {
+                    "listening" -> "Listening"
+                    "thinking" -> "Thinking"
+                    "speaking" -> "Speaking"
+                    else -> if (connected) "With you" else "Standing by"
+                },
+                fontFamily = Display, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = Cream
             )
-            if (heard.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text("You: $heard", color = Muted, fontSize = 15.sp, textAlign = TextAlign.Center)
+            if (replyUntil > 0 && said.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    said, color = Muted, fontSize = 16.sp, lineHeight = 23.sp,
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp)
+                )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Tile(Modifier.weight(1.5f).height(118.dp)) {
+            Tile(Modifier.weight(1.5f).height(118.dp).clip(RoundedCornerShape(26.dp)).clickable { devicesOpen = true }) {
                 Text("Wearing", color = Muted, fontSize = 13.sp)
                 Column {
                     Text(
@@ -702,24 +716,17 @@ fun HomeScreen(resumes: Int) {
             }
         }
 
-        val today = remember(said, heard, resumes) {
-            val line = Regex("^- (\\d\\d:\\d\\d) \\*\\*(.+?)\\*\\*: (.*)$")
-            Store.todayLog().lines().mapNotNull { line.find(it) }
-                .map { Triple(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }
-                .filter { it.second == "Jon" || it.second == Prefs.name }
-                .takeLast(8)
-        }
-        if (today.isNotEmpty()) {
-            Text(
-                "Today", fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp,
-                modifier = Modifier.padding(start = 6.dp, top = 6.dp)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                today.forEach { (time, who, text) -> Bubble("$who · $time", text, who == "Jon") }
-            }
-        }
+        Spacer(Modifier.height(8.dp))
+    }
 
-        Section("Devices") {
+    if (devicesOpen) {
+        AlertDialog(
+            onDismissRequest = { devicesOpen = false },
+            containerColor = Panel, titleContentColor = Cream, textContentColor = Cream,
+            confirmButton = { TextButton(onClick = { devicesOpen = false }) { Text("Done") } },
+            title = { Text("Devices", fontFamily = Display, fontWeight = FontWeight.Medium) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (meeting) Text("Taking meeting notes", color = Gold, fontWeight = FontWeight.SemiBold)
             InfoRow("Glasses", deviceName.ifBlank { "Not chosen yet. Anything named Anzu is picked up." })
             if (connected) InfoRow("Worn", "${Glasses.wornMinutes()} min" + (if (activeWear.isNotBlank()) " · ${Wear.label()}" else ""))
@@ -745,8 +752,9 @@ fun HomeScreen(resumes: Int) {
                     }) { Text("Find") }
                 }
             }
-        }
-        Spacer(Modifier.height(8.dp))
+                }
+            }
+        )
     }
 
     if (picking) {
@@ -861,6 +869,18 @@ fun NotesScreen() {
                     TextButton(onClick = { Store.removeMemory(i) }) { Text("Forget") }
                 }
             }
+        }
+
+        Section("Today's conversation") {
+            val line = remember { Regex("^- (\\d\\d:\\d\\d) \\*\\*(.+?)\\*\\*: (.*)$") }
+            val today = remember(notes, actions) {
+                Store.todayLog().lines().mapNotNull { line.find(it) }
+                    .map { Triple(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }
+                    .filter { it.second == "Jon" || it.second == Prefs.name }
+                    .takeLast(12)
+            }
+            if (today.isEmpty()) EmptyHint("Nothing said yet today.")
+            today.forEach { (time, who, text) -> Bubble("$who · $time", text, who == "Jon") }
         }
 
         Section("Done on its own") {
