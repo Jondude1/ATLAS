@@ -8,6 +8,7 @@ import com.jondude.anzu.assist.Routing
 import com.jondude.anzu.assist.Timers
 import com.jondude.anzu.assist.Weather
 import com.jondude.anzu.update.Updater
+import kotlinx.coroutines.async
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -716,13 +717,13 @@ class AtlasTest {
     fun approvalCardWaitsForATap() = kotlinx.coroutines.runBlocking {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         val A = com.jondude.anzu.assist.Approvals
-        val yes = kotlinx.coroutines.async { A.ask(ctx, "Text Jenna: on my way. Send it?") }
+        val yes = async { A.ask(ctx, "Text Jenna: on my way. Send it?") }
         while (A.pending.value == null) kotlinx.coroutines.delay(10)
         assertEquals("Text Jenna: on my way. Send it?", A.pending.value!!.question)
         A.answer(A.pending.value!!.id, true)
         assertTrue(yes.await())
         assertNull(A.pending.value)
-        val no = kotlinx.coroutines.async { A.ask(ctx, "Call Dave?") }
+        val no = async { A.ask(ctx, "Call Dave?") }
         while (A.pending.value == null) kotlinx.coroutines.delay(10)
         A.answer(A.pending.value!!.id, false)
         assertFalse(no.await())
