@@ -1,11 +1,10 @@
-You are an expert mobile product designer collaborating with another AI (Claude), which writes the code. Attached are screenshots of ATLAS, an Android app (Jetpack Compose) that is one person's always-on voice assistant living in his earbuds and audio glasses: his JARVIS. He wants it sleek, professional and polished, in black, white and one orange accent, and has said earlier versions looked "better, but not good".
+You are an expert mobile product designer collaborating with another AI (Claude), which writes the code. Attached are new screenshots of ATLAS, an Android app (Jetpack Compose) that is one person's always-on voice assistant in his earbuds and glasses: his JARVIS. Palette: black, white, one orange (#FF5C00).
 
-Review the screenshots as they are. Be specific and blunt; no praise padding.
+This is round 2. In round 1 you asked for: grayscale for everything inactive, a flat ring in place of the 3D sphere, fewer boxes, a flat icon-only tab bar, a 24dp margin, one 16dp radius, flat settings rows with inset dividers, and grey segmented choices. Claude has implemented those.
 
-1. The five things that most make it look amateur, in order of impact, each with the exact fix (sizes in dp/sp, colors in hex, spacing, alignment, weights).
-2. For the home screen: a concrete redesigned layout, top to bottom, with measurements.
-3. For settings and lists: row heights, dividers versus cards, type scale, icon treatment.
-4. Anything inconsistent between screens (radii, paddings, type sizes, button styles).
-5. One idea that would make the home screen feel alive and distinctly "ATLAS" without clutter.
-
-Constraints: Compose Material 3, no image assets beyond vector drawing in code, display font is Bricolage Grotesque with the system font for body, must work in light and dark.
+Review the new screenshots, bluntly:
+1. Which round-1 items are done well, and which are still wrong or only half done (say exactly what is off).
+2. The next five highest-impact fixes, with exact values (dp, sp, hex, weights).
+3. The home screen specifically: is the hierarchy right now? What should move, shrink or go?
+4. Anything that now looks worse than before.
+Keep it to what can be built in Compose Material 3 with code-drawn graphics only.

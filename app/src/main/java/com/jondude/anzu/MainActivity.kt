@@ -143,13 +143,13 @@ private var isDark by mutableStateOf(true)
 
 // Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = if (isDark) Color(0xFFFF6B1A) else Color(0xFFF25C05)
-private val OnGold: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+private val Gold: Color get() = if (isDark) Color(0xFFFF5C00) else Color(0xFFFF5C00)
+private val OnGold: Color get() = Color(0xFF000000)
 private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
-private val Muted: Color get() = if (isDark) Color(0xFF9A9A9A) else Color(0xFF6B6B6B)
+private val Muted: Color get() = if (isDark) Color(0xFF8E8E93) else Color(0xFF6B6B6B)
 private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-private val Panel: Color get() = if (isDark) Color(0xFF141414) else Color(0xFFF4F4F5)
-private val Fill: Color get() = if (isDark) Color(0xFF232323) else Color(0xFFE6E6E8)
+private val Panel: Color get() = if (isDark) Color(0xFF161616) else Color(0xFFF5F5F5)
+private val Fill: Color get() = if (isDark) Color(0xFF242424) else Color(0xFFE8E8E8)
 private val Hairline: Color get() = if (isDark) Color(0xFF2A2A2A) else Color(0xFFDDDDDD)
 
 /** The display face (Bricolage Grotesque) for titles and Atlas's own words. */
@@ -159,7 +159,7 @@ private val Display = FontFamily(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFF6B1A),
+    primary = Color(0xFFFF5C00),
     onPrimary = Color(0xFF000000),
     secondary = Color(0xFF9A9A9A),
     onSecondary = Color(0xFF000000),
@@ -174,8 +174,8 @@ private val DarkColors = darkColorScheme(
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFFF25C05),
-    onPrimary = Color(0xFFFFFFFF),
+    primary = Color(0xFFFF5C00),
+    onPrimary = Color(0xFF000000),
     secondary = Color(0xFF6B6B6B),
     onSecondary = Color(0xFFFFFFFF),
     background = Color(0xFFFFFFFF),
@@ -203,7 +203,7 @@ fun SoftButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bool
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
-        colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.14f), contentColor = Gold),
+        colors = ButtonDefaults.buttonColors(containerColor = Fill, contentColor = Cream),
         elevation = null
     ) { content() }
 }
@@ -257,36 +257,22 @@ fun AppRoot(resumes: Int) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // A floating bar: the selected tab opens into a labelled pill.
+            // A flat bar: icons only, and orange marks where you are.
             val items = listOf(
                 "Atlas" to Icons.Filled.Home,
                 "Notes" to Icons.Filled.Create,
                 "Whisper" to Icons.Filled.Notifications,
                 "Settings" to Icons.Filled.Settings
             )
-            Box(Modifier.fillMaxWidth().background(Ground).padding(start = 20.dp, end = 20.dp, bottom = 14.dp, top = 6.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Panel).padding(6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            Column(Modifier.fillMaxWidth().background(Ground)) {
+                HorizontalDivider(color = Hairline, thickness = 1.dp)
+                Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                     items.forEachIndexed { i, (label, icon) ->
-                        val selected = tab == i
-                        Row(
-                            Modifier.clip(RoundedCornerShape(26.dp))
-                                .background(if (selected) Gold else Color.Transparent)
-                                .clickable { tab = i }
-                                .padding(horizontal = if (selected) 18.dp else 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            Modifier.weight(1f).height(64.dp).clickable { tab = i },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                icon, contentDescription = if (selected) null else label,
-                                tint = if (selected) OnGold else Muted, modifier = Modifier.size(22.dp)
-                            )
-                            if (selected) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(label, color = OnGold, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            }
+                            Icon(icon, contentDescription = label, tint = if (tab == i) Gold else Muted, modifier = Modifier.size(26.dp))
                         }
                     }
                 }
@@ -298,8 +284,8 @@ fun AppRoot(resumes: Int) {
             if (rel != null && !dismissed) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = Gold.copy(alpha = 0.14f))
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Panel)
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                         Text("Update available: ${rel.tag}", fontWeight = FontWeight.SemiBold)
@@ -330,7 +316,7 @@ fun AppRoot(resumes: Int) {
 @Composable
 fun LargeTitle(text: String) {
     Text(
-        text, fontFamily = Display, fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Cream,
+        text, fontFamily = Display, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Cream,
         letterSpacing = (-0.5).sp, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp)
     )
 }
@@ -361,31 +347,28 @@ fun Section(title: String, content: @Composable () -> Unit) {
     val nav = LocalSettingsNav.current
     if (nav != null && nav.page == null) {
         val (icon, subtitle) = settingsIndex[title] ?: (Icons.Filled.Settings to "")
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel)
-                .clickable { nav.open(title) }.padding(horizontal = 14.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(40.dp).clip(CircleShape).background(Gold.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = Gold, modifier = Modifier.size(20.dp))
+        Column(Modifier.fillMaxWidth().clickable { nav.open(title) }) {
+            Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(24.dp))
+                Column(Modifier.weight(1f).padding(start = 20.dp, end = 12.dp)) {
+                    Text(title, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
             }
-            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(title, color = Cream, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
+            HorizontalDivider(color = Hairline, thickness = 1.dp, modifier = Modifier.padding(start = 44.dp))
         }
         return
     }
     if (nav != null && nav.page != title) return
     Column {
         if (nav == null) Text(
-            title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp,
+            title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 20.sp,
             modifier = Modifier.padding(start = 6.dp, bottom = 8.dp, top = 6.dp)
         )
         Card(
             Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Panel),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
@@ -428,8 +411,8 @@ fun EmptyHint(text: String) {
 fun Bubble(speaker: String, text: String, mine: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
-            Modifier.fillMaxWidth(0.86f).clip(RoundedCornerShape(20.dp))
-                .background(if (mine) Gold.copy(alpha = 0.16f) else Panel).padding(horizontal = 14.dp, vertical = 10.dp)
+            Modifier.fillMaxWidth(0.86f).clip(RoundedCornerShape(16.dp))
+                .background(if (mine) Fill else Panel).padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Text(speaker, color = if (mine) Gold else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text(text, color = Cream, fontSize = 15.sp, lineHeight = 21.sp)
@@ -441,7 +424,7 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
 @Composable
 fun Tile(modifier: Modifier, tint: Color = Panel, content: @Composable () -> Unit) {
     Column(
-        modifier.clip(RoundedCornerShape(26.dp)).background(tint).padding(16.dp),
+        modifier.clip(RoundedCornerShape(16.dp)).background(tint).padding(16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) { content() }
 }
@@ -480,43 +463,40 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
     )
 }
 
-/** Atlas's presence: a glowing orange sphere that breathes, and quickens and brightens when listening or thinking. */
+/** Atlas's presence: a flat orange ring with a slow heartbeat. When it listens, thinks or speaks, rings ripple outward. */
 @Composable
 fun Orb(state: String, diameter: Dp = 148.dp) {
+    val active = state != "idle"
     val period = when (state) {
-        "listening" -> 700
-        "thinking" -> 450
-        "speaking" -> 1000
-        else -> 3000
+        "listening" -> 1400
+        "thinking" -> 800
+        "speaking" -> 1100
+        else -> 3200
     }
-    // White-hot where the light falls, orange through the body, ember-dark in the shadow.
-    val light = when (state) {
-        "listening", "speaking" -> Color(0xFFFFFFFF)
-        else -> Color(0xFFFFE2C4)
-    }
-    val body = when (state) {
-        "listening" -> Color(0xFFFF8A3D)
-        "speaking" -> Color(0xFFFFA057)
-        else -> Color(0xFFFF6B1A)
-    }
-    val deep = if (state == "idle") Color(0xFF5A1E00) else Color(0xFF7A2B00)
+    val orange = Color(0xFFFF5C00)
     key(period) {
         val transition = rememberInfiniteTransition(label = "orb")
-        val pulse by transition.animateFloat(
-            initialValue = 0.88f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "pulse"
+        val beat by transition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse), label = "beat"
+        )
+        val ripple by transition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Restart), label = "ripple"
         )
         Canvas(Modifier.size(diameter)) {
-            val r = size.minDimension / 2
             val c = Offset(size.width / 2, size.height / 2)
-            // a wide, faint glow that spills past the sphere
-            drawCircle(Brush.radialGradient(listOf(body.copy(alpha = 0.34f), body.copy(alpha = 0.08f), Color.Transparent), c, r * pulse), r * pulse, c)
-            // the sphere: bright where the light falls, deep green in its shadow
-            val core = r * 0.6f * pulse
-            drawCircle(
-                Brush.radialGradient(listOf(light, body, deep), Offset(c.x - core * 0.35f, c.y - core * 0.4f), core * 1.7f),
-                core, c
-            )
+            val base = size.minDimension * 0.27f
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            if (active) {
+                // three rings travelling outward, fading as they go
+                for (k in 0 until 3) {
+                    val t = (ripple + k / 3f) % 1f
+                    drawCircle(orange.copy(alpha = (1f - t) * 0.55f), base + t * (size.minDimension / 2 - base), c, style = stroke)
+                }
+                drawCircle(orange, base * (0.34f + 0.06f * beat), c)
+            }
+            drawCircle(orange.copy(alpha = if (active) 1f else 0.6f + 0.4f * beat), base * (1f + 0.03f * beat), c, style = stroke)
         }
     }
 }
@@ -580,14 +560,15 @@ fun HomeScreen(resumes: Int) {
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { LargeTitle(Prefs.name.uppercase()) }
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Orb(state, 220.dp)
+            Spacer(Modifier.height(20.dp))
+            Orb(state, 200.dp)
             // No running transcript here: one quiet status line, and a typed answer only while it's fresh.
             Text(
                 when (state) {
@@ -596,8 +577,9 @@ fun HomeScreen(resumes: Int) {
                     "speaking" -> "Speaking"
                     else -> if (connected) "With you" else "Standing by"
                 },
-                fontFamily = Display, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = Cream
+                fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Cream
             )
+            Spacer(Modifier.height(20.dp))
             if (replyUntil > 0 && said.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -607,7 +589,7 @@ fun HomeScreen(resumes: Int) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Tile(Modifier.weight(1.5f).height(118.dp).clip(RoundedCornerShape(26.dp)).clickable { devicesOpen = true }) {
+            Tile(Modifier.weight(1.5f).height(92.dp).clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
                 Text("Wearing", color = Muted, fontSize = 13.sp)
                 Column {
                     Text(
@@ -617,7 +599,7 @@ fun HomeScreen(resumes: Int) {
                             activeWear == "pixelbuds" -> "Pixel Buds"
                             else -> "Glasses"
                         },
-                        fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream
+                        fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream
                     )
                     Text(
                         when {
@@ -630,11 +612,11 @@ fun HomeScreen(resumes: Int) {
                     )
                 }
             }
-            Tile(Modifier.weight(1f).height(118.dp), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
+            Tile(Modifier.weight(1f).height(92.dp), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
                 Text("Battery", color = Muted, fontSize = 13.sp)
                 Text(
                     if (connected && battery >= 0) "$battery%" else "–",
-                    fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 34.sp, color = Cream
+                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream
                 )
             }
         }
@@ -781,7 +763,7 @@ fun HomeScreen(resumes: Int) {
                     devices.forEach { (name, address) ->
                         Text(
                             name, color = Cream, fontSize = 16.sp,
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
                                 Prefs.deviceName = name
                                 Prefs.deviceAddress = address
                                 deviceName = name
@@ -803,7 +785,7 @@ fun NotesScreen() {
     val lists by Store.lists.collectAsState()
     var draft by remember { mutableStateOf("") }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         LargeTitle("Notes")
@@ -826,7 +808,7 @@ fun NotesScreen() {
         }
         notes.forEachIndexed { i, n ->
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel).padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
@@ -847,7 +829,7 @@ fun NotesScreen() {
                     }
                     listItems.forEachIndexed { i, item ->
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { Store.listToggle(name, i) }.padding(vertical = 8.dp),
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { Store.listToggle(name, i) }.padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -924,7 +906,7 @@ fun WhisperScreen() {
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
             LargeTitle("Whisper")
             Spacer(Modifier.height(6.dp))
@@ -940,7 +922,7 @@ fun WhisperScreen() {
         items(apps, key = { it.pkg }) { app ->
             val on = app.pkg in allowed
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Panel).padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (app.icon != null) Image(app.icon, contentDescription = null, modifier = Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)))
@@ -978,8 +960,8 @@ fun SettingsScreen() {
     BackHandler(enabled = page != null) { page = null }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(if (page == null) 8.dp else 16.dp)
+        Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(if (page == null) 0.dp else 16.dp)
     ) {
         val open = page
         if (open == null) {
@@ -988,7 +970,7 @@ fun SettingsScreen() {
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                 IconButton(onClick = { page = null }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Cream) }
-                Text(open, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream)
+                Text(open, fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream)
             }
         }
         CompositionLocalProvider(LocalSettingsNav provides SettingsNav(page) { page = it }) {
@@ -1070,7 +1052,7 @@ fun SettingsScreen() {
             var voiceNote by remember { mutableStateOf("") }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Phone", "ElevenLabs", "Custom").forEachIndexed { i, label ->
-                    if (provider == i) Button(onClick = {}) { Text(label) }
+                    if (provider == i) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground), elevation = null) { Text(label) }
                     else SoftButton(onClick = { provider = i; Prefs.voiceProvider = i }) { Text(label) }
                 }
             }
@@ -1140,7 +1122,7 @@ fun SettingsScreen() {
                             items(options) { (id, label) ->
                                 Text(
                                     label, color = Cream, fontSize = 16.sp,
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
                                     when (pick) {
                                         "voice" -> {
                                             Prefs.voiceName = id; chosen = id
@@ -1174,7 +1156,7 @@ fun SettingsScreen() {
             )[mode.coerceIn(0, 2)], color = Muted, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Off", "Tap", "Window").forEachIndexed { i, label ->
-                    if (mode == i) Button(onClick = {}) { Text(label) }
+                    if (mode == i) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground), elevation = null) { Text(label) }
                     else SoftButton(onClick = { mode = i; Prefs.listenMode = i }) { Text(label) }
                 }
             }
