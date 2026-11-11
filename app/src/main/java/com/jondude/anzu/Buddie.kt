@@ -980,6 +980,7 @@ object BuddieLink {
                 val (stop, next) = Barge.decide(text, Prefs.name)
                 if (!stop) return@launch
                 BuddieStats.lastHeard = text
+                if (next.isNullOrBlank()) com.jondude.anzu.assist.Interrupts.cut(Atlas.speakingSource)
                 Speaker.stop()
                 if (!next.isNullOrBlank()) Atlas.heard(ctx, next)
             }

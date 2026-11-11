@@ -519,6 +519,7 @@ fun firstSentence(text: String): String {
 fun knowsLine(
     connected: Boolean, wear: String?, battery: Int, haUp: Boolean?, hubUp: Boolean?,
     athena: com.jondude.anzu.assist.Hub.AthenaStatus?, brief: String,
+    needsToken: Boolean = false,
     day: String = SimpleDateFormat("EEEE", Locale.US).format(Date())
 ): String = buildString {
     append("It's $day.")
@@ -532,6 +533,7 @@ fun knowsLine(
         append(if (down == 0) " Athena's running all ${athena.containers.size} services." else " Athena has $down service${if (down == 1) "" else "s"} down.")
     } else if (hubUp == false) append(" Obelisk isn't answering.")
     if (brief.isNotBlank()) append(" ").append(brief)
+    if (needsToken) append(" The hub needs its token: Settings, Obelisk.")
 }
 
 private fun reachable(url: String): Boolean = try {
@@ -796,6 +798,7 @@ fun HomeScreen(resumes: Int) {
     var haUp by remember { mutableStateOf<Boolean?>(null) }
     var athena by remember { mutableStateOf<com.jondude.anzu.assist.Hub.AthenaStatus?>(null) }
     var briefLine by remember { mutableStateOf("") }
+    var tokenMissing by remember { mutableStateOf(false) }
     LaunchedEffect(resumes) {
         while (true) {
             hubUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -807,11 +810,12 @@ fun HomeScreen(resumes: Int) {
                     .takeIf { it.error == null }
                 briefLine = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.brief() }
                     ?.text?.let { firstSentence(it) } ?: ""
+                tokenMissing = com.jondude.anzu.assist.Hub.needsToken
             }
             kotlinx.coroutines.delay(60_000)
         }
     }
-    val knows = knowsLine(connected, activeWear, battery, haUp, hubUp, athena, briefLine)
+    val knows = knowsLine(connected, activeWear, battery, haUp, hubUp, athena, briefLine, tokenMissing)
 
     fun send() {
         val t = typed.trim()

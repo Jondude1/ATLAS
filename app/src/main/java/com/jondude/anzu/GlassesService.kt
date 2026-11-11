@@ -502,10 +502,10 @@ class GlassesService : Service() {
             Atlas.announce("Glasses are at $b percent. I'll drop out soon.")
         } else if (b in 11..20 && !warned20) {
             warned20 = true
-            Atlas.polite("Heads up, glasses battery is at $b percent.")
+            Atlas.polite("Heads up, glasses battery is at $b percent.", source = "battery")
         }
         if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
-        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Atlas.polite(it) } }
+        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Atlas.polite(it, source = "places") } }
         ticks++
         if (Glasses.meeting.value) return // stay out of the way while taking notes
         if (Prefs.commuteAlerts && ticks % 10 == 0) commuteCheck(now)
@@ -513,7 +513,7 @@ class GlassesService : Service() {
         // House check every three minutes: only things that need him.
         if (Prefs.homeAlerts && HomeAssistant.configured() && ticks % 6 == 0) {
             val lines = kotlinx.coroutines.withContext(Dispatchers.IO) { HomeWatch.poll() }
-            if (!quietNow) lines.forEach { Atlas.polite(it) }
+            if (!quietNow) lines.forEach { Atlas.polite(it, source = "house") }
         }
         if (quietNow) return
         val driving = Prefs.activityAware && Motion.driving()
@@ -626,7 +626,7 @@ class GlassesService : Service() {
                     if (c.getInt(3) != 0 || begin <= now || key in announcedEvents) continue
                     announcedEvents.add(key)
                     val mins = ((begin - now) / 60_000 + 1).toInt()
-                    Atlas.polite("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.", 3 * 60_000L)
+                    Atlas.polite("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.", 3 * 60_000L, "calendar")
                 }
             }
         } catch (_: Exception) {

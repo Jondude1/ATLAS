@@ -26,6 +26,8 @@ import androidx.lifecycle.lifecycleScope
 import com.jondude.anzu.Ears
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.Prefs
+import com.jondude.anzu.Store
+import com.jondude.anzu.Earcons
 import com.jondude.anzu.Speaker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -189,10 +191,20 @@ object Atlas {
      * For things that aren't urgent: never over music. The line waits for a pause (up to [maxWaitMs]),
      * then moves to the held digest he hears in the next brief instead.
      */
-    fun polite(text: String, maxWaitMs: Long = 10 * 60_000L) {
-        if (!musicPlaying()) announce(text)
+    fun polite(text: String, maxWaitMs: Long = 10 * 60_000L, source: String = "") {
+        // A kind of line Jon keeps cutting off gets a soft bell and a place in the brief instead of speech.
+        if (Interrupts.muted(source)) {
+            Earcons.play("notice")
+            Glasses.hold(text)
+            return
+        }
+        if (!musicPlaying()) announce(text, source)
         else synchronized(waiting) { waiting.add(System.currentTimeMillis() + maxWaitMs to text) }
     }
+
+    /** What kind of line is being spoken right now, so a "stop" can be counted against it. */
+    @Volatile
+    var speakingSource = ""
 
     /** Called every tick: say what waited if the music stopped; hold what waited too long. */
     fun flushPolite() {
@@ -207,16 +219,18 @@ object Atlas {
         due.forEach { (held, line) -> if (held) Glasses.hold(line) else announce(line) }
     }
 
-    fun announce(text: String) {
+    fun announce(text: String, source: String = "") {
         scope.launch {
             mutex.withLock {
                 try {
+                    speakingSource = source
                     Glasses.atlasState.value = "speaking"
                     // Nothing worn: hand off to a house speaker if one is set up.
                     val handedOff = !Glasses.connected.value && Prefs.houseSpeaker &&
                         kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(text) }
                     if (!handedOff) Speaker.say(text)
                 } finally {
+                    speakingSource = ""
                     Glasses.atlasState.value = "idle"
                 }
             }
@@ -267,4 +281,46 @@ class AssistActivity : ComponentActivity() {
             finish()
         }
     }
+}
+
+
+/**
+ * Learned interruption policy (roadmap Phase 2): every time Jon says "stop" over a proactive line, that kind of line
+ * (house, places, calendar, research, battery…) gets a mark. Three marks in a week and that kind stops being spoken:
+ * it becomes a soft bell plus a line in the next brief. A week without being cut off and it can speak again.
+ */
+object Interrupts {
+    private const val WEEK = 7L * 24 * 60 * 60_000
+    const val LIMIT = 3
+
+    /** source -> times he cut it off, newest last. */
+    fun parse(raw: String): Map<String, List<Long>> = try {
+        val o = org.json.JSONObject(raw.ifBlank { "{}" })
+        o.keys().asSequence().associateWith { k ->
+            val a = o.getJSONArray(k); (0 until a.length()).map { a.getLong(it) }
+        }
+    } catch (_: Exception) {
+        emptyMap()
+    }
+
+    fun encode(m: Map<String, List<Long>>): String =
+        org.json.JSONObject(m.mapValues { org.json.JSONArray(it.value) }).toString()
+
+    fun mutedIn(m: Map<String, List<Long>>, source: String, now: Long = System.currentTimeMillis()): Boolean =
+        source.isNotBlank() && (m[source]?.count { now - it < WEEK } ?: 0) >= LIMIT
+
+    fun muted(source: String): Boolean = mutedIn(parse(Prefs.cutoffs), source)
+
+    fun cut(source: String, now: Long = System.currentTimeMillis()) {
+        if (source.isBlank()) return
+        val m = parse(Prefs.cutoffs).toMutableMap()
+        m[source] = ((m[source] ?: emptyList()) + now).filter { now - it < WEEK }.takeLast(10)
+        Prefs.cutoffs = encode(m)
+        if (mutedIn(m, source, now)) Store.logAction("Stopped speaking $source updates out loud (you cut them off ${LIMIT}x this week); they'll be a soft bell and a line in your brief.")
+    }
+
+    /** Kinds that are currently bell-only, for Settings and "why didn't you tell me". */
+    fun mutedSources(): List<String> = parse(Prefs.cutoffs).keys.filter { muted(it) }
+
+    fun reset() { Prefs.cutoffs = "" }
 }

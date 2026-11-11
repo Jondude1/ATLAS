@@ -195,6 +195,8 @@ object Prefs {
     var volumeGlasses by IntPref("volumeGlasses", 120)
     /** While Atlas speaks, lift the phone's media volume to at least this share of maximum (0 = leave it). */
     var minSpeechVolume by IntPref("minSpeechVolume", 70)
+    /** Kinds of proactive lines Jon has cut off, with when (see Interrupts). */
+    var cutoffs by StrPref("cutoffs", "")
     /** Extra microphone sensitivity for the earbud stream: 0 normal, 1 high, 2 max. */
     var micBoost by IntPref("micBoost", 1)
     var volumeBuds by IntPref("volumeBuds", 160)

@@ -24,6 +24,10 @@ object Hub {
 
     @Volatile
     private var cached: Brief? = null
+
+    /** True when the hub turned the app away for want of its token (Settings → Obelisk). */
+    @Volatile
+    var needsToken = false
     @Volatile
     private var fetchedAt = 0L
 
@@ -48,6 +52,7 @@ object Hub {
         cached?.let { if (now - fetchedAt < maxAgeMs) return it }
         return try {
             val (code, body) = Net.get(base() + "/atlas/brief", auth(), 6_000)
+            needsToken = code == 401 || code == 403
             if (code !in 200..299) return cached
             parseBrief(body)?.also { cached = it; fetchedAt = now }
         } catch (e: Exception) {

@@ -860,7 +860,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         } catch (e: Exception) {
                             answer.take(400)
                         }
-                        Atlas.polite("Hermes is back. $spoken The full answer is in your notes.")
+                        Atlas.polite("Hermes is back. $spoken The full answer is in your notes.", source = "hermes")
                     } catch (e: Exception) {
                         Atlas.polite("Hermes didn't come through on that. ${e.message ?: ""}")
                     }
@@ -1267,7 +1267,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Store.addNote("Research: $topic\n$text")
             Store.logAction("Finished research: ${topic.take(80)}")
             record("[research errand finished: $topic]", text, "")
-            Atlas.polite("I finished looking into $topic. $text I saved it to your notes.")
+            Atlas.polite("I finished looking into $topic. $text I saved it to your notes.", source = "research")
         } catch (e: Exception) {
             Atlas.polite("The research on $topic failed. ${e.message ?: ""}")
         }

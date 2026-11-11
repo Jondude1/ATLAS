@@ -681,9 +681,9 @@ class AtlasTest {
         assertEquals("Athena needs a look: sonarr is down. The other 1 are up.", athenaSentence(st))
         assertEquals(
             "It's Tuesday. Your earbuds are on (64%). The house is connected. Athena has 1 service down. Garage is open.",
-            knowsLine(true, "buddie", 64, true, true, st, "Garage is open.", "Tuesday")
+            knowsLine(true, "buddie", 64, true, true, st, "Garage is open.", day = "Tuesday")
         )
-        assertEquals("It's Tuesday. Obelisk isn't answering.", knowsLine(false, null, -1, null, false, null, "", "Tuesday"))
+        assertEquals("It's Tuesday. Obelisk isn't answering.", knowsLine(false, null, -1, null, false, null, "", day = "Tuesday"))
         assertEquals("Garage is open.", firstSentence("Garage is open. Two packages came."))
     }
 
@@ -828,5 +828,22 @@ class AtlasTest {
         assertEquals("Garage is open." to "house: Door unlocked  +1",
             AtlasWidget.lines("Garage is open. Two packages came.", listOf("house: Door unlocked", "athena: sonarr down")))
         assertEquals("Standing by" to null, AtlasWidget.lines("", emptyList()))
+    }
+
+    @Test
+    fun cutOffThreeTimesBecomesABell() {
+        val I = com.jondude.anzu.assist.Interrupts
+        I.reset()
+        val now = System.currentTimeMillis()
+        I.cut("house", now - 3_000); I.cut("house", now - 2_000)
+        assertFalse(I.muted("house"))
+        I.cut("house", now - 1_000)
+        assertTrue(I.muted("house"))
+        assertFalse(I.muted("calendar"))
+        assertFalse(I.mutedIn(I.parse(Prefs.cutoffs), "house", now + 8L * 24 * 60 * 60_000)) // a week later it may speak again
+        I.cut("", now)                                                                      // replies (no source) never count
+        assertEquals(listOf("house"), I.mutedSources())
+        I.reset()
+        assertTrue(knowsLine(false, null, -1, null, true, null, "", true, "Tuesday").endsWith("The hub needs its token: Settings, Obelisk."))
     }
 }
