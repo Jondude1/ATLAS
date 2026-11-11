@@ -193,6 +193,10 @@ object Prefs {
     var useGlassesMic by BoolPref("useGlassesMic", true)
     /** Where the voice loop listens: 0 auto (worn device if there is one), 1 the Bluetooth headset, 2 the phone's own mics. */
     var micSource by IntPref("micSource", 0)
+    /** Hands-free "Atlas" through a headset or the phone (WakeListener). On by default. */
+    var wakeListen by BoolPref("wakeListen", true)
+    var lastWake by LongPref("lastWake", 0L)
+    var lastWakeSource by StrPref("lastWakeSource", "")
 
     var readNotifications by BoolPref("readNotifications", true)
     // Per-wearable behavior. The glasses are open-ear (people nearby can hear); the buds are private.

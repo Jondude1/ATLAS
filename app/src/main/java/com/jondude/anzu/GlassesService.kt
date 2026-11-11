@@ -118,6 +118,15 @@ class GlassesService : Service() {
         }
         ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         checkAlreadyConnected()
+        WakeListener.start(this)
+        // Keep the notification honest about whether "Atlas" is being listened for.
+        scope.launch {
+            var last = ""
+            WakeListener.state.collect { st ->
+                val shown = st.substringBefore(" ·")
+                if (shown != last) { last = shown; refreshNotification() }
+            }
+        }
         scope.launch(Dispatchers.IO) {
             try {
                 com.jondude.anzu.assist.Mcp.refresh()
@@ -182,6 +191,7 @@ class GlassesService : Service() {
     }
 
     override fun onDestroy() {
+        WakeListener.stop()
         try {
             unregisterReceiver(receiver)
         } catch (_: Exception) {
@@ -200,8 +210,10 @@ class GlassesService : Service() {
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val quiet = Prefs.quietUntil > System.currentTimeMillis()
+        val wake = WakeListener.state.value
         val text = when {
-            !Glasses.connected.value -> "Waiting for the glasses or earbuds"
+            wake.startsWith("listening") -> "Listening for “${Prefs.name}”" + wake.substringAfter("listening", "").let { if (it.isBlank()) "" else " ·" + it.substringAfter("·") }
+            !Glasses.connected.value -> "Waiting for the glasses or earbuds" + if (wake.startsWith("paused")) " · wake word $wake" else ""
             quiet -> "With you, staying quiet"
             Wear.onPixelBuds() -> "With you in the Pixel Buds"
             Wear.onBuds() -> "With you in the earbuds"

@@ -771,6 +771,7 @@ fun HomeScreen(resumes: Int) {
     val state by Glasses.atlasState.collectAsState()
     val said by Glasses.lastSaid.collectAsState()
     val inputSource by Glasses.inputSource.collectAsState()
+    val wake by WakeListener.state.collectAsState()
     val heard by Glasses.lastHeard.collectAsState()
     var typed by remember { mutableStateOf("") }
     var quietUntil by remember(resumes) { mutableStateOf(Prefs.quietUntil) }
@@ -854,6 +855,7 @@ fun HomeScreen(resumes: Int) {
                 state == "listening" -> "Listening" + inputSource.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                 state == "thinking" -> "Thinking"
                 said.isNotBlank() -> "“${said.take(160)}${if (said.length > 160) "…" else ""}”"
+                wake.startsWith("listening") -> "Listening for “${Prefs.name}”" + (wake.substringAfter("·", "").takeIf { it.isNotBlank() }?.let { " ·$it" } ?: "")
                 else -> "Standing by"
             }
             Text(
@@ -1427,6 +1429,17 @@ fun SettingsScreen() {
                     2 -> "Listens through the phone's own mics; replies still play in your buds or glasses."
                     else -> "Listens through whatever you're wearing, or the phone if nothing is."
                 } + if (lastMic.isNotBlank()) " Last listened through: $lastMic." else "",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
+            val wakeNow by WakeListener.state.collectAsState()
+            ToggleRow(
+                "Wake word: “${Prefs.name}” hands-free",
+                "Listens on the phone for its name through your headset (or the phone, with Phone mic). Nothing leaves the phone until it hears it. " +
+                    "Keeping a Bluetooth mic open uses more of the buds' battery and drops them to call-quality sound, so it pauses whenever music or a call is playing, and during quiet time.",
+                Prefs.wakeListen
+            ) { Prefs.wakeListen = it }
+            Text(
+                "Right now: $wakeNow." + if (Prefs.lastWake > 0) " Last woke ${timeAgo(Prefs.lastWake)} through ${Prefs.lastWakeSource}." else "",
                 color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
             )
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }

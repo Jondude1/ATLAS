@@ -860,4 +860,23 @@ class AtlasTest {
         assertFalse(Wear.repliesViaStream())
         Glasses.active.value = ""
     }
+
+    @Test
+    fun wakeListenerKnowsWhenToListen() {
+        fun d(micSource: Int = 0, worn: Boolean = true, buddie: Boolean = false, sco: Boolean = true, music: Boolean = false,
+              call: Boolean = false, quiet: Boolean = false, busy: Boolean = false, allowed: Boolean = true, on: Boolean = true) =
+            WakeListener.decide(on, micSource, worn, buddie, sco, music, call, quiet, busy, allowed)
+        assertTrue(d().listen && d().headset)                                  // Galaxy Buds in, Auto
+        assertEquals("paused: music playing", d(music = true).why)
+        assertEquals("paused: on a call", d(call = true).why)
+        assertEquals("paused: quiet time", d(quiet = true).why)
+        assertFalse(d(busy = true).listen)
+        assertEquals("paused: nothing worn", d(worn = false, sco = false).why) // never through a phone in a pocket on Auto
+        assertTrue(d(micSource = 2, worn = false, sco = false).listen)         // Phone mic: listens on the phone
+        assertFalse(d(micSource = 2).headset)
+        assertEquals("paused: no headset connected", d(micSource = 1, sco = false).why)
+        assertFalse(d(buddie = true).listen)                                   // the Buddies have their own wake word
+        assertEquals("off", d(on = false).why)
+        assertTrue(d(allowed = false).why.contains("open Atlas once"))
+    }
 }
