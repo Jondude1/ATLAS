@@ -1336,6 +1336,62 @@ async def house_maintenance_check():
     return await _check_house_maintenance()
 
 
+async def _compose_leave_home_check() -> dict:
+    # Composition/checklist half only: doors, thermostat setback and
+    # HA-armed state live on Home Assistant, which this hub has no token
+    # for and architecturally isn't meant to hold (the app talks to HA
+    # directly, per docs/REACH.md). Flagged as unreachable below rather
+    # than stalling on it or faking a result.
+    cams = await frigate_cameras()
+    print_state = await print_preflight()
+    checklist = []
+    exceptions = []
+
+    if cams.get("ok"):
+        names = [c["name"] for c in cams["cameras"]]
+        disabled = [c["name"] for c in cams["cameras"] if not c["enabled"]]
+        checklist.append(f"Cameras: {len(names) - len(disabled)}/{len(names)} armed")
+        if disabled:
+            exceptions.append(f"Not armed: {', '.join(disabled)}")
+    else:
+        exceptions.append("Cameras: Frigate isn't answering")
+
+    if print_state.get("ok"):
+        checklist.append(f"Print area camera ({print_state['camera']}): watching")
+    else:
+        exceptions.append(f"Print area: {print_state.get('reason', 'not available')}")
+
+    exceptions.append("Doors/thermostat/HA-armed state: not reachable from this hub -- check the app's HA connection")
+
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Compose a one-line 'House is set' style summary for someone leaving "
+                    "home, from the checklist and flagged items given. Mention exceptions "
+                    "by name; if the checklist items are all fine, lead with 'House is set.' "
+                    "Plain spoken English, one short sentence, no markdown."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "Checklist:\n" + "\n".join(checklist) + "\n\nFlagged:\n" + "\n".join(exceptions),
+            },
+        ],
+        max_tokens=80,
+        timeout_s=30,
+    )
+    if reply is None:
+        reply = "House is set, except: " + "; ".join(exceptions)
+    return {"summary": reply, "checklist": checklist, "exceptions": exceptions}
+
+
+@app.get("/atlas/leave-home/check", dependencies=[Depends(require_token)])
+async def leave_home_check():
+    return await _compose_leave_home_check()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -2129,6 +2185,12 @@ def mcp_house_maintenance() -> dict:
 async def mcp_house_maintenance_check() -> dict:
     """Check maintenance clocks now; reports anything due or overdue."""
     return await house_maintenance_check()
+
+
+@mcp.tool
+async def mcp_leave_home_check() -> dict:
+    """Run the leave-home checklist (cameras, print area); composes a 'House is set' line, exceptions only."""
+    return await leave_home_check()
 
 
 @mcp.tool

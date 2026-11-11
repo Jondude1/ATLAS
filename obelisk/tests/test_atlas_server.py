@@ -1016,6 +1016,60 @@ def test_house_maintenance_list_and_missing_file(atlas):
     assert items == [{"item": "Car oil change", "cadence_days": 180, "last_done": "2026-08-01"}]
 
 
+def test_leave_home_check_reports_clean_when_everything_is_armed(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        if path == "/api/config":
+            return {"cameras": {"front_porch": {"enabled": True}, mod.PRINT_CAMERA: {"enabled": True}}}
+        return None
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/leave-home/check").json()
+    assert any("2/2 armed" in c for c in body["checklist"])
+    assert any(mod.PRINT_CAMERA in c for c in body["checklist"])
+    assert any("HA" in e for e in body["exceptions"])  # the flagged HA dependency always shows
+    assert "House is set" in body["summary"]
+
+
+def test_leave_home_check_flags_disabled_cameras_and_printer(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        if path == "/api/config":
+            return {"cameras": {"front_porch": {"enabled": False}, mod.PRINT_CAMERA: {"enabled": False}}}
+        return None
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/leave-home/check").json()
+    assert any("front_porch" in e for e in body["exceptions"])
+    assert any("Print area" in e for e in body["exceptions"])
+    assert "House is set, except" in body["summary"]
+
+
+def test_leave_home_check_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        return {"cameras": {}}
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "House is set."
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/leave-home/check").json()
+    assert body["summary"] == "House is set."
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
