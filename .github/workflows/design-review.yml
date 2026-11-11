@@ -1,0 +1,28 @@
+name: Design review
+# Gemini reviews the latest screenshots. Runs when the brief changes, or by hand.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["ci/design-brief.md"]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-screenshots
+          path: shots
+      - name: Ask Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+        run: python3 ci/design_review.py > review.md; head -c 400 review.md
+      - name: Post the review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 2 -R ${{ github.repository }} --body-file review.md
