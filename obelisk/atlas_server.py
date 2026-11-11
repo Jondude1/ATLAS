@@ -139,6 +139,17 @@ SLICER_SETTING_BOUNDS = {
     "nozzle_temp_c": (150.0, 260.0),
 }
 
+# Place-and-Person Triggers (#11): condition is free text, voice-created.
+# Two ways a trigger fires: the hub evaluates a handful of known keyword
+# patterns itself (currently just "printer idle/empty/done/free", via the
+# print queue -- the only context the hub can actually sense on its own),
+# or an app-side signal calls POST /atlas/triggers/event with a short event
+# name ("home", "jenna") that's matched by substring against pending
+# conditions -- "home" is not something this hub can detect (no geofencing
+# here either, same conclusion as Catch Me Up / Leave-Home).
+PLACE_TRIGGER_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_PLACE_TRIGGER_CHECK_INTERVAL_S", "300"))
+_place_trigger_task: Optional[asyncio.Task] = None
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -162,6 +173,7 @@ async def _atlas_lifespan(app):
             _schedule_outage_watch()
             _schedule_account_watch()
             _schedule_house_maintenance()
+            _schedule_place_triggers()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -175,6 +187,7 @@ async def _atlas_lifespan(app):
         _schedule_outage_watch()
         _schedule_account_watch()
         _schedule_house_maintenance()
+        _schedule_place_triggers()
         yield
 
 
@@ -384,6 +397,17 @@ def init_hub_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS place_triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                condition TEXT NOT NULL,
+                reminder TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                fired_at INTEGER
+            )
+            """
+        )
         conn.commit()
 
 
@@ -456,6 +480,15 @@ class RoutineRun(BaseModel):
 
 class SlicerTune(BaseModel):
     symptom: str
+
+
+class PlaceTrigger(BaseModel):
+    condition: str
+    reminder: str
+
+
+class PlaceTriggerEvent(BaseModel):
+    event: str
 
 
 def _now_ms() -> int:
@@ -1584,6 +1617,97 @@ async def departure_check():
     return await _compose_departure_check()
 
 
+async def _fire_trigger(row: sqlite3.Row) -> None:
+    await report(
+        Report(app="trigger", title=row["reminder"], body=f"Triggered by: {row['condition']}", key=None)
+    )
+    with hub_db() as conn:
+        conn.execute("UPDATE place_triggers SET fired_at = ? WHERE id = ?", (_now_ms(), row["id"]))
+        conn.commit()
+
+
+async def _check_place_triggers() -> dict:
+    with hub_db() as conn:
+        pending = conn.execute("SELECT * FROM place_triggers WHERE fired_at IS NULL").fetchall()
+    fired = 0
+    printer_idle = None
+    for row in pending:
+        cond = row["condition"].lower()
+        if "printer" in cond and any(w in cond for w in ("idle", "empty", "done", "free")):
+            if printer_idle is None:
+                printer_idle = not any(j["status"] == "queued" for j in _read_print_queue())
+            if printer_idle:
+                await _fire_trigger(row)
+                fired += 1
+    return {"checked": len(pending), "fired": fired}
+
+
+async def _fire_triggers_for_event(event: str) -> dict:
+    event_low = event.strip().lower()
+    with hub_db() as conn:
+        pending = conn.execute("SELECT * FROM place_triggers WHERE fired_at IS NULL").fetchall()
+    fired = 0
+    for row in pending:
+        if event_low and event_low in row["condition"].lower():
+            await _fire_trigger(row)
+            fired += 1
+    return {"checked": len(pending), "fired": fired, "event": event}
+
+
+async def _place_trigger_loop():
+    while True:
+        await asyncio.sleep(PLACE_TRIGGER_CHECK_INTERVAL_S)
+        try:
+            await _check_place_triggers()
+        except Exception:
+            pass
+
+
+def _schedule_place_triggers():
+    global _place_trigger_task
+    if _place_trigger_task is not None and not _place_trigger_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _place_trigger_task = loop.create_task(_place_trigger_loop())
+
+
+@app.post("/atlas/triggers", dependencies=[Depends(require_token)])
+def create_trigger(t: PlaceTrigger):
+    with hub_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO place_triggers (condition, reminder, created_at) VALUES (?, ?, ?)",
+            (t.condition, t.reminder, _now_ms()),
+        )
+        conn.commit()
+        trigger_id = cur.lastrowid
+    return {"id": trigger_id}
+
+
+@app.get("/atlas/triggers", dependencies=[Depends(require_token)])
+def list_triggers(include_fired: bool = False):
+    with hub_db() as conn:
+        if include_fired:
+            rows = conn.execute("SELECT * FROM place_triggers ORDER BY created_at DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM place_triggers WHERE fired_at IS NULL ORDER BY created_at ASC"
+            ).fetchall()
+    return {"triggers": [dict(r) for r in rows]}
+
+
+@app.post("/atlas/triggers/check", dependencies=[Depends(require_token)])
+async def triggers_check():
+    return await _check_place_triggers()
+
+
+@app.post("/atlas/triggers/event", dependencies=[Depends(require_token)])
+async def triggers_event(e: PlaceTriggerEvent):
+    return await _fire_triggers_for_event(e.event)
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -2515,6 +2639,30 @@ async def mcp_run_routine(name: str) -> dict:
 async def mcp_departure_check() -> dict:
     """Run the departure checklist (printer, open urgent items); composes a 'clear to go' line, exceptions only."""
     return await departure_check()
+
+
+@mcp.tool
+def mcp_create_trigger(condition: str, reminder: str) -> dict:
+    """Create a context-bound reminder ('when I get home', 'when the printer's idle') instead of a clock-bound one."""
+    return create_trigger(PlaceTrigger(condition=condition, reminder=reminder))
+
+
+@mcp.tool
+def mcp_list_triggers(include_fired: bool = False) -> dict:
+    """List pending (or, with include_fired, all) place/person triggers."""
+    return list_triggers(include_fired=include_fired)
+
+
+@mcp.tool
+async def mcp_triggers_check() -> dict:
+    """Check hub-evaluable trigger conditions now (currently: printer idle)."""
+    return await triggers_check()
+
+
+@mcp.tool
+async def mcp_triggers_event(event: str) -> dict:
+    """Signal an app-detected event (e.g. 'home', 'jenna') to fire any matching pending triggers."""
+    return await triggers_event(PlaceTriggerEvent(event=event))
 
 
 @mcp.tool

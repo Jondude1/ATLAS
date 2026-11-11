@@ -1259,6 +1259,65 @@ def test_departure_check_uses_parser_when_available(atlas, monkeypatch):
     assert body["summary"] == "Clear to go, nothing outstanding."
 
 
+def test_trigger_create_and_list(atlas):
+    mod, client = atlas
+    resp = client.post(
+        "/atlas/triggers", json={"condition": "when I get home", "reminder": "ask about the dentist"}
+    )
+    trigger_id = resp.json()["id"]
+    assert trigger_id > 0
+
+    pending = client.get("/atlas/triggers").json()["triggers"]
+    assert len(pending) == 1
+    assert pending[0]["reminder"] == "ask about the dentist"
+
+
+def test_trigger_fires_on_printer_idle(atlas):
+    mod, client = atlas
+    client.post(
+        "/atlas/triggers", json={"condition": "when the printer's idle", "reminder": "start the next job"}
+    )
+    # queue has a queued job -> printer is not idle -> no fire
+    client.post("/atlas/capture", json={"text": "noop"})  # unrelated, just touching the DB
+    mod.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 100 | queued\n", encoding="utf-8")
+
+    resp = client.post("/atlas/triggers/check").json()
+    assert resp == {"checked": 1, "fired": 0}
+
+    mod.QUEUE_FILE.write_text("- Bracket | PLA | 100 | done\n", encoding="utf-8")
+    resp = client.post("/atlas/triggers/check").json()
+    assert resp == {"checked": 1, "fired": 1}
+
+    pending = client.get("/atlas/triggers").json()["triggers"]
+    assert pending == []
+    reports = client.get("/atlas/reports", params={"app": "trigger"}).json()["reports"]
+    assert len(reports) == 1
+    assert reports[0]["title"] == "start the next job"
+
+
+def test_trigger_fires_on_matching_app_event(atlas):
+    mod, client = atlas
+    client.post(
+        "/atlas/triggers", json={"condition": "next time Jenna's up", "reminder": "mention the plan for Saturday"}
+    )
+    client.post("/atlas/triggers", json={"condition": "when I get home", "reminder": "unrelated"})
+
+    resp = client.post("/atlas/triggers/event", json={"event": "jenna"}).json()
+    assert resp["fired"] == 1
+
+    pending = client.get("/atlas/triggers").json()["triggers"]
+    assert len(pending) == 1
+    assert pending[0]["condition"] == "when I get home"
+
+
+def test_trigger_event_with_no_match_fires_nothing(atlas):
+    mod, client = atlas
+    client.post("/atlas/triggers", json={"condition": "when I get home", "reminder": "x"})
+    resp = client.post("/atlas/triggers/event", json={"event": "office"}).json()
+    assert resp["fired"] == 0
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
