@@ -100,6 +100,38 @@ object Speaker : TextToSpeech.OnInitListener {
         emptyList()
     }
 
+    override fun onInit(status: Int) {
+        val t = tts ?: return
+        if (status != TextToSpeech.SUCCESS) return
+        t.setAudioAttributes(attrs)
+        ready = true
+        applyVoice()
+        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
+            }
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
+            }
+        })
+    }
+
+    /** Offline English voices Corin can choose from. */
+    fun voices(): List<String> = try {
+        tts?.voices.orEmpty()
+            .filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+            .map { it.name }.sorted().take(16)
+    } catch (e: Exception) {
+        emptyList()
+    }
+
     fun applyVoice() {
         val want = Prefs.voiceName
         if (want.isBlank()) return
