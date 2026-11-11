@@ -417,6 +417,66 @@ def test_money_subscriptions_lists_parsed_entries(atlas):
     assert subs[0]["amount"] == 29.99
 
 
+def test_catch_me_up_summarizes_reports_since_last_call_then_clears(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/report", json={"app": "home", "title": "Package delivered"})
+
+    first = client.get("/atlas/catch-me-up").json()
+    assert "Package delivered" in first["summary"]
+
+    second = client.get("/atlas/catch-me-up").json()
+    assert second["summary"] == "Nothing to report."
+
+
+def test_catch_me_up_peek_does_not_advance_the_watermark(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/report", json={"app": "home", "title": "Garage left open"})
+
+    peeked = client.get("/atlas/catch-me-up", params={"peek": True}).json()
+    assert "Garage left open" in peeked["summary"]
+
+    real = client.get("/atlas/catch-me-up").json()
+    assert "Garage left open" in real["summary"]
+
+    after = client.get("/atlas/catch-me-up").json()
+    assert after["summary"] == "Nothing to report."
+
+
+def test_catch_me_up_caps_the_lookback_window(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    too_old = mod._now_ms() - (mod.CATCH_UP_MAX_HOURS + 1) * 3600 * 1000
+    client.post("/atlas/report", json={"app": "home", "title": "Ancient event", "at": too_old})
+
+    summary = client.get("/atlas/catch-me-up").json()["summary"]
+    assert "Ancient event" not in summary
+
+
+def test_catch_me_up_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "Welcome back! Quiet while you were out."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.get("/atlas/catch-me-up").json()
+    assert body["summary"] == "Welcome back! Quiet while you were out."
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

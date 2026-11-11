@@ -63,6 +63,12 @@ MONEY_FILE = Path(
 MONEY_LOOKAHEAD_DAYS = int(os.environ.get("ATLAS_MONEY_LOOKAHEAD_DAYS", "7"))
 MONEY_CHECK_HOUR = int(os.environ.get("ATLAS_MONEY_CHECK_HOUR", "6"))  # local 24h clock
 
+# Catch Me Up: the hub has no geofencing of its own, so "presence-triggered"
+# means the app calls this the moment ITS presence signal says arrival; the
+# hub's job is only the composition, watermarked by the last time this was
+# actually fetched (not peeked).
+CATCH_UP_MAX_HOURS = int(os.environ.get("ATLAS_CATCH_UP_MAX_HOURS", "72"))
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -276,6 +282,7 @@ _brief_lock = asyncio.Lock()
 _brief_task: Optional[asyncio.Task] = None
 _captures_task: Optional[asyncio.Task] = None
 _money_task: Optional[asyncio.Task] = None
+_catch_up_cache = {"last_shown_at": 0}
 
 
 class Report(BaseModel):
@@ -768,6 +775,48 @@ async def money_check():
     return await _check_money_subscriptions()
 
 
+async def _compose_catch_me_up(peek: bool = False) -> dict:
+    now_ms = _now_ms()
+    floor = now_ms - CATCH_UP_MAX_HOURS * 3600 * 1000
+    since = max(_catch_up_cache.get("last_shown_at", 0), floor)
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reports WHERE at >= ? ORDER BY at ASC LIMIT 50", (since,)
+        ).fetchall()
+    reports_text = "\n".join(
+        f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip()
+        for r in rows
+    )
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Welcome the person back with a short, warm catch-up on what happened "
+                    "while they were away, drawn only from the reports given. If nothing "
+                    "happened, say so briefly and warmly. Plain spoken English, at most 120 "
+                    "words, no markdown, no lists."
+                ),
+            },
+            {
+                "role": "user",
+                "content": reports_text or "(nothing happened while they were away)",
+            },
+        ],
+        max_tokens=220,
+        timeout_s=60,
+    )
+    summary = reply if reply else _fallback_brief(rows)
+    if not peek:
+        _catch_up_cache["last_shown_at"] = now_ms
+    return {"summary": summary, "since": since, "updated": now_ms}
+
+
+@app.get("/atlas/catch-me-up", dependencies=[Depends(require_token)])
+async def catch_me_up(peek: bool = False):
+    return await _compose_catch_me_up(peek=peek)
+
+
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
 async def ask(a: Ask):
     with hub_db() as conn:
@@ -1087,6 +1136,12 @@ def mcp_money_subscriptions() -> dict:
 async def mcp_money_check() -> dict:
     """Run the Money Sentinel check now and file hub reports for anything renewing soon."""
     return await money_check()
+
+
+@mcp.tool
+async def mcp_catch_me_up() -> dict:
+    """Compose a short catch-up on what happened since the last time this was called (call it on arrival)."""
+    return await catch_me_up()
 
 
 @mcp.tool
