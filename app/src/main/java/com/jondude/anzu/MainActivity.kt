@@ -152,11 +152,11 @@ private var isDark by mutableStateOf(true)
 
 // Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = Color(0xFFFF5C00)
+private val Gold: Color get() = if (isDark) Color(0xFFFF5C00) else Color(0xFFD64D00)
 private val OnGold: Color get() = Color(0xFF000000)
-private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF110E0C)
+private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF121212)
 private val Muted: Color get() = if (isDark) Color(0xFFA3968F) else Color(0xFF6B605A)
-private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFF2EFEA)
+private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFEBEBEB)
 private val Panel: Color get() = if (isDark) Color(0xFF120F0D) else Color(0xFFE6E1DC)
 private val Fill: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
 private val Hairline: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
@@ -233,14 +233,14 @@ private val DarkColors = darkColorScheme(
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFFFF5C00),
+    primary = Color(0xFFD64D00),
     onPrimary = Color(0xFF000000),
     secondary = Color(0xFF6B605A),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFF2EFEA),
-    onBackground = Color(0xFF110E0C),
+    background = Color(0xFFEBEBEB),
+    onBackground = Color(0xFF121212),
     surface = Color(0xFFE6E1DC),
-    onSurface = Color(0xFF110E0C),
+    onSurface = Color(0xFF121212),
     surfaceVariant = Color(0xFFD5CFC9),
     onSurfaceVariant = Color(0xFF6B605A),
     outline = Color(0xFF6B605A),
@@ -336,7 +336,7 @@ fun AppRoot(resumes: Int) {
                             Icon(icon, contentDescription = label, tint = if (tab == i) Gold else Muted, modifier = Modifier.size(24.dp))
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                (if (i == 0) "Home" else label).uppercase(), fontSize = 10.sp, letterSpacing = 0.5.sp,
+                                (if (i == 0) "Home" else label).uppercase(), fontSize = 12.sp, letterSpacing = 0.6.sp,
                                 color = if (tab == i) Cream else Muted,
                                 modifier = Modifier.clearAndSetSemantics { }
                             )
@@ -416,7 +416,7 @@ fun Section(title: String, content: @Composable () -> Unit) {
         val (icon, subtitle) = settingsIndex[title] ?: (Icons.Filled.Settings to "")
         Column(Modifier.fillMaxWidth().clickable { nav.open(title) }) {
             Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(32.dp).background(Panel), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)).background(if (isDark) Color(0xFF1A1A1A) else Color(0xFFDCDCDC)), contentAlignment = Alignment.Center) {
                     Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
                 }
                 Column(Modifier.weight(1f).padding(start = 16.dp, end = 12.dp)) {
@@ -432,7 +432,7 @@ fun Section(title: String, content: @Composable () -> Unit) {
     if (nav != null && nav.page != title) return
     Column {
         if (nav == null) Text(
-            "// " + title.uppercase().replace(' ', '_'), color = Gold, fontSize = 10.sp, letterSpacing = 0.5.sp,
+            "// " + title.uppercase().replace(' ', '_'), color = Gold, fontSize = 12.sp, letterSpacing = 0.6.sp,
             modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
         )
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -485,7 +485,7 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
 /** A tiny overhead label, like BATT // on an instrument. */
 @Composable
 fun Label(text: String, color: Color = Muted) {
-    Text(text, color = color, fontSize = 10.sp, letterSpacing = 0.5.sp, maxLines = 1)
+    Text(text, color = color, fontSize = 12.sp, letterSpacing = 0.6.sp, maxLines = 1)
 }
 
 /** One cell of the telemetry grid: label above, value below. */
@@ -564,8 +564,9 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
  */
 @Composable
 fun Orb(state: String, diameter: Dp = 240.dp) {
-    val orange = Color(0xFFFF5C00)
-    val rim = if (isDark) Color(0xFF3A302B) else Color(0xFFBDB5AE)
+    val orange = Gold
+    val rim = if (isDark) Color(0xFF333333) else Color(0xFFB8B8B8)
+    val reticle = if (isDark) Color(0xFF666666) else Color(0xFF8A8A8A)
     val transition = rememberInfiniteTransition(label = "scope")
     val orbit by transition.animateFloat(
         initialValue = 0f, targetValue = 1f,
@@ -579,7 +580,7 @@ fun Orb(state: String, diameter: Dp = 240.dp) {
         val c = Offset(size.width / 2, size.height / 2)
         val r = size.minDimension / 2 - 4.dp.toPx()
         val tau = (2 * Math.PI).toFloat()
-        drawCircle(rim, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
+        drawCircle(rim, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
         for (k in 0 until 4) {
             val a = k * tau / 4
             val dx = kotlin.math.cos(a); val dy = kotlin.math.sin(a)
@@ -612,6 +613,15 @@ fun Orb(state: String, diameter: Dp = 240.dp) {
                 drawPath(path, orange, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
             }
             else -> {
+                // at rest: a centre dot inside a small dashed reticle, and one dot circling the rim
+                drawCircle(orange, 2.dp.toPx(), c)
+                drawCircle(
+                    reticle, 16.dp.toPx(), c,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                    )
+                )
                 val a = orbit * tau - tau / 4
                 drawCircle(orange, 2.5.dp.toPx(), Offset(c.x + kotlin.math.cos(a) * r, c.y + kotlin.math.sin(a) * r))
             }
@@ -671,8 +681,14 @@ fun HomeScreen(resumes: Int) {
     // Real links only: the hub on Obelisk and Home Assistant, checked once a minute while this screen is up.
     var hubUp by remember { mutableStateOf<Boolean?>(null) }
     var haUp by remember { mutableStateOf<Boolean?>(null) }
+    var machine by remember { mutableStateOf("") } // the phone's own battery temperature and voltage
     LaunchedEffect(resumes) {
         while (true) {
+            ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { b ->
+                val temp = b.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1)
+                val volts = b.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1)
+                if (temp > 0 && volts > 0) machine = String.format(Locale.US, "CORE_TEMP: %.1f°C // BUS: %dmV", temp / 10f, volts)
+            }
             hubUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 reachable(Prefs.obeliskUrl.trim().trimEnd('/') + "/atlas/status")
             }
@@ -753,10 +769,14 @@ fun HomeScreen(resumes: Int) {
             }
             HorizontalDivider(color = Hairline, thickness = 1.dp)
             Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-                Readout("EXT_LINK //", when (haUp) { true -> "Active"; false -> "Down"; else -> "--" }, Modifier.weight(1f))
+                Readout("UPLINK //", when (haUp) { true -> "Active"; false -> "Down"; else -> "--" }, Modifier.weight(1f))
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
                 Readout("MIC //", if (armed) "Armed" else "Muted", Modifier.weight(1f))
             }
+        }
+        if (machine.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Label(machine)
         }
         Spacer(Modifier.height(24.dp))
         TextField(
@@ -787,7 +807,7 @@ fun HomeScreen(resumes: Int) {
                 modifier = Modifier.weight(1f).height(48.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
             ) { Text("[ TALK ]", maxLines = 1) }
-            ConsoleButton("[ FORCE ]", Gold, Modifier.weight(1f)) { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
+            ConsoleButton("[ OVERRIDE ]", Gold, Modifier.weight(1f)) { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
             ConsoleButton(if (quiet) "[ RESUME ]" else "[ MUTE_1H ]", Muted, Modifier.weight(1f)) {
                 Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
                 quietUntil = Prefs.quietUntil
@@ -948,8 +968,9 @@ fun NotesScreen() {
         }
         notes.forEachIndexed { i, n ->
             Row(
-                Modifier.fillMaxWidth().drawBehind { drawRect(Color(0xFFFF5C00), size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height)) }
-                    .padding(start = 14.dp, top = 4.dp, bottom = 4.dp),
+                Modifier.fillMaxWidth().drawBehind { drawRect(Gold, size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height - 12.dp.toPx()))
+                    drawLine(Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+                }.padding(start = 14.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
