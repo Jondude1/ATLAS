@@ -91,6 +91,67 @@ object Hub {
         }
     }
 
+    data class Container(val name: String, val status: String, val ports: String) {
+        val up get() = status.startsWith("Up", ignoreCase = true)
+        /** Containers group by the first part of their name: piped-nginx and piped-backend are one stack. */
+        val stack get() = name.substringBefore('-').substringBefore('_')
+    }
+    data class AthenaStatus(val containers: List<Container>, val uptime: String, val disk: String, val error: String?)
+    data class AthenaRun(val ok: Boolean, val exit: Int, val out: String)
+
+    /** Reads the hub's cached Athena status. Lenient about the shape so small server changes don't blank the screen. */
+    fun parseAthena(body: String): AthenaStatus {
+        val o = JSONObject(body)
+        val arr = o.optJSONArray("containers") ?: JSONArray()
+        val list = (0 until arr.length()).mapNotNull { i ->
+            val c = arr.optJSONObject(i) ?: return@mapNotNull null
+            val ports = c.opt("ports")
+            Container(
+                c.optString("name", c.optString("Names")),
+                c.optString("status", c.optString("Status")),
+                if (ports is JSONArray) (0 until ports.length()).joinToString(", ") { ports.optString(it) } else (ports?.toString() ?: "")
+            )
+        }
+        return AthenaStatus(list, o.optString("uptime"), o.opt("disk")?.toString() ?: "", null)
+    }
+
+    /** Blocking. Athena's containers, uptime and disk, as the hub last saw them. */
+    fun athenaStatus(): AthenaStatus {
+        if (!configured()) return AthenaStatus(emptyList(), "", "", "The hub isn't set up.")
+        return try {
+            val (code, body) = Net.get(base() + "/atlas/athena/status", auth(), 10_000)
+            when (code) {
+                in 200..299 -> parseAthena(body)
+                401, 403 -> AthenaStatus(emptyList(), "", "", "The hub wants its token (Settings, Obelisk).")
+                404 -> AthenaStatus(emptyList(), "", "", "The hub doesn't have the Athena channel yet.")
+                else -> AthenaStatus(emptyList(), "", "", "Athena didn't answer (${code}).")
+            }
+        } catch (e: Exception) {
+            AthenaStatus(emptyList(), "", "", "Couldn't reach the hub on Obelisk.")
+        }
+    }
+
+    /** Blocking. Runs one command on Athena through the hub and returns what it printed. */
+    fun athenaRun(command: String): AthenaRun {
+        if (!configured()) return AthenaRun(false, -1, "The hub isn't set up.")
+        return try {
+            val (code, body) = Net.postJson(
+                base() + "/atlas/athena", auth(), JSONObject().put("command", command).toString(), 90_000
+            )
+            when (code) {
+                in 200..299 -> {
+                    val o = JSONObject(body)
+                    val out = listOf(o.optString("stdout"), o.optString("stderr")).filter { it.isNotBlank() }.joinToString("\n").trimEnd()
+                    AthenaRun(o.optBoolean("ok"), o.optInt("exit", -1), out.ifBlank { "(no output)" })
+                }
+                401, 403 -> AthenaRun(false, -1, "The hub wants its token. Add it in Settings, Obelisk.")
+                else -> AthenaRun(false, -1, "Athena didn't answer (${code}). " + try { JSONObject(body).optString("detail") } catch (e: Exception) { "" })
+            }
+        } catch (e: Exception) {
+            AthenaRun(false, -1, "Athena didn't answer: couldn't reach the hub.")
+        }
+    }
+
     /** Builds a report in the hub's format. */
     fun reportJson(app: String, title: String, body: String, priority: String, key: String?): JSONObject {
         val p = priority.lowercase().takeIf { it in setOf("low", "normal", "urgent") } ?: "normal"

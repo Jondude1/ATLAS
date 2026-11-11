@@ -607,6 +607,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
+        if (Hub.configured()) {
+            a.put(tool("athena_status", "What's running on Athena, Jon's Windows server: its Docker containers (Jellyfin, the *arr apps, Frigate, Nextcloud, Audiobookshelf, Piped, Node-RED and more), which are down, uptime and disk."))
+        }
         if (Hub.configured() || Hermes.configured()) {
             a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes, Jon's agent on Obelisk. Runs in the background; you report the result when it comes back.",
                 JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
@@ -789,6 +792,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     msg
+                }
+            }
+            "athena_status" -> Hub.athenaStatus().let { st ->
+                st.error ?: buildString {
+                    val down = st.containers.filter { !it.up }
+                    append("${st.containers.size} containers, ${if (down.isEmpty()) "all up" else "down: " + down.joinToString { it.name + " (" + it.status + ")" }}.")
+                    if (st.uptime.isNotBlank()) append(" Uptime ${st.uptime}.")
+                    if (st.disk.isNotBlank()) append(" Disk ${st.disk}.")
+                    append(" Running: " + st.containers.filter { it.up }.joinToString { it.name })
                 }
             }
             "ask_hub" -> Hub.ask(input.optString("question")) ?: "The hub on Obelisk didn't answer."

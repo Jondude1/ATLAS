@@ -657,4 +657,17 @@ class AtlasTest {
         Usage.add(50, 5)
         assertEquals("Today: 2 calls, 150 tokens in, 25 out.", Usage.summary())
     }
+
+    @Test
+    fun athenaStatusGroupsAndFlags() {
+        val st = com.jondude.anzu.assist.Hub.parseAthena(
+            """{"containers":[{"name":"piped-nginx","status":"Up 38 hours","ports":["0.0.0.0:80->80/tcp"]},
+               {"name":"piped-backend","status":"Exited (1) 2 hours ago","ports":""},
+               {"name":"jellyfin","status":"Up 3 days","ports":"0.0.0.0:8096->8096/tcp"}],"uptime":"3 days","disk":"412 GB free"}"""
+        )
+        assertEquals(3, st.containers.size)
+        assertEquals(listOf("piped-backend"), st.containers.filter { !it.up }.map { it.name })
+        assertEquals(setOf("piped", "jellyfin"), st.containers.map { it.stack }.toSet())
+        assertEquals("412 GB free", st.disk)
+    }
 }

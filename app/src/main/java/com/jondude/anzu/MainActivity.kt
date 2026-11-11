@@ -21,6 +21,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Create
 import androidx.compose.material.icons.outlined.Notifications
@@ -403,6 +404,7 @@ private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
     "Buddie earbuds" to (Icons.Filled.Build to "Wake word, stream, diagnostics"),
     "Home Assistant" to (Icons.Filled.Home to "Your house and what needs a spoken okay"),
     "Connections" to (Icons.Filled.Share to "Everything Atlas can reach and control"),
+    "Athena" to (Icons.Filled.Build to "Containers on Athena, and a command line to it"),
     "Hermes and your vault" to (Icons.Filled.Build to "Hand-offs to Hermes, Obsidian"),
     "Obelisk and local models" to (Icons.Filled.Lock to "Your own server and models"),
     "App" to (Icons.Filled.Info to "Version, updates, usage")
@@ -627,6 +629,78 @@ fun Orb(state: String, diameter: Dp = 240.dp) {
             }
         }
     }
+}
+
+/** Athena's containers grouped by stack, anything not up flagged, and a command line that runs through the hub. */
+@Composable
+fun AthenaPanel() {
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf<com.jondude.anzu.assist.Hub.AthenaStatus?>(null) }
+    var cmd by remember { mutableStateOf("") }
+    var running by remember { mutableStateOf(false) }
+    var output by remember { mutableStateOf("") }
+    fun refresh() = scope.launch {
+        status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.athenaStatus() }
+    }
+    LaunchedEffect(Unit) { refresh() }
+    val st = status
+    when {
+        st == null -> Label("READING ATHENA...")
+        st.error != null -> Text(st.error, color = Muted, fontSize = 14.sp)
+        else -> {
+            val down = st.containers.filter { !it.up }
+            Label(
+                "${st.containers.size} CONTAINERS // ${if (down.isEmpty()) "ALL UP" else "${down.size} DOWN"}" +
+                    (if (st.uptime.isNotBlank()) " // UP ${st.uptime}" else ""),
+                if (down.isEmpty()) Muted else MaterialTheme.colorScheme.error
+            )
+            if (st.disk.isNotBlank()) Label("DISK // ${st.disk}")
+            Column(Modifier.fillMaxWidth().border(1.dp, Hairline)) {
+                st.containers.groupBy { it.stack }.toSortedMap().entries.forEachIndexed { i, (stack, items) ->
+                    if (i > 0) HorizontalDivider(color = Hairline, thickness = 1.dp)
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Label(stack.uppercase() + " //", Gold)
+                        items.forEach { c ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).background(if (c.up) Muted else MaterialTheme.colorScheme.error))
+                                Text(c.name, color = Cream, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f).padding(start = 8.dp))
+                                Text(if (c.up) c.ports.substringBefore(',').substringAfterLast(':').substringBefore('-') else c.status,
+                                    color = if (c.up) Muted else MaterialTheme.colorScheme.error, fontSize = 12.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    SoftButton(onClick = { status = null; refresh() }) { Text("Refresh") }
+    TextField(
+        value = cmd, onValueChange = { cmd = it },
+        placeholder = { Text("> command on athena", color = Muted, fontSize = 14.sp) },
+        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = Display, fontSize = 14.sp),
+        singleLine = true, shape = Chamfer,
+        colors = TextFieldDefaults.colors(
+            unfocusedContainerColor = Panel, focusedContainerColor = Panel,
+            unfocusedIndicatorColor = Gold, focusedIndicatorColor = Gold, cursorColor = Gold
+        ),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(enabled = cmd.isNotBlank() && !running, onClick = {
+            val c = cmd.trim(); running = true; output = "$ $c\n..."
+            scope.launch {
+                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.athenaRun(c) }
+                output = "$ $c\n" + r.out.take(6000) + (if (r.exit > 0) "\n[exit ${r.exit}]" else "")
+                running = false
+            }
+        }) { Text("[ RUN ]") }
+        listOf("docker ps", "uptime").forEach { q -> SoftButton(onClick = { cmd = q }) { Text(q) } }
+    }
+    if (output.isNotBlank()) Text(
+        output, color = Cream, fontSize = 12.sp, lineHeight = 17.sp,
+        modifier = Modifier.fillMaxWidth().background(Panel).padding(12.dp).horizontalScroll(rememberScrollState())
+    )
 }
 
 private fun timeAgo(t: Long): String {
@@ -1388,6 +1462,8 @@ fun SettingsScreen() {
             Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }
+
+        Section("Athena") { AthenaPanel() }
 
         Section("Home Assistant") {
             PrefField("Address (built in)", Prefs.haUrl) { Prefs.haUrl = it.trim().ifBlank { HOME_ASSISTANT } }
