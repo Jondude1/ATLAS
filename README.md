@@ -29,12 +29,11 @@ The Anzu has speakers, a microphone and touch controls, with no screen or camera
 
 ## Obelisk (optional)
 
-`obelisk/atlas_server.py` is a small FastAPI server that writes every exchange into your Obsidian vault as daily notes, lets recall search the vault, and tracks which device you're on.
+`obelisk/atlas_server.py` is a small FastAPI server that writes every exchange into your Obsidian vault as daily notes, lets recall search the vault, and tracks which device you're on. It also transcribes the Buddie earbud stream with Whisper when Android's own recognizer can't.
 
-    pip install fastapi uvicorn
-    ATLAS_VAULT=/path/to/vault uvicorn atlas_server:app --host 0.0.0.0 --port 8765
+Run `obelisk/install.sh` on the node. It creates a venv, installs the requirements, and installs + starts a `systemd --user` service (`atlas-server.service`) so the server comes up on boot and restarts if it dies — no root needed, as long as `loginctl enable-linger $USER` is set. Defaults to `$HOME/Documents/Hermes` as the vault and port 8765; override with `ATLAS_VAULT=` / `ATLAS_PORT=` env vars before running it.
 
-Keep it on Tailscale only; it has no login.
+Then put `http://<obelisk-tailscale-name>:8765` in the app under Settings → Obelisk and local models. Keep it on Tailscale only; it has no login. If the node runs a firewall, open the port on the tailnet only, e.g. `sudo ufw allow from 100.64.0.0/10 to any port 8765 proto tcp`.
 
 ## Added in the second pass
 

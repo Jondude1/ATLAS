@@ -6,3 +6,5 @@ local.properties
 # Local secrets written by `elevenlabs onboard`
 /.env.local
 app/libs/
+obelisk/.venv/
+obelisk/__pycache__/
