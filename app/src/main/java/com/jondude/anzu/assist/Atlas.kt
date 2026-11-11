@@ -105,7 +105,13 @@ object Atlas {
                         }
                         Glasses.atlasState.value = "thinking"
                         Ears.earcon("think")
-                        val answer = Brain.reply(app, text)
+                        // From the earbuds' wake word there's no follow-up listen, so a gated action asks aloud and waits for a tap.
+                        val answer = Brain.reply(app, text) { question ->
+                            Glasses.atlasState.value = "speaking"
+                            Speaker.say("$question Tap approve on your phone.")
+                            Glasses.atlasState.value = "thinking"
+                            Approvals.ask(app, question)
+                        }
                         Glasses.atlasState.value = "speaking"
                         Speaker.say(answer)
                     }
@@ -126,7 +132,7 @@ object Atlas {
                 try {
                     Glasses.lastHeard.value = text
                     Glasses.atlasState.value = "thinking"
-                    val answer = Brain.reply(app, text)
+                    val answer = Brain.reply(app, text) { question -> Approvals.ask(app, question) }
                     Glasses.lastSaid.value = answer
                     if (Glasses.connected.value) {
                         Glasses.atlasState.value = "speaking"

@@ -346,6 +346,27 @@ fun AppRoot(resumes: Int) {
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
+            // A gated action waiting for one tap.
+            val ask by com.jondude.anzu.assist.Approvals.pending.collectAsState()
+            ask?.let { a ->
+                Column(
+                    Modifier.fillMaxWidth().background(Panel).padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("${Prefs.name} is asking", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light)
+                    Text(a.question, color = Cream, fontSize = 18.sp, lineHeight = 26.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { com.jondude.anzu.assist.Approvals.answer(a.id, true) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
+                        ) { Text("Approve") }
+                        SoftButton(onClick = { com.jondude.anzu.assist.Approvals.answer(a.id, false) }, Modifier.weight(1f).height(48.dp)) {
+                            Text("Deny")
+                        }
+                    }
+                }
+            }
             val rel = update
             if (rel != null && !dismissed) {
                 Card(

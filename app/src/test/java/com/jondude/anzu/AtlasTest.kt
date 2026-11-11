@@ -711,4 +711,20 @@ class AtlasTest {
         assertTrue(cut.endsWith("."))
         assertEquals("Nothing new from your systems. All quiet.", S.brief("", emptyList()))
     }
+
+    @Test
+    fun approvalCardWaitsForATap() = kotlinx.coroutines.runBlocking {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val A = com.jondude.anzu.assist.Approvals
+        val yes = kotlinx.coroutines.async { A.ask(ctx, "Text Jenna: on my way. Send it?") }
+        while (A.pending.value == null) kotlinx.coroutines.delay(10)
+        assertEquals("Text Jenna: on my way. Send it?", A.pending.value!!.question)
+        A.answer(A.pending.value!!.id, true)
+        assertTrue(yes.await())
+        assertNull(A.pending.value)
+        val no = kotlinx.coroutines.async { A.ask(ctx, "Call Dave?") }
+        while (A.pending.value == null) kotlinx.coroutines.delay(10)
+        A.answer(A.pending.value!!.id, false)
+        assertFalse(no.await())
+    }
 }
