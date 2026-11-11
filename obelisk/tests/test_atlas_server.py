@@ -58,7 +58,7 @@ def test_reports_filtered_by_app(atlas):
 def test_brief_falls_back_to_rules_when_parser_is_down(atlas, monkeypatch):
     mod, client = atlas
 
-    async def fake_chat(messages, max_tokens=300):
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
         return None
 
     monkeypatch.setattr(mod, "_chat", fake_chat)
@@ -78,7 +78,7 @@ def test_brief_falls_back_to_rules_when_parser_is_down(atlas, monkeypatch):
 def test_brief_uses_parser_when_available(atlas, monkeypatch):
     mod, client = atlas
 
-    async def fake_chat(messages, max_tokens=300):
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
         return "Everything is quiet right now."
 
     monkeypatch.setattr(mod, "_chat", fake_chat)
@@ -95,7 +95,7 @@ def test_brief_uses_parser_when_available(atlas, monkeypatch):
 def test_urgent_items_appear_until_acked(atlas, monkeypatch):
     mod, client = atlas
 
-    async def fake_chat(messages, max_tokens=300):
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
         return None
 
     monkeypatch.setattr(mod, "_chat", fake_chat)
@@ -118,7 +118,7 @@ def test_urgent_items_appear_until_acked(atlas, monkeypatch):
 def test_ask_falls_back_to_matching_reports_when_parser_is_down(atlas, monkeypatch):
     mod, client = atlas
 
-    async def fake_chat(messages, max_tokens=300):
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
         return None
 
     monkeypatch.setattr(mod, "_chat", fake_chat)
@@ -132,7 +132,7 @@ def test_ask_falls_back_to_matching_reports_when_parser_is_down(atlas, monkeypat
 def test_ask_uses_parser_when_available(atlas, monkeypatch):
     mod, client = atlas
 
-    async def fake_chat(messages, max_tokens=300):
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
         return "The garage has been open since 3pm."
 
     monkeypatch.setattr(mod, "_chat", fake_chat)
@@ -156,16 +156,86 @@ def test_delegate_forwards_to_hermes_and_files_a_report(atlas, monkeypatch):
     assert reports[0]["body"] == "done: water the plants"
 
 
-def test_delegate_survives_hermes_being_unreachable(atlas, monkeypatch):
+def test_delegate_returns_502_and_files_no_report_when_hermes_fails(atlas, monkeypatch):
     mod, client = atlas
 
     async def fake_hermes(task):
-        return "Hermes isn't installed on this node."
+        raise mod.HTTPException(status_code=502, detail="Hermes isn't installed on this node.")
 
     monkeypatch.setattr(mod, "_run_hermes_oneshot", fake_hermes)
     resp = client.post("/atlas/delegate", json={"task": "water the plants"})
-    assert resp.status_code == 200
-    assert "isn't installed" in resp.json()["answer"]
+    assert resp.status_code == 502
+    assert "isn't installed" in resp.json()["detail"]
+
+    reports = client.get("/atlas/reports", params={"app": "Hermes"}).json()["reports"]
+    assert reports == []
+
+
+def test_urgent_survives_a_fresh_process_without_a_rebuild(atlas):
+    # Fix #1 regression test: the very first /atlas/brief call on a freshly
+    # started process (no _rebuild_brief has run yet) must still read urgent
+    # items from the DB, not from the empty in-memory cache.
+    mod, client = atlas
+    resp = client.post("/atlas/report", json={"app": "home", "title": "Pipe burst", "priority": "urgent"})
+    report_id = resp.json()["id"]
+
+    urgent = client.get("/atlas/brief").json()["urgent"]
+    assert any(u["id"] == report_id for u in urgent)
+
+    client.post("/atlas/ack", json={"ids": [report_id]})
+    urgent = client.get("/atlas/brief").json()["urgent"]
+    assert not any(u["id"] == report_id for u in urgent)
+
+
+def test_athena_exec_requires_token_even_when_not_globally_required(atlas):
+    mod, client = atlas
+    # ATLAS_TOKEN is unset in this fixture, so other endpoints run tokenless —
+    # but the exec channel must stay closed regardless (non-negotiable spec).
+    resp = client.post("/atlas/athena", json={"command": "docker ps"})
+    assert resp.status_code == 401
+
+
+def test_athena_exec_runs_over_ssh_and_files_a_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_HUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("ATLAS_VAULT", str(tmp_path / "vault"))
+    monkeypatch.setenv("ATLAS_TOKEN", "secret123")
+    sys.modules.pop("atlas_server", None)
+    mod = importlib.import_module("atlas_server")
+
+    async def fake_ssh(command, timeout_s):
+        return 0, "hello from athena\n", ""
+
+    monkeypatch.setattr(mod, "_run_athena_ssh", fake_ssh)
+    with TestClient(mod.app) as client:
+        resp = client.post(
+            "/atlas/athena",
+            json={"command": "echo hello from athena"},
+            headers={"Authorization": "Bearer secret123"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["exit"] == 0
+        assert "hello from athena" in body["stdout"]
+
+        reports = client.get(
+            "/atlas/reports", params={"app": "athena"}, headers={"Authorization": "Bearer secret123"}
+        ).json()["reports"]
+        assert len(reports) == 1
+
+
+def test_athena_status_parses_docker_output(atlas):
+    mod, client = atlas
+    parsed = mod._parse_athena_status(
+        "jellyfin|Up 3 days|8096->8096/tcp\nbazarr|Up 3 days|6767->6767/tcp",
+        "2.01:23:45",
+        "Used 120GB Free 380GB",
+    )
+    assert parsed["containers"] == [
+        {"name": "jellyfin", "status": "Up 3 days", "ports": "8096->8096/tcp"},
+        {"name": "bazarr", "status": "Up 3 days", "ports": "6767->6767/tcp"},
+    ]
+    assert "120GB" in parsed["disk"]
 
 
 def test_token_required_when_set(tmp_path, monkeypatch):

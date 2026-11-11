@@ -39,6 +39,7 @@ Environment=ATLAS_WHISPER=base.en
 Environment=ATLAS_LLM_URL=$LLM_URL
 Environment=ATLAS_LLM_MODEL=$LLM_MODEL
 Environment=ATLAS_TOKEN=${ATLAS_TOKEN:-}
+Environment=ATLAS_ATHENA_HOST=${ATLAS_ATHENA_HOST:-user@athena.tail8dab0b.ts.net}
 ExecStart=$VENV/bin/uvicorn atlas_server:app --host 0.0.0.0 --port $PORT
 Restart=on-failure
 RestartSec=5
