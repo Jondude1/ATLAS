@@ -478,6 +478,88 @@ class AtlasTest {
         assertTrue(com.jondude.anzu.assist.Phone.media(ctx, "juggle").startsWith("I can play"))
     }
 
+    // ---------- connections (MCP) ----------
+    @Test
+    fun mcpRepliesAndNamesParse() {
+        val sse = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}\n\n"
+        assertTrue(com.jondude.anzu.assist.Mcp.parseReply(sse, "text/event-stream", 7)!!.getJSONObject("result").getBoolean("ok"))
+        assertNull(com.jondude.anzu.assist.Mcp.parseReply(sse, "text/event-stream", 8))
+        assertEquals(3, com.jondude.anzu.assist.Mcp.parseReply("""{"jsonrpc":"2.0","id":3,"result":{}}""", "application/json", 3)!!.getInt("id"))
+        val n = com.jondude.anzu.assist.Mcp.apiName("Home Assistant", "HassTurnOn")
+        assertEquals("x_Home_Assistant__HassTurnOn", n)
+        val long = com.jondude.anzu.assist.Mcp.apiName("A very long server name indeed", "an_extremely_long_tool_name_that_keeps_going_on")
+        assertTrue(long.length <= 64)
+        assertTrue(Regex("^[A-Za-z0-9_-]+$").matches(long))
+    }
+
+    /** A real MCP conversation over HTTP: a small server in the test, Atlas's client talking to it. */
+    @Test
+    fun mcpClientTalksToAServer() {
+        val calls = java.util.Collections.synchronizedList(ArrayList<String>())
+        val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/mcp") { ex ->
+            val body = ex.requestBody.readBytes().toString(Charsets.UTF_8)
+            val msg = JSONObject(body)
+            val method = msg.optString("method")
+            calls.add(method)
+            if (ex.requestHeaders.getFirst("Authorization") != "Bearer secret") {
+                ex.sendResponseHeaders(401, -1); ex.close(); return@createContext
+            }
+            if (method != "initialize" && ex.requestHeaders.getFirst("Mcp-Session-Id") != "s1") {
+                ex.sendResponseHeaders(400, -1); ex.close(); return@createContext
+            }
+            if (!msg.has("id")) { ex.sendResponseHeaders(202, -1); ex.close(); return@createContext }
+            val id = msg.getInt("id")
+            val result = when (method) {
+                "initialize" -> JSONObject().put("protocolVersion", "2025-06-18").put("capabilities", JSONObject().put("tools", JSONObject()))
+                    .put("serverInfo", JSONObject().put("name", "fake").put("version", "1"))
+                "tools/list" -> JSONObject().put("tools", org.json.JSONArray()
+                    .put(JSONObject().put("name", "light_on").put("description", "Turn on a light")
+                        .put("inputSchema", JSONObject().put("type", "object").put("properties", JSONObject().put("room", JSONObject().put("type", "string"))))))
+                "tools/call" -> JSONObject().put("content", org.json.JSONArray().put(JSONObject().put("type", "text")
+                    .put("text", "Light on in " + msg.getJSONObject("params").getJSONObject("arguments").getString("room"))))
+                else -> JSONObject()
+            }
+            val reply = JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result).toString()
+            // initialize answers as plain JSON and hands out a session; the rest answer as an event stream
+            val bytes: ByteArray
+            if (method == "initialize") {
+                ex.responseHeaders.add("Content-Type", "application/json")
+                ex.responseHeaders.add("Mcp-Session-Id", "s1")
+                bytes = reply.toByteArray()
+            } else {
+                ex.responseHeaders.add("Content-Type", "text/event-stream")
+                bytes = "event: message\ndata: $reply\n\n".toByteArray()
+            }
+            ex.sendResponseHeaders(200, bytes.size.toLong())
+            ex.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val url = "http://127.0.0.1:${server.address.port}/mcp"
+            val bad = com.jondude.anzu.assist.McpServer("Wrong", url, "nope")
+            assertTrue(com.jondude.anzu.assist.Mcp.discover(bad).isEmpty())
+            assertTrue(com.jondude.anzu.assist.Mcp.status.value["Wrong"]!!.contains("refused"))
+
+            val s = com.jondude.anzu.assist.McpServer("House", url, "secret")
+            com.jondude.anzu.assist.Mcp.upsert(s)
+            val tools = com.jondude.anzu.assist.Mcp.discover(s)
+            assertEquals(listOf("light_on"), tools.map { it.name })
+            assertEquals("1 tools", com.jondude.anzu.assist.Mcp.status.value["House"])
+            assertTrue(calls.contains("notifications/initialized"))
+            val def = com.jondude.anzu.assist.Mcp.toolDefinitions().getJSONObject(0)
+            assertEquals("x_House__light_on", def.getString("name"))
+            val t = com.jondude.anzu.assist.Mcp.find("x_House__light_on")!!
+            assertEquals("Light on in office", com.jondude.anzu.assist.Mcp.call(t, JSONObject().put("room", "office")))
+            assertTrue(com.jondude.anzu.assist.Mcp.summary().contains("House (light_on)"))
+            com.jondude.anzu.assist.Mcp.setEnabled("House", false)
+            assertNull(com.jondude.anzu.assist.Mcp.find("x_House__light_on"))
+        } finally {
+            server.stop(0)
+            com.jondude.anzu.assist.Mcp.remove("House")
+        }
+    }
+
     // ---------- updater / usage ----------
     @Test
     fun updaterReadsBuildNumbers() {

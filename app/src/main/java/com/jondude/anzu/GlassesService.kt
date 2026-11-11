@@ -118,6 +118,12 @@ class GlassesService : Service() {
         }
         ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         checkAlreadyConnected()
+        scope.launch(Dispatchers.IO) {
+            try {
+                com.jondude.anzu.assist.Mcp.refresh()
+            } catch (_: Exception) {
+            }
+        }
         ticker = scope.launch {
             while (isActive) {
                 delay(30_000)

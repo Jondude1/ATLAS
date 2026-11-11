@@ -349,7 +349,8 @@ private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
     "Listening" to (Icons.Filled.Phone to "Microphone and talking back"),
     "Buddie earbuds" to (Icons.Filled.Build to "Wake word, stream, diagnostics"),
     "Home Assistant" to (Icons.Filled.Home to "Your house and what needs a spoken okay"),
-    "Hermes and your vault" to (Icons.Filled.Share to "Hand-offs to Hermes, Obsidian"),
+    "Connections" to (Icons.Filled.Share to "Everything Atlas can reach and control"),
+    "Hermes and your vault" to (Icons.Filled.Build to "Hand-offs to Hermes, Obsidian"),
     "Obelisk and local models" to (Icons.Filled.Lock to "Your own server and models"),
     "App" to (Icons.Filled.Info to "Version, updates, usage")
 )
@@ -1255,6 +1256,68 @@ fun SettingsScreen() {
             PrefField("Speech service", Prefs.haTtsService) { Prefs.haTtsService = it.trim() }
             PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
             PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }
+        }
+
+        Section("Connections") {
+            val mcpStatus by com.jondude.anzu.assist.Mcp.status.collectAsState()
+            var servers by remember { mutableStateOf(com.jondude.anzu.assist.Mcp.servers()) }
+            var newName by remember { mutableStateOf("") }
+            var newUrl by remember { mutableStateOf("") }
+            var newToken by remember { mutableStateOf("") }
+            fun reload() { servers = com.jondude.anzu.assist.Mcp.servers() }
+            fun check(s: com.jondude.anzu.assist.McpServer) {
+                scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Mcp.discover(s) }
+            }
+            LaunchedEffect(Unit) { withContext(Dispatchers.IO) { com.jondude.anzu.assist.Mcp.refresh(force = true) } }
+            Text(
+                "Anything that speaks MCP can be connected here, and its tools become things ${Prefs.name} can do: your house, your desktop, your servers, your other apps. Home Assistant has it built in.",
+                color = Muted, fontSize = 13.sp
+            )
+            if (servers.isEmpty()) EmptyHint("Nothing connected yet.")
+            servers.forEach { s ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(s.name, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (!s.enabled) "Off" else mcpStatus[s.name] ?: "Not checked yet",
+                            color = if ((mcpStatus[s.name] ?: "").startsWith("unreachable")) MaterialTheme.colorScheme.error else Muted,
+                            fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Switch(
+                        checked = s.enabled,
+                        onCheckedChange = { on ->
+                            com.jondude.anzu.assist.Mcp.setEnabled(s.name, on); reload()
+                            if (on) check(s.copy(enabled = true))
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = OnGold, checkedTrackColor = Gold,
+                            uncheckedThumbColor = Muted, uncheckedTrackColor = Fill, uncheckedBorderColor = Color.Transparent
+                        )
+                    )
+                    IconButton(onClick = { com.jondude.anzu.assist.Mcp.remove(s.name); reload() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Remove ${s.name}", tint = Muted)
+                    }
+                }
+            }
+            if (Prefs.haUrl.isNotBlank() && servers.none { it.url.contains("/api/mcp") }) {
+                SoftButton(onClick = {
+                    val s = com.jondude.anzu.assist.McpServer("Home Assistant", Prefs.haUrl.trim().trimEnd('/') + "/api/mcp", Prefs.haToken)
+                    com.jondude.anzu.assist.Mcp.upsert(s); reload(); check(s)
+                }) { Text("Connect Home Assistant") }
+            }
+            Text("Add a connection", color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            PrefField("Name (for example Athena files)", "") { newName = it }
+            PrefField("Address (for example http://athena:8000/mcp)", "") { newUrl = it.trim() }
+            PrefField("Token, if it needs one", "", secret = true) { newToken = it.trim() }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = newName.isNotBlank() && newUrl.startsWith("http"), onClick = {
+                    val s = com.jondude.anzu.assist.McpServer(newName.trim(), newUrl, newToken)
+                    com.jondude.anzu.assist.Mcp.upsert(s); reload(); check(s)
+                }) { Text("Connect") }
+                SoftButton(onClick = { scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Mcp.refresh(force = true) } }) { Text("Check all") }
+            }
+            Text("Changes to the add form take effect when you tap Connect. Addresses can be Tailscale names, since the phone is on your tailnet.", color = Muted, fontSize = 12.sp)
         }
 
         Section("Hermes and your vault") {

@@ -536,6 +536,9 @@ Everything you write is spoken aloud. One to three short sentences unless he cle
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on his desktop, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
+            Mcp.summary().takeIf { it.isNotBlank() }?.let {
+                append("\nSystems you're connected to, whose tools you can use directly (their tool names start with x_): ").append(it).append('\n')
+            }
             if (Prefs.aboutMe.isNotBlank()) append("\nAbout Jon (from him): ").append(Prefs.aboutMe.trim()).append('\n')
             if (mem.isNotEmpty()) {
                 append("\nWhat you remember:\n")
@@ -595,6 +598,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes on Jon's desktop. Runs in the background; you report the result when it comes back.",
                 JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
         }
+        // Everything reachable through Connections (Home Assistant, Hermes, servers on Athena and Obelisk...).
+        val connected = Mcp.toolDefinitions()
+        for (i in 0 until connected.length()) a.put(connected.get(i))
         a.put(tool("meeting_start", "Start taking notes on a meeting or session (needs the Buddie earbuds stream)."))
         a.put(tool("meeting_stop", "Stop the meeting recording and save summarized notes."))
         a.put(tool("weather", "Current conditions and today's forecast where Jon is."))
@@ -638,6 +644,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
         if (Local.configured()) append("Local model tier configured. ")
         append(if (Hermes.configured()) "Hermes is linked. " else "Hermes is not linked. ")
+        Mcp.servers().forEach { s -> append("${s.name}: ${Mcp.status.value[s.name] ?: if (s.enabled) "not checked yet" else "off"}. ") }
         append(if (Vault.configured()) "Obsidian vault is linked. " else "No Obsidian vault chosen. ")
         append("Buddie earbuds stream: ${Glasses.buddieStream.value}. ")
     }
@@ -842,7 +849,26 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     }
                 }
             }
-            else -> "Unknown tool."
+            else -> {
+                val t = Mcp.find(name) ?: return "Unknown tool."
+                val what = "${t.server} ${t.name} ${input}"
+                when (zone(what)) {
+                    2 -> "Refused: that touches something Jon has blocked from voice control."
+                    1 -> if (confirm("Okay to have ${t.server} do this: ${t.name.replace('_', ' ')}?")) {
+                        Store.logAction("${t.server}: ${t.name} (confirmed)")
+                        lastUndo = null
+                        Mcp.call(t, input)
+                    } else "Declined: Jon didn't give a spoken okay."
+                    else -> {
+                        val out = Mcp.call(t, input)
+                        if (!Regex("(?i)^(get|list|search|read|find|query|fetch|describe)").containsMatchIn(t.name)) {
+                            Store.logAction("${t.server}: ${t.name}")
+                        }
+                        lastUndo = null
+                        out
+                    }
+                }
+            }
         }
     } catch (e: Exception) {
         "Tool error: ${e.message}"
@@ -930,6 +956,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     suspend fun reply(
         ctx: Context, userText: String, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
+        try {
+            Mcp.refresh()
+        } catch (_: Exception) {
+        }
         val sys = system(ctx)
         if (hasKey()) {
             try {
