@@ -255,17 +255,31 @@ object Ears {
 
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         var routed = false
-        if (Prefs.useGlassesMic && Glasses.connected.value) {
+        // Which mic: the worn headset (Auto when something's worn, or Headset), or the phone's own array.
+        // Output is unaffected: with the phone mic, replies still play through the buds or glasses.
+        val wantHeadset = when (Prefs.micSource) {
+            1 -> true
+            2 -> false
+            else -> Prefs.useGlassesMic && Glasses.connected.value
+        }
+        var source = MicRoute.phoneName()
+        if (wantHeadset) {
             try {
                 val sco = am.availableCommunicationDevices
                     .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
                 if (sco != null) {
                     routed = am.setCommunicationDevice(sco)
-                    if (routed) delay(800)
+                    if (routed) {
+                        source = sco.productName?.toString()?.takeIf { it.isNotBlank() } ?: "headset mic"
+                        delay(800)
+                    }
                 }
             } catch (_: Exception) {
             }
+        } else {
+            try { am.clearCommunicationDevice() } catch (_: Exception) {}
         }
+        Glasses.inputSource.value = source
         try {
             earcon("listen")
             delay(200)
@@ -632,5 +646,20 @@ object Loud {
         } catch (_: Exception) {
             {}
         }
+    }
+}
+
+
+/** Names for the microphone in use, for "Listening · Pixel mic". */
+object MicRoute {
+    fun phoneName(): String {
+        val model = android.os.Build.MODEL ?: ""
+        return if (model.contains("Pixel", ignoreCase = true)) "Pixel mic" else "phone mic"
+    }
+
+    fun choiceLabel(i: Int): String = when (i) {
+        1 -> "Headset mic"
+        2 -> "Phone mic"
+        else -> "Auto"
     }
 }

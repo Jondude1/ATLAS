@@ -268,7 +268,11 @@ class AssistActivity : ComponentActivity() {
                         .padding(horizontal = 22.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("${Prefs.name} · $state", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    val mic by Glasses.inputSource.collectAsState()
+                    Text(
+                        "${Prefs.name} · $state" + (if (state == "listening" && mic.isNotBlank()) " · $mic" else ""),
+                        color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp
+                    )
                     if (heard.isNotBlank()) Text("You: $heard", color = muted, fontSize = 15.sp)
                     if (said.isNotBlank()) Text(said, color = text, fontSize = 19.sp, fontWeight = FontWeight.Medium)
                     Text("Tap anywhere to dismiss", color = muted, fontSize = 12.sp)

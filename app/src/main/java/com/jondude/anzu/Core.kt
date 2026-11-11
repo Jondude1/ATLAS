@@ -95,6 +95,11 @@ object Prefs {
             if (sp.getString("haUrl", "").isNullOrBlank()) e.putString("haUrl", HOME_ASSISTANT)
             e.apply()
         }
+        if (!sp.getBoolean("micSourceV1", false)) {
+            val e = sp.edit().putBoolean("micSourceV1", true)
+            if (!sp.getBoolean("useGlassesMic", true)) e.putInt("micSource", 2)
+            e.apply()
+        }
         if (!sp.getBoolean("louderV1", false)) {
             // Jon found the earbuds too quiet: start everyone above 100% (the extra comes from a loudness boost).
             val e = sp.edit().putBoolean("louderV1", true)
@@ -186,6 +191,8 @@ object Prefs {
     var activeEnd by IntPref("activeEnd", 22)
     var talkOverMedia by BoolPref("talkOverMedia", false)
     var useGlassesMic by BoolPref("useGlassesMic", true)
+    /** Where the voice loop listens: 0 auto (worn device if there is one), 1 the Bluetooth headset, 2 the phone's own mics. */
+    var micSource by IntPref("micSource", 0)
 
     var readNotifications by BoolPref("readNotifications", true)
     // Per-wearable behavior. The glasses are open-ear (people nearby can hear); the buds are private.
@@ -224,7 +231,7 @@ data class Item(val text: String, val done: Boolean)
 /** How Atlas behaves depending on which wearable it's in. */
 object Wear {
     /** Any in-ear, private wearable: the Buddie earbuds or the Pixel Buds. */
-    fun onBuds(): Boolean = Glasses.active.value == "buddie" || Glasses.active.value == "pixelbuds"
+    fun onBuds(): Boolean = Glasses.active.value in setOf("buddie", "pixelbuds", "galaxybuds")
     fun onPixelBuds(): Boolean = Glasses.active.value == "pixelbuds"
     fun onGlasses(): Boolean = Glasses.active.value == "glasses"
 
@@ -249,6 +256,7 @@ object Wear {
 
     fun label(): String = when {
         onPixelBuds() -> "Pixel Buds: private"
+        Glasses.active.value == "galaxybuds" -> "Galaxy Buds: private"
         onBuds() -> "earbuds: private"
         onGlasses() -> if (Prefs.discreetGlasses) "glasses: open-ear, discreet" else "glasses: open-ear"
         else -> ""
@@ -256,6 +264,7 @@ object Wear {
 
     /** What the model is told about the situation. */
     fun promptLine(): String = when {
+        Glasses.active.value == "galaxybuds" -> "You're in his Galaxy Buds right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. He talks to you with the Talk button, the widget or the assistant gesture, and can answer right after you speak."
         onPixelBuds() -> "You're in his Pixel Buds Pro 2 right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. These have good sound and noise cancelling, so he may be listening to something or out and about; he can answer you right after you speak."
         onBuds() -> "You're in his Buddie earbuds right now. Only he can hear you, so you can be personal and take a little more room when it's worth it. He can talk to you hands-free by saying your name, and he may be out and about."
         onGlasses() -> "You're in his Razer Anzu glasses right now. They are open-ear speakers, so people near him can hear you" +
@@ -573,6 +582,8 @@ object Glasses {
     val connectedSince = MutableStateFlow(0L)
     val micArmed = MutableStateFlow(false)
     /** idle, listening, thinking, speaking */
+    /** The microphone the last listen used, e.g. "Pixel mic" or "Galaxy Buds". */
+    val inputSource = MutableStateFlow("")
     val atlasState = MutableStateFlow("idle")
     val lastSaid = MutableStateFlow("")
     val lastHeard = MutableStateFlow("")

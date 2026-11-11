@@ -524,7 +524,13 @@ fun knowsLine(
 ): String = buildString {
     append("It's $day.")
     if (connected) {
-        append(if (wear == "buddie") " Your earbuds are on" else " Your glasses are on")
+        append(
+            when (wear) {
+                "buddie" -> " Your earbuds are on"
+                "galaxybuds" -> " Your Galaxy Buds are on"
+                else -> " Your glasses are on"
+            }
+        )
         append(if (battery >= 0) " ($battery%)." else ".")
     }
     when (haUp) { true -> append(" The house is connected."); false -> append(" I can't reach the house."); else -> {} }
@@ -764,6 +770,7 @@ fun HomeScreen(resumes: Int) {
     val meeting by Glasses.meeting.collectAsState()
     val state by Glasses.atlasState.collectAsState()
     val said by Glasses.lastSaid.collectAsState()
+    val inputSource by Glasses.inputSource.collectAsState()
     val heard by Glasses.lastHeard.collectAsState()
     var typed by remember { mutableStateOf("") }
     var quietUntil by remember(resumes) { mutableStateOf(Prefs.quietUntil) }
@@ -844,7 +851,7 @@ fun HomeScreen(resumes: Int) {
                 Modifier.clip(CircleShape).clickable(onClickLabel = "Talk") { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }
             ) { Orb(state, 240.dp) }
             val line = when {
-                state == "listening" -> "Listening"
+                state == "listening" -> "Listening" + inputSource.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                 state == "thinking" -> "Thinking"
                 said.isNotBlank() -> "“${said.take(160)}${if (said.length > 160) "…" else ""}”"
                 else -> "Standing by"
@@ -1405,7 +1412,23 @@ fun SettingsScreen() {
                 }
             }
             Text("From the glasses, use the Anzu voice-assistant gesture and pick ${Prefs.name} when Android asks which app to use.", color = Muted, fontSize = 13.sp)
-            ToggleRow("Use the glasses microphone", "Off uses the phone's mic", Prefs.useGlassesMic) { Prefs.useGlassesMic = it }
+            var mic by remember { mutableIntStateOf(Prefs.micSource) }
+            val lastMic by Glasses.inputSource.collectAsState()
+            Text("Voice input source", color = Cream, fontSize = 16.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                (0..2).forEach { i ->
+                    if (mic == i) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground)) { Text(MicRoute.choiceLabel(i)) }
+                    else SoftButton(onClick = { mic = i; Prefs.micSource = i }) { Text(MicRoute.choiceLabel(i)) }
+                }
+            }
+            Text(
+                when (mic) {
+                    1 -> "Listens through the connected Bluetooth headset's mic."
+                    2 -> "Listens through the phone's own mics; replies still play in your buds or glasses."
+                    else -> "Listens through whatever you're wearing, or the phone if nothing is."
+                } + if (lastMic.isNotBlank()) " Last listened through: $lastMic." else "",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)

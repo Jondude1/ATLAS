@@ -270,7 +270,7 @@ class GlassesService : Service() {
         }
         Glasses.wearing.value = listOfNotNull(
             "glasses".takeIf { it in kinds }, "Buddie earbuds".takeIf { "buddie" in kinds },
-            "Pixel Buds".takeIf { "pixelbuds" in kinds }
+            "Pixel Buds".takeIf { "pixelbuds" in kinds }, "Galaxy Buds".takeIf { "galaxybuds" in kinds }
         ).joinToString(" and ")
     }
 
@@ -720,6 +720,7 @@ class NotifyListener : NotificationListenerService() {
 fun wearableKind(name: String, address: String, savedGlassesAddress: String): String? = when {
     savedGlassesAddress.isNotBlank() && address == savedGlassesAddress -> "glasses"
     name.contains("buddie", ignoreCase = true) -> "buddie"
+    name.contains("galaxy buds", ignoreCase = true) || (name.contains("buds", ignoreCase = true) && !name.contains("pixel", ignoreCase = true)) -> "galaxybuds"
     savedGlassesAddress.isBlank() && name.contains("anzu", ignoreCase = true) -> "glasses"
     else -> null
 }

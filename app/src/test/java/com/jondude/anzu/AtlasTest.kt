@@ -846,4 +846,18 @@ class AtlasTest {
         I.reset()
         assertTrue(knowsLine(false, null, -1, null, true, null, "", true, "Tuesday").endsWith("The hub needs its token: Settings, Obelisk."))
     }
+
+    @Test
+    fun galaxyBudsAndMicChoices() {
+        assertEquals("galaxybuds", wearableKind("Galaxy Buds2 Pro (A1B2)", "AA", ""))
+        assertEquals("galaxybuds", wearableKind("Jon's Buds+", "AB", ""))
+        assertNull(wearableKind("Pixel Buds Pro 2", "AC", ""))
+        assertEquals("buddie", wearableKind("Buddie-L", "AD", ""))
+        assertEquals("Phone mic", MicRoute.choiceLabel(2))
+        Glasses.active.value = "galaxybuds"
+        assertTrue(Wear.onBuds())
+        assertTrue(Wear.promptLine().contains("Galaxy Buds"))
+        assertFalse(Wear.repliesViaStream())
+        Glasses.active.value = ""
+    }
 }
