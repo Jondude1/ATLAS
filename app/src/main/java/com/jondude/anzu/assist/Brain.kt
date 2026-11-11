@@ -1307,7 +1307,7 @@ object Spoken {
      */
     fun forEar(text: String, words: Int = 80): String {
         var t = text
-            .replace(Regex("https?://\\S+"), "the link")
+            .replace(Regex("https?://\\S*[^\\s.,;:!?)]"), "the link")
             .replace(Regex("(?m)^\\s*([-*•]|\\d+[.)])\\s+"), "")
             .replace(Regex("[*_#`>]+"), "")
             .replace(Regex("\\s+"), " ")
