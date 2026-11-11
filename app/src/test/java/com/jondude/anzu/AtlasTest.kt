@@ -980,4 +980,19 @@ class AtlasTest {
         assertNull(H.detect(wave(true, 0.3f, 0.4f)))                  // looking down once isn't a nod
         assertNull(H.detect(wave(true, 0.3f, 1.5f, other = 0.3f)))    // circling the head: neither
     }
+
+    @Test
+    fun followMePicksTheRoomHesIn() {
+        val F = com.jondude.anzu.assist.FollowMe
+        val json = """{"players": [["media_player.office", "Office"], ["media_player.kitchen", "Kitchen"]],
+                       "motion": [["Office", 1794390000, false], ["Kitchen", 1794390500, true], ["Garage", 1794390600, true]], "room": ""}"""
+        val (players, motion, room) = F.parse(json)
+        val now = 1794390700_000L
+        assertEquals("media_player.kitchen", F.choose(players, motion, room, "media_player.office", now))      // motion now in the kitchen
+        assertEquals("media_player.office", F.choose(players, motion, "Office", "", now))                       // the room sensor wins
+        assertEquals("media_player.office", F.choose(players, emptyList(), "not_home", "media_player.office", now)) // fallback
+        val stale = listOf(com.jondude.anzu.assist.FollowMe.Motion("Kitchen", now - 60 * 60_000, false))
+        assertEquals("media_player.office", F.choose(players, stale, "", "media_player.office", now))           // an hour-old motion doesn't count
+        assertNull(F.choose(emptyList(), emptyList(), "", "", now))
+    }
 }

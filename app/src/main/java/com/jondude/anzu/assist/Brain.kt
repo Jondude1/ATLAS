@@ -122,19 +122,29 @@ object HomeAssistant {
         }
     }
 
-    /** Speak through a house speaker (used when nothing is being worn). Blocking. */
+    /** Speak through a house speaker (used when nothing is being worn): the one in the room he's in, if Follow-Me can tell. Blocking. */
     fun say(text: String): Boolean {
-        if (!configured() || Prefs.haSpeaker.isBlank()) return false
+        if (!configured()) return false
+        val speaker = (if (Prefs.followMe) FollowMe.speaker() else null) ?: Prefs.haSpeaker.trim()
+        if (speaker.isBlank()) return false
         return try {
             val service = Prefs.haTtsService.trim().ifBlank { "tts.google_translate_say" }.replace('.', '/')
             val (code, _) = Net.postJson(
                 base() + "/api/services/" + service, auth(),
-                JSONObject().put("entity_id", Prefs.haSpeaker.trim()).put("message", text).toString(), 10_000
+                JSONObject().put("entity_id", speaker).put("message", text).toString(), 10_000
             )
             code in 200..299
         } catch (e: Exception) {
             false
         }
+    }
+
+    /** Renders a Jinja template in Home Assistant. Blocking; null if unreachable. */
+    fun template(t: String): String? = try {
+        val (code, body) = Net.postJson(base() + "/api/template", auth(), JSONObject().put("template", t).toString(), 10_000)
+        if (code in 200..299) body else null
+    } catch (e: Exception) {
+        null
     }
 
     /** Raw entity states, or null if unreachable. Blocking. */
@@ -1541,6 +1551,56 @@ object Capture {
             "idea" -> "Saved the idea."
             "note" -> "Noted."
             else -> "Got it. I'll keep it on your list until it's done."
+        }
+    }
+}
+
+
+/**
+ * Follow-Me Voice (roadmap #13, app half): when nothing is worn, ATLAS speaks on the Home Assistant speaker in the
+ * room Jon is in, not the room he left. The room comes from a presence sensor if he names one (Bermuda or ESPresense
+ * "area" sensors report the room by name), otherwise from the most recent motion or occupancy in a room that has a
+ * speaker. The fixed house speaker is the fallback.
+ */
+object FollowMe {
+    data class Motion(val area: String, val changedMs: Long, val on: Boolean)
+
+    /** One template call: every media player with its area, every motion/occupancy sensor with its area, and the room sensor. */
+    private const val TEMPLATE = """{% set ns = namespace(p=[], m=[]) %}{% for s in states.media_player %}{% set a = area_name(s.entity_id) %}{% if a %}{% set ns.p = ns.p + [[s.entity_id, a]] %}{% endif %}{% endfor %}{% for s in states.binary_sensor %}{% if s.attributes.device_class in ['motion','occupancy','presence'] %}{% set a = area_name(s.entity_id) %}{% if a %}{% set ns.m = ns.m + [[a, as_timestamp(s.last_changed) | int, s.state == 'on']] %}{% endif %}{% endif %}{% endfor %}{"players": {{ ns.p | tojson }}, "motion": {{ ns.m | tojson }}, "room": {{ (states(ROOM) if ROOM else '') | tojson }}}"""
+
+    /** Which speaker to use. Pure, so it can be tested. */
+    fun choose(players: List<Pair<String, String>>, motion: List<Motion>, roomSensor: String?, fallback: String, now: Long): String? {
+        fun playerIn(area: String) = players.firstOrNull { it.second.equals(area, ignoreCase = true) }?.first
+        roomSensor?.takeIf { it.isNotBlank() && it !in setOf("unknown", "unavailable", "not_home", "away") }?.let { room ->
+            playerIn(room)?.let { return it }
+        }
+        val recent = motion.filter { playerIn(it.area) != null && (it.on || now - it.changedMs < 10 * 60_000) }
+            .maxByOrNull { if (it.on) Long.MAX_VALUE / 2 + it.changedMs else it.changedMs }
+        recent?.let { return playerIn(it.area) }
+        return fallback.ifBlank { null }
+    }
+
+    fun parse(json: String): Triple<List<Pair<String, String>>, List<Motion>, String> {
+        val o = JSONObject(json)
+        val p = o.optJSONArray("players") ?: JSONArray()
+        val m = o.optJSONArray("motion") ?: JSONArray()
+        return Triple(
+            (0 until p.length()).map { p.getJSONArray(it).let { a -> a.getString(0) to a.getString(1) } },
+            (0 until m.length()).map { m.getJSONArray(it).let { a -> Motion(a.getString(0), a.getLong(1) * 1000, a.getBoolean(2)) } },
+            o.optString("room")
+        )
+    }
+
+    /** The speaker entity in his room right now, or the fixed one. Blocking. */
+    fun speaker(): String? {
+        val sensor = Prefs.followMeSensor.trim()
+        val t = TEMPLATE.replace("ROOM", if (sensor.isBlank()) "''" else "'" + sensor.replace("'", "") + "'")
+        val body = HomeAssistant.template(t) ?: return Prefs.haSpeaker.trim().ifBlank { null }
+        return try {
+            val (players, motion, room) = parse(body)
+            choose(players, motion, room, Prefs.haSpeaker.trim(), System.currentTimeMillis())
+        } catch (e: Exception) {
+            Prefs.haSpeaker.trim().ifBlank { null }
         }
     }
 }

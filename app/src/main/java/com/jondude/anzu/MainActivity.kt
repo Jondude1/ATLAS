@@ -1598,8 +1598,10 @@ fun SettingsScreen() {
             ToggleRow("House alerts", "Tells you when something is left open or unlocked, and when people come and go", Prefs.homeAlerts) { Prefs.homeAlerts = it }
             PrefField("Alert after open for (minutes)", Prefs.homeOpenMinutes.toString()) { s -> s.toIntOrNull()?.let { Prefs.homeOpenMinutes = it.coerceIn(1, 240) } }
             PrefField("Don't announce comings and goings for", Prefs.homeIgnore) { Prefs.homeIgnore = it }
-            ToggleRow("Use a house speaker when I'm not wearing anything", "Timers and alerts go to the speaker below", Prefs.houseSpeaker) { Prefs.houseSpeaker = it }
-            PrefField("Speaker entity (e.g. media_player.office)", Prefs.haSpeaker) { Prefs.haSpeaker = it.trim() }
+            ToggleRow("Use a house speaker when I'm not wearing anything", "Timers, alerts and briefs go to a speaker in the house", Prefs.houseSpeaker) { Prefs.houseSpeaker = it }
+            ToggleRow("Follow me room to room", "Speak on the speaker in the room you're in (from a room sensor, or the latest motion in a room with a speaker). The speaker below is the fallback.", Prefs.followMe) { Prefs.followMe = it }
+            PrefField("Room sensor, if you have one (e.g. sensor.jons_phone_area)", Prefs.followMeSensor) { Prefs.followMeSensor = it.trim() }
+            PrefField("Fallback speaker (e.g. media_player.office)", Prefs.haSpeaker) { Prefs.haSpeaker = it.trim() }
             PrefField("Speech service", Prefs.haTtsService) { Prefs.haTtsService = it.trim() }
             PrefField("Ask first (amber) when a command mentions", Prefs.amberWords) { Prefs.amberWords = it }
             PrefField("Always refuse (red) when a command mentions", Prefs.redWords) { Prefs.redWords = it }

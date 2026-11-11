@@ -174,6 +174,10 @@ object Prefs {
     var buddieCompressedFirst by BoolPref("buddieCompressedFirst", false)
     var commuteAlerts by BoolPref("commuteAlerts", true)
     var houseSpeaker by BoolPref("houseSpeaker", false)
+    /** Follow-Me Voice: use the speaker in the room he's in (presence/motion), not one fixed speaker. */
+    var followMe by BoolPref("followMe", true)
+    /** Optional room sensor whose state is the room name (Bermuda / ESPresense), e.g. sensor.jons_phone_area. */
+    var followMeSensor by StrPref("followMeSensor", "")
     var haSpeaker by StrPref("haSpeaker", "")
     var haTtsService by StrPref("haTtsService", "tts.google_translate_say")
     var aboutMe by StrPref("aboutMe", "")
