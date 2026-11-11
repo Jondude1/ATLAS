@@ -126,22 +126,25 @@ object Whisperer {
     }
 
     /**
-     * Cleans up decoded earbud audio for recognition: removes the low rumble the earbuds' codec
-     * leaves behind (150 Hz high-pass) and brings the level up to a consistent 70% of full scale.
+     * Cleans up decoded earbud audio for recognition: removes the low rumble the earbuds' codec leaves behind
+     * (150 Hz high-pass), then brings quiet speech up by its average level rather than its loudest click
+     * (up to 40x, more with the mic boost), with a soft limiter so peaks never clip.
      */
-    fun prepare(pcm: ShortArray): FloatArray {
+    fun prepare(pcm: ShortArray, boost: Int = Prefs.micBoost): FloatArray {
         val out = FloatArray(pcm.size)
         var x1 = 0.0; var x2 = 0.0; var y1 = 0.0; var y2 = 0.0
-        var peak = 1e-9
+        var sum = 0.0
         for (i in pcm.indices) {
             val x = pcm[i].toDouble()
             val y = B0 * x + B1 * x1 + B0 * x2 - A1 * y1 - A2 * y2
             x2 = x1; x1 = x; y2 = y1; y1 = y
-            out[i] = y.toFloat()
-            if (Math.abs(y) > peak) peak = Math.abs(y)
+            out[i] = (y / 32768.0).toFloat()
+            sum += (y / 32768.0) * (y / 32768.0)
         }
-        val gain = (0.7 / peak).toFloat()
-        for (i in out.indices) out[i] *= gain
+        val rms = Math.sqrt(sum / maxOf(1, pcm.size))
+        val maxGain = when (boost) { 0 -> 20.0; 2 -> 80.0; else -> 40.0 }
+        val gain = if (rms < 1e-6) 1.0 else (0.12 / rms).coerceIn(1.0, maxGain)
+        for (i in out.indices) out[i] = (0.95 * Math.tanh(out[i] * gain / 0.95)).toFloat()
         return out
     }
 

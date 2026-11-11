@@ -255,7 +255,8 @@ class AtlasTest {
         val pcm = ShortArray(16000) { (6000 * sin(2 * PI * 30 * it / 16000.0) + 300 * sin(2 * PI * 1000 * it / 16000.0)).toInt().toShort() }
         val out = Whisperer.prepare(pcm)
         val tail = out.copyOfRange(8000, 16000)
-        assertEquals(0.7f, out.maxOf { Math.abs(it) }, 0.01f)
+        val peak = out.maxOf { Math.abs(it) }
+        assertTrue("peak $peak", peak > 0.1f && peak <= 0.95f)
         var low = 0.0; var high = 0.0
         for (i in tail.indices) {
             low += tail[i] * sin(2 * PI * 30 * (i + 8000) / 16000.0)
@@ -799,5 +800,26 @@ class AtlasTest {
         assertTrue(s.startsWith("Helios, at 13:46 UTC:"))
         assertTrue(s.contains("All green."))
         assertNull(com.jondude.anzu.assist.Helios.pick("[]"))
+    }
+
+    @Test
+    fun quietMicStillCutsAndLoudnessMaths() {
+        // a quiet microphone: background ~40, speech ~300 RMS, under the old fixed 450 threshold
+        val s = Segmenter(sensitivity = 1)
+        val rnd = java.util.Random(1)
+        fun noise(ms: Int, amp: Double) = ShortArray(16 * ms) { (rnd.nextGaussian() * amp).toInt().toShort() }
+        repeat(100) { assertNull(s.feed(noise(20, 40.0), false)) }        // two seconds of room
+        var got: Utterance? = null
+        repeat(40) { got = got ?: s.feed(tone(20, 420.0), false) }        // 800 ms of quiet speech
+        repeat(60) { got = got ?: s.feed(noise(20, 40.0), false) }
+        assertNotNull(got)
+        assertTrue(got!!.pcm.size >= 16000 * 8 / 10 + 16 * 200)        // includes the lead-in
+        // the sensor keeps a mid-sentence pause from cutting him off
+        val t = Segmenter()
+        var cut: Utterance? = null
+        repeat(30) { cut = cut ?: t.feed(tone(20, 3000.0), true) }
+        repeat(50) { cut = cut ?: t.feed(ShortArray(320), true) }        // 1 s pause while still talking
+        assertNull(cut)
+        assertEquals(0, Loud.gainMb(1f)); assertEquals(602, Loud.gainMb(2f))
     }
 }

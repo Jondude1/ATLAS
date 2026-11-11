@@ -67,7 +67,13 @@ class BuddiePacket(val mic: ByteArray?, val selfSpeaking: Boolean, val meeting: 
 class Utterance(val pcm: ShortArray, val selfRatio: Float)
 
 /** Cuts the continuous 16 kHz stream into utterances by loudness. */
-class Segmenter(private val rate: Int = 16000, private val threshold: Double = 450.0) {
+/**
+ * Cuts the earbud stream into utterances. The speech threshold follows the room: it sits a few times above the
+ * background level it has heard lately, so a quiet microphone still triggers. When the bone-conduction sensor says
+ * Jon is talking, that counts as speech whatever the level. About 300 ms before speech starts is kept, so the
+ * first syllable (often the wake word) isn't clipped.
+ */
+class Segmenter(private val rate: Int = 16000, private val threshold: Double = 450.0, private val sensitivity: Int = 1) {
     private var buf = ShortArray(rate * 4)
     private var len = 0
     private var active = false
@@ -75,7 +81,11 @@ class Segmenter(private val rate: Int = 16000, private val threshold: Double = 4
     private var silenceMs = 0
     private var frames = 0
     private var selfFrames = 0
-    private var previous = ShortArray(0)
+    private val preroll = ArrayDeque<ShortArray>()
+    private var prerollSamples = 0
+    /** Running estimate of the background level. */
+    var floor = 0.0
+        private set
 
     private fun append(a: ShortArray) {
         if (len + a.size > buf.size) buf = buf.copyOf(maxOf(buf.size * 2, len + a.size))
@@ -88,6 +98,13 @@ class Segmenter(private val rate: Int = 16000, private val threshold: Double = 4
         var sum = 0.0
         for (s in a) sum += s.toDouble() * s
         return sqrt(sum / a.size)
+    }
+
+    /** The level that counts as speech right now. */
+    fun level(): Double {
+        val factor = when (sensitivity) { 0 -> 3.5; 2 -> 2.0; else -> 2.6 }
+        val minimum = when (sensitivity) { 0 -> 260.0; 2 -> 110.0; else -> 170.0 }
+        return if (floor <= 0.0) threshold else (floor * factor).coerceIn(minimum, threshold)
     }
 
     private fun finish(): Utterance? {
@@ -105,11 +122,17 @@ class Segmenter(private val rate: Int = 16000, private val threshold: Double = 4
     fun feed(pcm: ShortArray, selfSpeaking: Boolean): Utterance? {
         if (pcm.isEmpty()) return null
         val ms = pcm.size * 1000 / rate
-        val loud = rms(pcm) > threshold
+        val r = rms(pcm)
+        val loud = r > level() || (selfSpeaking && r > level() * 0.5)
+        if (!loud && !active) {
+            // learn the background from quiet stretches only
+            floor = if (floor <= 0.0) r else floor * 0.97 + r * 0.03
+        }
         if (loud) {
             if (!active) {
                 active = true
-                append(previous) // a little lead-in so the first syllable isn't clipped
+                preroll.forEach { append(it) } // a little lead-in so the first syllable isn't clipped
+                preroll.clear(); prerollSamples = 0
             }
             append(pcm)
             speechMs += ms
@@ -119,9 +142,12 @@ class Segmenter(private val rate: Int = 16000, private val threshold: Double = 4
         } else if (active) {
             append(pcm)
             silenceMs += ms
-            if (silenceMs >= 900) return finish()
+            // a pause while he's still talking (the sensor says so) doesn't end the utterance
+            if (silenceMs >= (if (selfSpeaking) 1400 else 900)) return finish()
+        } else {
+            preroll.addLast(pcm); prerollSamples += pcm.size
+            while (prerollSamples > rate * 3 / 10 && preroll.size > 1) prerollSamples -= preroll.removeFirst().size
         }
-        previous = pcm
         if (active && len >= rate * 20) return finish()
         return null
     }
@@ -583,7 +609,7 @@ object BuddieLink {
     private var pca: PcaCodec? = null
     /** The wearer counts as speaking until this time (the earbuds report it in bursts). */
     private var selfUntil = 0L
-    private var segmenter = Segmenter()
+    private var segmenter = Segmenter(sensitivity = Prefs.micBoost)
     private val order = Mutex()
     private var meetingOnSince = 0L
     private var meetingOffSince = 0L
@@ -637,7 +663,7 @@ object BuddieLink {
         worker.execute {
             decoder?.release()
             decoder = null
-            segmenter = Segmenter()
+            segmenter = Segmenter(sensitivity = Prefs.micBoost)
             packets = 0
         }
         Glasses.buddieStream.value = "off"

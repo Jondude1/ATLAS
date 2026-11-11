@@ -95,6 +95,13 @@ object Prefs {
             if (sp.getString("haUrl", "").isNullOrBlank()) e.putString("haUrl", HOME_ASSISTANT)
             e.apply()
         }
+        if (!sp.getBoolean("louderV1", false)) {
+            // Jon found the earbuds too quiet: start everyone above 100% (the extra comes from a loudness boost).
+            val e = sp.edit().putBoolean("louderV1", true)
+            if (sp.getInt("volumeBuds", 100) <= 100) e.putInt("volumeBuds", 160)
+            if (sp.getInt("volumeGlasses", 85) <= 100) e.putInt("volumeGlasses", 120)
+            e.apply()
+        }
         if (!sp.getBoolean("networkByIpV2", false)) {
             // Older builds saved the MagicDNS names; move them to the IPs.
             val e = sp.edit().putBoolean("networkByIpV2", true)
@@ -185,8 +192,12 @@ object Prefs {
     var senderOnlyGlasses by BoolPref("senderOnlyGlasses", true)
     var senderOnlyBuds by BoolPref("senderOnlyBuds", false)
     var chattinessBuds by IntPref("chattinessBuds", 1)
-    var volumeGlasses by IntPref("volumeGlasses", 85)
-    var volumeBuds by IntPref("volumeBuds", 100)
+    var volumeGlasses by IntPref("volumeGlasses", 120)
+    /** While Atlas speaks, lift the phone's media volume to at least this share of maximum (0 = leave it). */
+    var minSpeechVolume by IntPref("minSpeechVolume", 70)
+    /** Extra microphone sensitivity for the earbud stream: 0 normal, 1 high, 2 max. */
+    var micBoost by IntPref("micBoost", 1)
+    var volumeBuds by IntPref("volumeBuds", 160)
     var discreetGlasses by BoolPref("discreetGlasses", true)
     var announceSwitch by BoolPref("announceSwitch", true)
     var eyeBreaks by BoolPref("eyeBreaks", false)
@@ -226,7 +237,7 @@ object Wear {
         onBuds() -> Prefs.volumeBuds / 100f
         onGlasses() -> Prefs.volumeGlasses / 100f
         else -> 1f
-    }.coerceIn(0.2f, 1f)
+    }.coerceIn(0.2f, 3f)
 
     /** With the buds' always-on stream running, replies come through it instead of opening a call-style mic. */
     fun repliesViaStream(): Boolean = Glasses.active.value == "buddie" && Glasses.buddieStream.value == "listening"

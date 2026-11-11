@@ -1260,7 +1260,7 @@ fun SettingsScreen() {
             Text("Speaks up " + often[chat.toInt().coerceIn(0, 2)])
             Slider(value = chat, onValueChange = { chat = it; Prefs.chattiness = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Volume ${volGlasses.toInt()}%")
-            Slider(value = volGlasses, onValueChange = { volGlasses = it; Prefs.volumeGlasses = it.toInt() }, valueRange = 30f..100f)
+            Slider(value = volGlasses, onValueChange = { volGlasses = it; Prefs.volumeGlasses = it.toInt() }, valueRange = 30f..300f)
             ToggleRow("Discreet", "People nearby can hear open-ear speakers: short replies, and nothing private said out loud", Prefs.discreetGlasses) { Prefs.discreetGlasses = it }
             ToggleRow("Notifications: sender only", "Say who it's from, not what it says", Prefs.senderOnlyGlasses) { Prefs.senderOnlyGlasses = it }
 
@@ -1268,7 +1268,15 @@ fun SettingsScreen() {
             Text("Speaks up " + often[chatBuds.toInt().coerceIn(0, 2)])
             Slider(value = chatBuds, onValueChange = { chatBuds = it; Prefs.chattinessBuds = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Volume ${volBuds.toInt()}%")
-            Slider(value = volBuds, onValueChange = { volBuds = it; Prefs.volumeBuds = it.toInt() }, valueRange = 30f..100f)
+            Slider(value = volBuds, onValueChange = { volBuds = it; Prefs.volumeBuds = it.toInt() }, valueRange = 30f..300f)
+            Text("Above 100% adds a loudness boost on top of the earbuds' own volume.", color = Muted, fontSize = 13.sp)
+            var lift by remember { mutableStateOf(Prefs.minSpeechVolume.toFloat()) }
+            Text(if (lift.toInt() == 0) "Leave the phone's volume alone" else "While ${Prefs.name} speaks, raise the phone's volume to at least ${lift.toInt()}%")
+            Slider(value = lift, onValueChange = { lift = it; Prefs.minSpeechVolume = it.toInt() }, valueRange = 0f..100f)
+            var mic by remember { mutableStateOf(Prefs.micBoost.toFloat()) }
+            Text("Earbud mic sensitivity: " + listOf("normal", "high", "max")[mic.toInt().coerceIn(0, 2)])
+            Slider(value = mic, onValueChange = { mic = it; Prefs.micBoost = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
+            Text("Higher hears you better when you speak softly; lower if it picks up too much around you. Re-seat the buds after changing.", color = Muted, fontSize = 13.sp)
             ToggleRow("Notifications: sender only", "Off reads the whole message, since only you can hear", Prefs.senderOnlyBuds) { Prefs.senderOnlyBuds = it }
 
             ToggleRow("Say so when I switch", "A short line when you swap between them", Prefs.announceSwitch) { Prefs.announceSwitch = it }

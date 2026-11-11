@@ -144,6 +144,7 @@ object Speaker : TextToSpeech.OnInitListener {
     /** Premium voice: fetch the audio, then play it. False means fall back to the phone voice. */
     @Volatile
     private var cloudDone: CompletableDeferred<Unit>? = null
+    private var cloudCleanup: (() -> Unit)? = null
 
     private suspend fun sayCloud(text: String, volume: Float): Boolean {
         val audio = withContext(Dispatchers.IO) { CloudVoice.synth(text) } ?: return false
@@ -158,7 +159,10 @@ object Speaker : TextToSpeech.OnInitListener {
             mp.setOnCompletionListener { done.complete(Unit) }
             mp.setOnErrorListener { _, _, _ -> done.complete(Unit); true }
             withContext(Dispatchers.IO) { mp.prepare() }
-            mp.setVolume(volume, volume)
+            mp.setVolume(volume.coerceAtMost(1f), volume.coerceAtMost(1f))
+            val boost = if (volume > 1f) Loud.enhancer(mp.audioSessionId, volume) else null
+            val restore = Loud.liftStream(am)
+            cloudCleanup = { try { boost?.release() } catch (_: Exception) {}; restore() }
             try {
                 mp.playbackParams = mp.playbackParams.setSpeed((Prefs.speechRate / 100f).coerceIn(0.7f, 1.6f))
             } catch (_: Exception) {
@@ -174,6 +178,7 @@ object Speaker : TextToSpeech.OnInitListener {
             lastCloudError = "Couldn't play the audio: ${e.message}"
             false
         } finally {
+            cloudCleanup?.invoke(); cloudCleanup = null
             player = null
             try {
                 mp.release()
@@ -202,11 +207,21 @@ object Speaker : TextToSpeech.OnInitListener {
         waiters[id] = done
         try {
             am.requestAudioFocus(focus)
+            val restore = Loud.liftStream(am)
             t.setSpeechRate(Prefs.speechRate / 100f)
             val params = Bundle()
-            params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
-            t.speak(text, TextToSpeech.QUEUE_ADD, params, id)
-            withTimeoutOrNull(90_000) { done.await() }
+            params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceAtMost(1f))
+            // Above 100%: route the speech through its own audio session with a loudness boost.
+            val session = if (volume > 1f) am.generateAudioSessionId() else 0
+            val boost = if (session > 0) Loud.enhancer(session, volume) else null
+            if (session > 0) params.putInt(TextToSpeech.Engine.KEY_PARAM_SESSION_ID, session)
+            try {
+                t.speak(text, TextToSpeech.QUEUE_ADD, params, id)
+                withTimeoutOrNull(90_000) { done.await() }
+            } finally {
+                try { boost?.release() } catch (_: Exception) {}
+                restore()
+            }
         } finally {
             waiters.remove(id)
             am.abandonAudioFocusRequest(focus)
@@ -588,5 +603,34 @@ object Earcons {
             } catch (_: Exception) {
             }
         }.start()
+    }
+}
+
+
+/** Making Atlas louder than the earbuds' normal ceiling, without touching anything else for longer than a line. */
+object Loud {
+    /** Gain in millibels for a volume above 100%: 150% ≈ +3.5 dB, 200% ≈ +6 dB, 300% ≈ +9.5 dB. */
+    fun gainMb(volume: Float): Int = if (volume <= 1f) 0 else (2000 * Math.log10(volume.toDouble())).toInt().coerceIn(0, 1200)
+
+    fun enhancer(session: Int, volume: Float): android.media.audiofx.LoudnessEnhancer? = try {
+        android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain(gainMb(volume)); enabled = true }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Lifts the media volume to Prefs.minSpeechVolume% of maximum for one line; returns how to put it back. */
+    fun liftStream(am: AudioManager): () -> Unit {
+        val want = Prefs.minSpeechVolume
+        if (want <= 0) return {}
+        return try {
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val before = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val target = (max * want + 99) / 100
+            if (before >= target) return {}
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            ({ try { am.setStreamVolume(AudioManager.STREAM_MUSIC, before, 0) } catch (_: Exception) {} })
+        } catch (_: Exception) {
+            {}
+        }
     }
 }
