@@ -21,6 +21,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Create
@@ -153,27 +155,29 @@ private var isDark by mutableStateOf(true)
 
 // Atlas's palette: black, white and one orange. True black and white grounds, orange for anything alive or actionable.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
-private val Gold: Color get() = if (isDark) Color(0xFFFF5C00) else Color(0xFFD64D00)
+private val Gold: Color get() = Color(0xFFFF5C00)
 private val OnGold: Color get() = Color(0xFF000000)
-private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF121212)
-private val Muted: Color get() = if (isDark) Color(0xFFA3968F) else Color(0xFF6B605A)
-private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFEBEBEB)
-private val Panel: Color get() = if (isDark) Color(0xFF120F0D) else Color(0xFFE6E1DC)
-private val Fill: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
-private val Hairline: Color get() = if (isDark) Color(0xFF1E1815) else Color(0xFFD5CFC9)
-private val Dim: Color get() = if (isDark) Color(0xFF732E00) else Color(0xFFFFA366)
+private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
+private val Muted: Color get() = if (isDark) Color(0xFF888888) else Color(0xFF777777)
+private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+private val Panel: Color get() = if (isDark) Color(0xFF111111) else Color(0xFFF5F5F5)
+private val Fill: Color get() = if (isDark) Color(0xFF111111) else Color(0xFFF5F5F5)
+private val Hairline: Color get() = if (isDark) Color(0xFF222222) else Color(0xFFE5E5E5)
 
-/** Chamfered corners, like machined hardware: used on buttons and inputs. Panels are plain rectangles. */
-private val Chamfer = androidx.compose.foundation.shape.CutCornerShape(topEnd = 4.dp, bottomStart = 4.dp)
+/** Square corners everywhere: flat, flush, nothing floats. */
+private val Chamfer = androidx.compose.ui.graphics.RectangleShape
 private val Flat = androidx.compose.ui.graphics.RectangleShape
 
-/** Space Mono everywhere: the whole app reads as one telemetry console. */
+/** Sora: the companion's voice and the whole UI. */
 private val Display = FontFamily(
-    Font(R.font.space_mono_regular, FontWeight.Normal),
-    Font(R.font.space_mono_regular, FontWeight.Medium),
-    Font(R.font.space_mono_bold, FontWeight.SemiBold),
-    Font(R.font.space_mono_bold, FontWeight.Bold)
+    Font(R.font.sora_light, FontWeight.Light),
+    Font(R.font.sora_regular, FontWeight.Normal),
+    Font(R.font.sora_regular, FontWeight.Medium),
+    Font(R.font.sora_semibold, FontWeight.SemiBold),
+    Font(R.font.sora_semibold, FontWeight.Bold)
 )
+/** Monospace lives only in raw data: command output and logs. */
+private val Mono = FontFamily(Font(R.font.space_mono_regular, FontWeight.Normal), Font(R.font.space_mono_bold, FontWeight.Bold))
 
 private val ConsoleType = androidx.compose.material3.Typography().let { t ->
     androidx.compose.material3.Typography(
@@ -183,7 +187,7 @@ private val ConsoleType = androidx.compose.material3.Typography().let { t ->
         titleLarge = t.titleLarge.copy(fontFamily = Display), titleMedium = t.titleMedium.copy(fontFamily = Display),
         titleSmall = t.titleSmall.copy(fontFamily = Display), bodyLarge = t.bodyLarge.copy(fontFamily = Display),
         bodyMedium = t.bodyMedium.copy(fontFamily = Display), bodySmall = t.bodySmall.copy(fontFamily = Display),
-        labelLarge = t.labelLarge.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.2.sp),
+        labelLarge = t.labelLarge.copy(fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 15.sp),
         labelMedium = t.labelMedium.copy(fontFamily = Display), labelSmall = t.labelSmall.copy(fontFamily = Display)
     )
 }
@@ -212,39 +216,38 @@ private fun Switch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, colors:
     ) {
         Box(
             Modifier.size(24.dp).background(if (checked) Gold else Color.Transparent)
-                .border(1.dp, if (checked) Gold else Muted),
-            contentAlignment = Alignment.Center
-        ) { if (checked) Box(Modifier.size(8.dp).background(OnGold)) }
+                .border(2.dp, if (checked) Gold else Muted)
+        )
     }
 }
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFFF5C00),
     onPrimary = Color(0xFF000000),
-    secondary = Color(0xFFA3968F),
+    secondary = Color(0xFF888888),
     onSecondary = Color(0xFF000000),
     background = Color(0xFF000000),
     onBackground = Color(0xFFFFFFFF),
-    surface = Color(0xFF120F0D),
+    surface = Color(0xFF111111),
     onSurface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFF1E1815),
-    onSurfaceVariant = Color(0xFFA3968F),
-    outline = Color(0xFFA3968F),
+    surfaceVariant = Color(0xFF111111),
+    onSurfaceVariant = Color(0xFF888888),
+    outline = Color(0xFF888888),
     error = Color(0xFFFF5A52)
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFFD64D00),
+    primary = Color(0xFFFF5C00),
     onPrimary = Color(0xFF000000),
-    secondary = Color(0xFF6B605A),
+    secondary = Color(0xFF777777),
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFEBEBEB),
-    onBackground = Color(0xFF121212),
-    surface = Color(0xFFE6E1DC),
-    onSurface = Color(0xFF121212),
-    surfaceVariant = Color(0xFFD5CFC9),
-    onSurfaceVariant = Color(0xFF6B605A),
-    outline = Color(0xFF6B605A),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF000000),
+    surface = Color(0xFFF5F5F5),
+    onSurface = Color(0xFF000000),
+    surfaceVariant = Color(0xFFF5F5F5),
+    onSurfaceVariant = Color(0xFF777777),
+    outline = Color(0xFF777777),
     error = Color(0xFFC81E1E)
 )
 
@@ -324,23 +327,15 @@ fun AppRoot(resumes: Int) {
                 "Whisper" to Icons.Outlined.Notifications,
                 "Settings" to Icons.Outlined.Settings
             )
-            Column(Modifier.fillMaxWidth().background(Ground)) {
-                HorizontalDivider(color = Hairline, thickness = 1.dp)
-                Row(Modifier.fillMaxWidth().height(64.dp)) {
-                    items.forEachIndexed { i, (label, icon) ->
-                        Column(
-                            Modifier.weight(1f).height(64.dp).clickable { tab = i },
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(Modifier.width(28.dp).height(2.dp).background(if (tab == i) Gold else Color.Transparent))
-                            Spacer(Modifier.height(10.dp))
-                            Icon(icon, contentDescription = label, tint = if (tab == i) Gold else Muted, modifier = Modifier.size(24.dp))
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                (if (i == 0) "Home" else label).uppercase(), fontSize = 12.sp, letterSpacing = 0.6.sp,
-                                color = if (tab == i) Cream else Muted,
-                                modifier = Modifier.clearAndSetSemantics { }
-                            )
+            Row(Modifier.fillMaxWidth().background(Ground).navigationBarsPadding().height(56.dp)) {
+                items.forEachIndexed { i, (label, icon) ->
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().clickable { tab = i },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(Modifier.fillMaxWidth().height(2.dp).background(if (tab == i) Gold else Color.Transparent))
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Icon(icon, contentDescription = label, tint = if (tab == i) Cream else Muted, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -384,8 +379,8 @@ fun AppRoot(resumes: Int) {
 @Composable
 fun LargeTitle(text: String) {
     Text(
-        text.uppercase(), fontFamily = Display, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Cream,
-        letterSpacing = 2.4.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+        text, fontFamily = Display, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = Cream,
+        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
     )
 }
 
@@ -418,23 +413,20 @@ fun Section(title: String, content: @Composable () -> Unit) {
         val (icon, subtitle) = settingsIndex[title] ?: (Icons.Filled.Settings to "")
         Column(Modifier.fillMaxWidth().clickable { nav.open(title) }) {
             Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)).background(if (isDark) Color(0xFF1A1A1A) else Color(0xFFDCDCDC)), contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(18.dp))
+                Icon(icon, contentDescription = null, tint = Cream, modifier = Modifier.size(24.dp))
+                Column(Modifier.weight(1f).padding(start = 20.dp, end = 12.dp)) {
+                    Text(title, color = Cream, fontSize = 16.sp)
+                    if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Column(Modifier.weight(1f).padding(start = 16.dp, end = 12.dp)) {
-                    Text(title, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Text(">", color = Muted, fontSize = 16.sp)
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
             }
-            HorizontalDivider(color = Hairline, thickness = 1.dp)
         }
         return
     }
     if (nav != null && nav.page != title) return
     Column {
         if (nav == null) Text(
-            "// " + title.uppercase().replace(' ', '_'), color = Gold, fontSize = 12.sp, letterSpacing = 0.6.sp,
+            title, color = Cream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
         )
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -484,30 +476,37 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
     }
 }
 
-/** A tiny overhead label, like BATT // on an instrument. */
-@Composable
-fun Label(text: String, color: Color = Muted) {
-    Text(text, color = color, fontSize = 12.sp, letterSpacing = 0.6.sp, maxLines = 1)
+/** "Good evening." by the hour. */
+fun greeting(hour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): String = when (hour) {
+    in 5..11 -> "Good morning."
+    in 12..16 -> "Good afternoon."
+    in 17..21 -> "Good evening."
+    else -> "Late night."
 }
 
-/** One cell of the telemetry grid: label above, value below. */
-@Composable
-fun Readout(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = Cream) {
-    Column(modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Label(label)
-        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+fun firstSentence(text: String): String {
+    val t = text.trim().replace(Regex("\\s+"), " ")
+    val end = Regex("[.!?](\\s|$)").find(t)?.range?.first
+    return if (end != null) t.substring(0, end + 1) else t.take(120)
+}
+
+/** What ATLAS knows right now, in one or two plain sentences. Only real readings; unknowns are left out. */
+fun knowsLine(
+    connected: Boolean, wear: String?, battery: Int, haUp: Boolean?, hubUp: Boolean?,
+    athena: com.jondude.anzu.assist.Hub.AthenaStatus?, brief: String,
+    day: String = SimpleDateFormat("EEEE", Locale.US).format(Date())
+): String = buildString {
+    append("It's $day.")
+    if (connected) {
+        append(if (wear == "buddie") " Your earbuds are on" else " Your glasses are on")
+        append(if (battery >= 0) " ($battery%)." else ".")
     }
-}
-
-/** An outlined console action, e.g. [ FORCE ]. */
-@Composable
-fun ConsoleButton(label: String, tint: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    androidx.compose.material3.OutlinedButton(
-        onClick = onClick, modifier = modifier.height(48.dp), shape = Chamfer,
-        border = androidx.compose.foundation.BorderStroke(1.dp, tint),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = tint)
-    ) { Text(label, maxLines = 1) }
+    when (haUp) { true -> append(" The house is connected."); false -> append(" I can't reach the house."); else -> {} }
+    if (athena != null) {
+        val down = athena.containers.count { !it.up }
+        append(if (down == 0) " Athena's running all ${athena.containers.size} services." else " Athena has $down service${if (down == 1) "" else "s"} down.")
+    } else if (hubUp == false) append(" Obelisk isn't answering.")
+    if (brief.isNotBlank()) append(" ").append(brief)
 }
 
 private fun reachable(url: String): Boolean = try {
@@ -561,81 +560,49 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
 }
 
 /**
- * The scope: a thin ring with four crosshair ticks. Idle, one dot orbits the rim. Listening, a dashed
- * ring turns in the centre. Thinking, three bars rise and fall. Speaking, a waveform runs across.
+ * ATLAS's presence: one flat 2dp ring. Idle, it breathes in grey. Listening, it ripples outward in orange.
+ * Thinking, an orange sweep turns around it. Speaking, it swells and settles like a voice.
  */
 @Composable
 fun Orb(state: String, diameter: Dp = 240.dp) {
-    val orange = Gold
-    val rim = if (isDark) Color(0xFF333333) else Color(0xFFB8B8B8)
-    val reticle = if (isDark) Color(0xFF666666) else Color(0xFF8A8A8A)
-    val transition = rememberInfiniteTransition(label = "scope")
-    val orbit by transition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(5000, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "orbit"
-    )
-    val wave by transition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2400, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "wave"
+    val orange = Color(0xFFFF5C00)
+    val grey = Muted
+    val t = rememberInfiniteTransition(label = "ring")
+    val breath by t.animateFloat(0.2f, 0.6f, infiniteRepeatable(tween(4000, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Reverse), label = "breath")
+    val ripple by t.animateFloat(1f, 1.15f, infiniteRepeatable(tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing), RepeatMode.Reverse), label = "ripple")
+    val turn by t.animateFloat(0f, 360f, infiniteRepeatable(tween(1500, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "turn")
+    val voice by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2600, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart), label = "voice")
+    // A speech-like envelope: a few overlapping syllables, eased by a spring.
+    val tau = (2 * Math.PI).toFloat()
+    val syllables = (0.5f + 0.5f * kotlin.math.sin(tau * voice * 5)) * (0.6f + 0.4f * kotlin.math.sin(tau * voice * 2 + 1f))
+    val swell by androidx.compose.animation.core.animateFloatAsState(
+        if (state == "speaking") 1f + 0.25f * syllables.coerceIn(0f, 1f) else 1f,
+        androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMedium), label = "swell"
     )
     Canvas(Modifier.size(diameter)) {
         val c = Offset(size.width / 2, size.height / 2)
-        val r = size.minDimension / 2 - 4.dp.toPx()
-        val tau = (2 * Math.PI).toFloat()
-        drawCircle(rim, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-        for (k in 0 until 4) {
-            val a = k * tau / 4
-            val dx = kotlin.math.cos(a); val dy = kotlin.math.sin(a)
-            drawLine(rim, Offset(c.x + dx * r, c.y + dy * r), Offset(c.x + dx * (r - 8.dp.toPx()), c.y + dy * (r - 8.dp.toPx())), 1.dp.toPx())
-        }
+        val base = size.minDimension / 2 / 1.25f - 2.dp.toPx()
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
         when (state) {
-            "listening" -> {
-                val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 10.dp.toPx()), wave * 20.dp.toPx())
-                drawCircle(orange, r * 0.42f, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), pathEffect = dash))
-            }
-            "thinking" -> {
-                for (k in 0 until 3) {
-                    val t = 0.5f + 0.5f * kotlin.math.sin(tau * (wave * (k + 2) + k * 0.31f))
-                    val h = 10.dp.toPx() + 70.dp.toPx() * t
-                    val x = c.x + (k - 1) * 14.dp.toPx()
-                    drawLine(orange, Offset(x, c.y - h / 2), Offset(x, c.y + h / 2), 4.dp.toPx())
-                }
-            }
-            "speaking" -> {
-                val path = androidx.compose.ui.graphics.Path()
-                val half = r * 0.7f
-                val swell = 0.55f + 0.45f * kotlin.math.sin(tau * wave * 3)
-                for (i in 0..60) {
-                    val u = i / 60f
-                    val envelope = kotlin.math.sin(Math.PI.toFloat() * u)
-                    val y = c.y + 26.dp.toPx() * swell * envelope * kotlin.math.sin(tau * (u * 3f - wave * 4))
-                    val x = c.x - half + 2 * half * u
-                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-                drawPath(path, orange, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-            }
-            else -> {
-                // at rest: a centre dot inside a small dashed reticle, and one dot circling the rim
-                drawCircle(orange, 2.dp.toPx(), c)
+            "listening" -> drawCircle(orange, base * ripple, c, style = stroke)
+            "thinking" -> rotate(turn, c) {
                 drawCircle(
-                    reticle, 16.dp.toPx(), c,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
-                    )
+                    androidx.compose.ui.graphics.Brush.sweepGradient(listOf(orange.copy(alpha = 0f), orange), c),
+                    base, c, style = stroke
                 )
-                val a = orbit * tau - tau / 4
-                drawCircle(orange, 2.5.dp.toPx(), Offset(c.x + kotlin.math.cos(a) * r, c.y + kotlin.math.sin(a) * r))
             }
+            "speaking" -> drawCircle(orange, base * swell, c, style = stroke)
+            else -> drawCircle(grey.copy(alpha = breath), base, c, style = stroke)
         }
     }
 }
 
-/** Athena's containers grouped by stack, anything not up flagged, and a command line that runs through the hub. */
+/** Athena in words first; the containers and a command line in monospace one tap down. */
 @Composable
 fun AthenaPanel() {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<com.jondude.anzu.assist.Hub.AthenaStatus?>(null) }
+    var raw by remember { mutableStateOf(false) }
     var cmd by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var output by remember { mutableStateOf("") }
@@ -644,63 +611,73 @@ fun AthenaPanel() {
     }
     LaunchedEffect(Unit) { refresh() }
     val st = status
-    when {
-        st == null -> Label("READING ATHENA...")
-        st.error != null -> Text(st.error, color = Muted, fontSize = 14.sp)
-        else -> {
-            val down = st.containers.filter { !it.up }
-            Label(
-                "${st.containers.size} CONTAINERS // ${if (down.isEmpty()) "ALL UP" else "${down.size} DOWN"}" +
-                    (if (st.uptime.isNotBlank()) " // UP ${st.uptime}" else ""),
-                if (down.isEmpty()) Muted else MaterialTheme.colorScheme.error
-            )
-            if (st.disk.isNotBlank()) Label("DISK // ${st.disk}")
-            Column(Modifier.fillMaxWidth().border(1.dp, Hairline)) {
-                st.containers.groupBy { it.stack }.toSortedMap().entries.forEachIndexed { i, (stack, items) ->
-                    if (i > 0) HorizontalDivider(color = Hairline, thickness = 1.dp)
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Label(stack.uppercase() + " //", Gold)
-                        items.forEach { c ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(6.dp).background(if (c.up) Muted else MaterialTheme.colorScheme.error))
-                                Text(c.name, color = Cream, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f).padding(start = 8.dp))
-                                Text(if (c.up) c.ports.substringBefore(',').substringAfterLast(':').substringBefore('-') else c.status,
-                                    color = if (c.up) Muted else MaterialTheme.colorScheme.error, fontSize = 12.sp, maxLines = 1)
-                            }
-                        }
-                    }
+    Text(
+        when {
+            st == null -> "Checking on Athena…"
+            st.error != null -> st.error
+            else -> athenaSentence(st)
+        },
+        color = Cream, fontSize = 18.sp, lineHeight = 26.sp
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SoftButton(onClick = { raw = !raw }) { Text(if (raw) "Hide raw telemetry" else "View raw telemetry") }
+        SoftButton(onClick = { status = null; refresh() }) { Text("Refresh") }
+    }
+    if (!raw) return
+    val mono = androidx.compose.ui.text.TextStyle(fontFamily = Mono, fontSize = 12.sp, lineHeight = 17.sp, color = Cream)
+    if (st != null && st.error == null) {
+        Column(Modifier.fillMaxWidth().background(Panel).padding(12.dp)) {
+            if (st.uptime.isNotBlank()) Text("uptime  ${st.uptime}", style = mono.copy(color = Muted))
+            if (st.disk.isNotBlank()) Text("disk    ${st.disk}", style = mono.copy(color = Muted))
+            st.containers.groupBy { it.stack }.toSortedMap().forEach { (stack, items) ->
+                Text("\n$stack", style = mono.copy(color = Gold))
+                items.forEach { c ->
+                    Text(
+                        "  ${c.name.padEnd(18).take(18)} ${if (c.up) c.ports.substringBefore(',') else c.status}",
+                        style = mono.copy(color = if (c.up) Cream else MaterialTheme.colorScheme.error), maxLines = 1
+                    )
                 }
             }
         }
     }
-    SoftButton(onClick = { status = null; refresh() }) { Text("Refresh") }
     TextField(
         value = cmd, onValueChange = { cmd = it },
-        placeholder = { Text("> command on athena", color = Muted, fontSize = 14.sp) },
-        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = Display, fontSize = 14.sp),
-        singleLine = true, shape = Chamfer,
+        placeholder = { Text("Command for Athena", color = Muted) },
+        textStyle = mono.copy(fontSize = 14.sp),
+        singleLine = true, shape = Flat,
         colors = TextFieldDefaults.colors(
             unfocusedContainerColor = Panel, focusedContainerColor = Panel,
-            unfocusedIndicatorColor = Gold, focusedIndicatorColor = Gold, cursorColor = Gold
+            unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, cursorColor = Gold
         ),
         modifier = Modifier.fillMaxWidth()
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(enabled = cmd.isNotBlank() && !running, onClick = {
-            val c = cmd.trim(); running = true; output = "$ $c\n..."
+            val c = cmd.trim(); running = true; output = "$ $c\n…"
             scope.launch {
                 val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.athenaRun(c) }
                 output = "$ $c\n" + r.out.take(6000) + (if (r.exit > 0) "\n[exit ${r.exit}]" else "")
                 running = false
             }
-        }) { Text("[ RUN ]") }
+        }) { Text("Run") }
         listOf("docker ps", "uptime").forEach { q -> SoftButton(onClick = { cmd = q }) { Text(q) } }
     }
     if (output.isNotBlank()) Text(
-        output, color = Cream, fontSize = 12.sp, lineHeight = 17.sp,
+        output, style = mono,
         modifier = Modifier.fillMaxWidth().background(Panel).padding(12.dp).horizontalScroll(rememberScrollState())
     )
+}
+
+/** Athena's state as ATLAS would say it. */
+fun athenaSentence(st: com.jondude.anzu.assist.Hub.AthenaStatus): String {
+    val down = st.containers.filter { !it.up }
+    val n = st.containers.size
+    return when {
+        n == 0 -> "Athena answered, but reported no services."
+        down.isEmpty() -> "Athena's fine. All $n services are up."
+        down.size == 1 -> "Athena needs a look: ${down[0].name} is down. The other ${n - 1} are up."
+        else -> "Athena needs a look: ${down.size} of $n services are down (${down.take(3).joinToString { it.name }}${if (down.size > 3) "…" else ""})."
+    }
 }
 
 private fun timeAgo(t: Long): String {
@@ -755,27 +732,24 @@ fun HomeScreen(resumes: Int) {
     // Real links only: the hub on Obelisk and Home Assistant, checked once a minute while this screen is up.
     var hubUp by remember { mutableStateOf<Boolean?>(null) }
     var haUp by remember { mutableStateOf<Boolean?>(null) }
-    var machine by remember { mutableStateOf("") } // the phone's own battery temperature and voltage
+    var athena by remember { mutableStateOf<com.jondude.anzu.assist.Hub.AthenaStatus?>(null) }
+    var briefLine by remember { mutableStateOf("") }
     LaunchedEffect(resumes) {
         while (true) {
-            ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { b ->
-                val temp = b.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1)
-                val volts = b.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1)
-                if (temp > 0 && volts > 0) machine = String.format(Locale.US, "CORE_TEMP: %.1f°C // BUS: %dmV", temp / 10f, volts)
-            }
             hubUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 reachable(Prefs.obeliskUrl.trim().trimEnd('/') + "/atlas/status")
             }
             haUp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { reachable(Prefs.haUrl.trim()) }
+            if (hubUp == true) {
+                athena = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.athenaStatus() }
+                    .takeIf { it.error == null }
+                briefLine = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.jondude.anzu.assist.Hub.brief() }
+                    ?.text?.let { firstSentence(it) } ?: ""
+            }
             kotlinx.coroutines.delay(60_000)
         }
     }
-    // Days since ATLAS was first installed.
-    val sol = remember {
-        try {
-            ((System.currentTimeMillis() - ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime) / 86_400_000L).toInt()
-        } catch (e: Exception) { 0 }
-    }
+    val knows = knowsLine(connected, activeWear, battery, haUp, hubUp, athena, briefLine)
 
     fun send() {
         val t = typed.trim()
@@ -793,103 +767,65 @@ fun HomeScreen(resumes: Int) {
             .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // A telemetry console: title bar, the scope, a grid of readouts, the command line, three actions.
-        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                Prefs.name.uppercase() + "_SYS", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Cream,
-                letterSpacing = 2.sp, modifier = Modifier.weight(1f)
-            )
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Label("SOL: " + String.format(Locale.US, "%03d", sol), Gold)
-                Label("LINK: " + when (hubUp) { true -> "UP"; false -> "DOWN"; else -> "--" })
-            }
+        // A presence, not a dashboard: a greeting that knows the hour, what ATLAS knows in a sentence,
+        // the ring, the last thing it said, then the message box and three actions.
+        Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(greeting(), fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = Cream)
+            Text(knows, fontSize = 18.sp, lineHeight = 26.sp, letterSpacing = 0.18.sp, color = Muted)
         }
         Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            // Tapping the scope starts talking.
             Box(
                 Modifier.clip(CircleShape).clickable(onClickLabel = "Talk") { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }
             ) { Orb(state, 240.dp) }
-            Spacer(Modifier.height(16.dp))
-            Label(
-                "STATUS: " + when (state) {
-                    "listening" -> "RX_OPEN"
-                    "thinking" -> "PROCESSING"
-                    "speaking" -> "TX_OPEN"
-                    else -> "AWAITING"
-                }
-            )
-            if (replyUntil > 0 && said.isNotBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Text(said, color = Cream, fontSize = 14.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
+            val line = when {
+                state == "listening" -> "Listening"
+                state == "thinking" -> "Thinking"
+                said.isNotBlank() -> "“${said.take(160)}${if (said.length > 160) "…" else ""}”"
+                else -> "Standing by"
             }
+            Text(
+                line, color = Muted, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.28.sp, fontWeight = FontWeight.Light,
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 16.dp)
+            )
         }
         Column {
-        Column(Modifier.fillMaxWidth().border(1.dp, Hairline)) {
-            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-                Readout(
-                    "SENSORS //",
-                    when {
-                        !connected -> "Offline"
-                        activeWear == "buddie" -> "Earbuds"
-                        else -> "Glasses"
-                    },
-                    Modifier.weight(1f).clickable { devicesOpen = true }
-                )
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                Readout(
-                    "PWR //", if (connected && battery >= 0) "$battery%" else "--", Modifier.weight(1f),
-                    if (connected && battery in 0..20) MaterialTheme.colorScheme.error else Cream
-                )
-            }
-            HorizontalDivider(color = Hairline, thickness = 1.dp)
-            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-                Readout("UPLINK //", when (haUp) { true -> "Active"; false -> "Down"; else -> "--" }, Modifier.weight(1f))
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                Readout("MIC //", if (armed) "Armed" else "Muted", Modifier.weight(1f))
-            }
-        }
-        if (machine.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Label(machine)
-        }
-        Spacer(Modifier.height(24.dp))
         TextField(
             value = typed,
             onValueChange = { typed = it },
-            placeholder = { Text("> enter_cmd...", color = Muted, fontSize = 14.sp) },
-            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = Display, fontSize = 14.sp),
+            placeholder = { Text("Message ${Prefs.name}...", color = Muted) },
             singleLine = true, // so Enter on a hardware or wrist keyboard sends
-            shape = Chamfer,
+            shape = Flat,
             colors = TextFieldDefaults.colors(
                 unfocusedContainerColor = Panel, focusedContainerColor = Panel,
-                unfocusedIndicatorColor = Gold, focusedIndicatorColor = Gold, cursorColor = Gold
+                unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, cursorColor = Gold
             ),
             trailingIcon = {
-                IconButton(onClick = { send() }, modifier = Modifier.semantics { contentDescription = "Send" }) {
-                    Text(">", color = Gold, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                }
+                IconButton(onClick = { send() }) { Icon(Icons.Filled.Send, contentDescription = "Send", tint = Gold) }
             },
             modifier = Modifier.fillMaxWidth().height(56.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() })
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
         val quiet = quietUntil > System.currentTimeMillis()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) },
                 modifier = Modifier.weight(1f).height(48.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
-            ) { Text("[ TALK ]", maxLines = 1) }
-            ConsoleButton("[ OVERRIDE ]", Gold, Modifier.weight(1f)) { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
-            ConsoleButton(if (quiet) "[ RESUME ]" else "[ MUTE_1H ]", Muted, Modifier.weight(1f)) {
+            ) { Text("Talk", maxLines = 1) }
+            SoftButton(onClick = { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }, Modifier.weight(1f).height(48.dp)) {
+                Text("Speak up", maxLines = 1)
+            }
+            SoftButton(onClick = {
                 Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
                 quietUntil = Prefs.quietUntil
-            }
+            }, Modifier.weight(1f).height(48.dp)) { Text(if (quiet) "Resume" else "Quiet 1h", maxLines = 1) }
         }
-        if (quiet) Label(
-            "MUTED UNTIL " + SimpleDateFormat("HH:mm", Locale.US).format(Date(quietUntil)),
-            Muted
+        if (quiet) Text(
+            "Quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))}.",
+            color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp)
         )
         Spacer(Modifier.height(12.dp))
         if (!awake && Prefs.apiKey.isNotBlank()) {
@@ -1042,9 +978,7 @@ fun NotesScreen() {
         }
         notes.forEachIndexed { i, n ->
             Row(
-                Modifier.fillMaxWidth().drawBehind { drawRect(Gold, size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height - 12.dp.toPx()))
-                    drawLine(Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
-                }.padding(start = 14.dp, bottom = 12.dp),
+                Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {

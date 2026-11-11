@@ -670,4 +670,18 @@ class AtlasTest {
         assertEquals(setOf("piped", "jellyfin"), st.containers.map { it.stack }.toSet())
         assertEquals("412 GB free", st.disk)
     }
+
+    @Test
+    fun companionWordsAreHonest() {
+        assertEquals("Good morning.", greeting(8))
+        assertEquals("Late night.", greeting(2))
+        val st = com.jondude.anzu.assist.Hub.parseAthena("""{"containers":[{"name":"jellyfin","status":"Up 3 days"},{"name":"sonarr","status":"Exited (1)"}]}""")
+        assertEquals("Athena needs a look: sonarr is down. The other 1 are up.", athenaSentence(st))
+        assertEquals(
+            "It's Tuesday. Your earbuds are on (64%). The house is connected. Athena has 1 service down. Garage is open.",
+            knowsLine(true, "buddie", 64, true, true, st, "Garage is open.", "Tuesday")
+        )
+        assertEquals("It's Tuesday. Obelisk isn't answering.", knowsLine(false, null, -1, null, false, null, "", "Tuesday"))
+        assertEquals("Garage is open.", firstSentence("Garage is open. Two packages came."))
+    }
 }
