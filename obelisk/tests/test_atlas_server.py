@@ -6,6 +6,8 @@ isolated per test (the module reads env vars at import time).
 import importlib
 import sys
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -185,6 +187,36 @@ def test_urgent_survives_a_fresh_process_without_a_rebuild(atlas):
     client.post("/atlas/ack", json={"ids": [report_id]})
     urgent = client.get("/atlas/brief").json()["urgent"]
     assert not any(u["id"] == report_id for u in urgent)
+
+
+
+def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
+    """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
+
+    The background refresh calls the same SSH helper the /atlas/athena/status
+    route uses; with a hub token configured but no caller present, a refresh
+    that goes through the token dependency dies with 401 and the cache stays
+    empty forever while the route still answers 200. Pin ATLAS_TOKEN so the
+    dependency is armed and assert the refresh still populates the cache.
+    """
+    mod, client = atlas
+    monkeypatch.setenv("ATLAS_TOKEN", "test-token")
+    monkeypatch.setattr(mod, "TOKEN", "test-token")
+
+    async def fake_ssh(command, timeout_s):
+        if "docker ps" in command:
+            return 0, "jellyfin|Up 2 hours|0.0.0.0:8096->8096/tcp", ""
+        if "LastBootUpTime" in command:
+            return 0, "3 days, 4 hours", ""
+        if "Get-PSDrive" in command:
+            return 0, "Used Free ---- ---- 100 200", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(mod, "_run_athena_ssh", fake_ssh)
+    asyncio.run(mod._refresh_athena_status())
+    assert mod._athena_cache["containers"], "refresh left the cache empty"
+    assert mod._athena_cache["containers"][0]["name"] == "jellyfin"
+    assert mod._athena_cache["updated"] > 0
 
 
 def test_athena_exec_requires_token_even_when_not_globally_required(atlas):

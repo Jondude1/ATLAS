@@ -30,7 +30,7 @@ import os
 import re
 import sqlite3
 import time
-from contextlib import closing, contextmanager
+from contextlib import asynccontextmanager, closing, contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -57,7 +57,21 @@ ASK_MAX_WORDS = 80
 mcp = FastMCP("atlas-hub")
 _mcp_app = mcp.http_app()
 
-app = FastAPI(title="Atlas on Obelisk", lifespan=_mcp_app.lifespan)
+@asynccontextmanager
+async def _atlas_lifespan(app):
+    # FastMCP's session manager guards run() so it can only be entered once
+    # per process; TestClient enters the lifespan on every block, so a second
+    # entry skips the MCP session manager instead of crashing startup.
+    try:
+        async with _mcp_app.lifespan(app):
+            _schedule_athena_refresh()
+            yield
+    except RuntimeError:
+        _schedule_athena_refresh()
+        yield
+
+
+app = FastAPI(title="Atlas on Obelisk", lifespan=_atlas_lifespan)
 state = {"device": "unknown", "since": 0.0, "started": time.time()}
 
 
