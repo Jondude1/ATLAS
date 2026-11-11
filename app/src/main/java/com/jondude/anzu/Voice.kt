@@ -182,7 +182,9 @@ object Speaker : TextToSpeech.OnInitListener {
     suspend fun say(text: String, requested: Float = 1f) {
         if (text.isBlank()) return
         val volume = requested * Wear.volume()
-        Glasses.lastSaid.value = text // shown on screen even if the speech engine is unavailable
+        Glasses.lastSaid.value = text // shown on screen in full, even if the speech engine is unavailable
+        com.jondude.anzu.assist.Spoken.lastFull = text
+        @Suppress("NAME_SHADOWING") val text = com.jondude.anzu.assist.Spoken.forEar(text)
         if (Prefs.voiceProvider != 0 && sayCloud(text, volume)) return
         val t = tts ?: return
         var waited = 0

@@ -728,4 +728,17 @@ class AtlasTest {
         A.answer(A.pending.value!!.id, false)
         assertFalse(no.await())
     }
+
+    @Test
+    fun earGetsShortPlainSpeech() {
+        val S = com.jondude.anzu.assist.Spoken
+        assertEquals("Jellyfin restarted. See the link.", S.forEar("**Jellyfin** restarted. See https://athena:8096/web."))
+        assertEquals("Milk Eggs", S.forEar("- Milk\n- Eggs"))
+        val long = (1..60).joinToString(" ") { "Point $it." }
+        val ear = S.forEar(long)
+        assertTrue(ear.endsWith("The rest is on your phone."))
+        assertTrue(ear.split(" ").size <= 86)
+        listOf("say that again", "Atlas, repeat that", "what did you say?", "come again").forEach { assertTrue(it, S.isRepeatRequest(it)) }
+        assertFalse(S.isRepeatRequest("repeat that to Jenna tomorrow"))
+    }
 }

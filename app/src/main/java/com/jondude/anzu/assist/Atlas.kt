@@ -53,6 +53,7 @@ object Atlas {
      */
     suspend fun converse(ctx: Context, opening: String?, canListen: Boolean, maxTurns: Int = 5) {
         mutex.withLock {
+            var listened = false
             try {
                 var volume = 1f
                 if (!opening.isNullOrBlank()) {
@@ -61,6 +62,7 @@ object Atlas {
                     windowUntil = System.currentTimeMillis() + 30_000
                 }
                 if (!canListen || Prefs.listenMode == 0) return
+                listened = true
                 repeat(maxTurns) {
                     Glasses.atlasState.value = "listening"
                     val heard = Ears.listen(ctx) ?: return
@@ -84,6 +86,7 @@ object Atlas {
                 }
             } finally {
                 Glasses.atlasState.value = "idle"
+                if (listened) Ears.earcon("done") // the conversation closed: a soft falling note, so he knows it stopped listening
             }
         }
     }

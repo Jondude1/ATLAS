@@ -1016,6 +1016,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     suspend fun reply(
         ctx: Context, userText: String, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
+        // "Say that again" repeats the last full answer without a model call.
+        if (Spoken.isRepeatRequest(userText) && Spoken.lastFull.isNotBlank()) return@withContext Spoken.lastFull
         // "Brief me" goes straight to the hub: fast, held to its spoken length, and it works even with no model.
         if (Hub.configured() && Spoken.isBriefRequest(userText)) {
             val b = Hub.brief(0)
@@ -1287,6 +1289,33 @@ object Spoken {
     )
 
     fun isBriefRequest(text: String): Boolean = briefAsk.matches(text.trim())
+
+    private val repeatAsk = Regex(
+        "^(\\W*(atlas\\W*)?)?(say (that|it) again|repeat (that|it)|what did you (just )?say|come again|pardon|sorry\\??)\\W*(please)?\\W*$",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isRepeatRequest(text: String): Boolean = repeatAsk.matches(text.trim())
+
+    /** The last thing spoken, in full, for "say that again". */
+    @Volatile
+    var lastFull = ""
+
+    /**
+     * What actually goes into the ear: no markdown, no raw links, and at most ~80 words, with the rest left on the phone.
+     * The screen always shows the full text.
+     */
+    fun forEar(text: String, words: Int = 80): String {
+        var t = text
+            .replace(Regex("https?://\\S+"), "the link")
+            .replace(Regex("(?m)^\\s*([-*•]|\\d+[.)])\\s+"), "")
+            .replace(Regex("[*_#`>]+"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val n = t.split(" ").count { it.isNotBlank() }
+        if (n > words) t = trimWords(t, words).removeSuffix("…").trimEnd(',', ';', ':') + " The rest is on your phone."
+        return t
+    }
 
     /** ~120 words in the morning, ~60 in the evening and at night, ~80 otherwise. */
     fun budget(hour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Int = when (hour) {
