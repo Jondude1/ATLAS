@@ -1383,6 +1383,63 @@ def test_chronicle_opener_with_no_recaps_yet(atlas):
     assert body == {"opener": "No previous session recap to open with.", "session_id": None}
 
 
+def test_care_settings_default_off_and_toggle(atlas):
+    mod, client = atlas
+    assert client.get("/atlas/care/settings").json() == {"movement_enabled": False, "weighin_enabled": False}
+
+    resp = client.post("/atlas/care/settings", params={"movement_enabled": True}).json()
+    assert resp == {"movement_enabled": True, "weighin_enabled": False}
+
+    resp = client.post("/atlas/care/settings", params={"weighin_enabled": True}).json()
+    assert resp == {"movement_enabled": True, "weighin_enabled": True}
+
+
+def test_care_sedentary_opted_out_by_default(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/care/sedentary").json()
+    assert resp == {"nudged": False, "reason": "opted out"}
+    assert client.get("/atlas/reports", params={"app": "care"}).json()["reports"] == []
+
+
+def test_care_sedentary_nudges_once_then_respects_cooldown(atlas):
+    mod, client = atlas
+    client.post("/atlas/care/settings", params={"movement_enabled": True})
+
+    first = client.post("/atlas/care/sedentary").json()
+    assert first == {"nudged": True}
+    reports = client.get("/atlas/reports", params={"app": "care"}).json()["reports"]
+    assert len(reports) == 1
+    assert reports[0]["priority"] == "low"
+
+    second = client.post("/atlas/care/sedentary").json()
+    assert second == {"nudged": False, "reason": "cooldown"}
+    assert len(client.get("/atlas/reports", params={"app": "care"}).json()["reports"]) == 1
+
+
+def test_weigh_in_log_and_list(atlas):
+    mod, client = atlas
+    client.post("/atlas/care/weigh-in", json={"weight": 180.5})
+    weigh_ins = client.get("/atlas/care/weigh-ins").json()["weigh_ins"]
+    assert len(weigh_ins) == 1
+    assert weigh_ins[0]["weight"] == 180.5
+
+
+def test_sunday_brief_includes_weighin_line_only_when_opted_in(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.post("/atlas/sunday-brief/compose").json()
+    assert "weigh-in" not in body["brief"].lower()
+
+    client.post("/atlas/care/settings", params={"weighin_enabled": True})
+    client.post("/atlas/care/weigh-in", json={"weight": 180.5})
+    body = client.post("/atlas/sunday-brief/compose").json()
+    assert "180.5" in body["brief"]
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

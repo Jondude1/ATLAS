@@ -152,6 +152,16 @@ _place_trigger_task: Optional[asyncio.Task] = None
 
 CHRONICLE_MAX_WORDS = 150  # a recap can run a bit longer than a spoken brief
 
+# Care Nudges (#28): opt-in, off by default, so these live in a durable
+# hub_settings table (not an in-memory flag -- a preference like this
+# should survive a restart). "Sedentary stretch" isn't something this hub
+# can sense itself, so the movement nudge is event-driven: the app calls
+# POST /atlas/care/sedentary when ITS sensors say so, and the hub decides
+# whether to actually speak up (opted in, past cooldown) -- rare and
+# killable by design, never urgent.
+CARE_MOVEMENT_COOLDOWN_S = int(os.environ.get("ATLAS_CARE_MOVEMENT_COOLDOWN_S", str(4 * 3600)))
+_care_state = {"last_movement_nudge_at": 0}
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -431,6 +441,23 @@ def init_hub_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hub_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weigh_ins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                weight REAL NOT NULL,
+                logged_at INTEGER NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -522,6 +549,10 @@ class ChronicleNote(BaseModel):
 
 class ChronicleRecapRequest(BaseModel):
     session_id: str
+
+
+class WeighIn(BaseModel):
+    weight: float
 
 
 def _now_ms() -> int:
@@ -1056,6 +1087,16 @@ async def _compose_sunday_brief() -> dict:
         f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip()
         for r in rows
     )
+    # Care Nudges (#28): opt-in weekly weigh-in line, written to be easy to
+    # skip past -- never phrased as pressure or guilt.
+    care_line = ""
+    if _get_setting("care_weighin_enabled") == "true":
+        with hub_db() as conn:
+            latest = conn.execute("SELECT * FROM weigh_ins ORDER BY logged_at DESC LIMIT 1").fetchone()
+        if latest and latest["logged_at"] >= since:
+            care_line = f"This week's weigh-in: {latest['weight']}."
+        else:
+            care_line = "No weigh-in logged this week -- a gentle, optional nudge, no pressure."
     reply = await _chat(
         [
             {
@@ -1063,18 +1104,21 @@ async def _compose_sunday_brief() -> dict:
                 "content": (
                     "Write a short, warm weekly look-back covering the last 7 days, drawn "
                     "only from the reports given. If the week was quiet, say so briefly and "
-                    "warmly. Plain spoken English, at most 120 words, no markdown, no lists."
+                    "warmly. If a weigh-in line is given, mention it once, gently, in a way "
+                    "that's easy to skip past -- never pressure or guilt. Plain spoken "
+                    "English, at most 120 words, no markdown, no lists."
                 ),
             },
             {
                 "role": "user",
-                "content": reports_text or "(a quiet week, nothing reported)",
+                "content": (reports_text or "(a quiet week, nothing reported)")
+                + (f"\n\n{care_line}" if care_line else ""),
             },
         ],
         max_tokens=220,
         timeout_s=90,
     )
-    summary = reply if reply else _fallback_brief(rows)
+    summary = reply if reply else (_fallback_brief(rows) + (f" {care_line}" if care_line else ""))
     _sunday_brief_cache["brief"] = summary
     _sunday_brief_cache["since"] = since
     _sunday_brief_cache["updated"] = now_ms
@@ -1846,6 +1890,83 @@ async def _compose_chronicle_opener(exclude_session_id: Optional[str] = None) ->
 @app.get("/atlas/chronicle/opener", dependencies=[Depends(require_token)])
 async def chronicle_opener(exclude_session_id: Optional[str] = None):
     return await _compose_chronicle_opener(exclude_session_id)
+
+
+def _get_setting(key: str, default: str = "false") -> str:
+    with hub_db() as conn:
+        row = conn.execute("SELECT value FROM hub_settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def _set_setting(key: str, value: str) -> None:
+    with hub_db() as conn:
+        conn.execute(
+            "INSERT INTO hub_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()
+
+
+def _care_settings() -> dict:
+    return {
+        "movement_enabled": _get_setting("care_movement_enabled") == "true",
+        "weighin_enabled": _get_setting("care_weighin_enabled") == "true",
+    }
+
+
+@app.get("/atlas/care/settings", dependencies=[Depends(require_token)])
+def get_care_settings():
+    return _care_settings()
+
+
+@app.post("/atlas/care/settings", dependencies=[Depends(require_token)])
+def set_care_settings(movement_enabled: Optional[bool] = None, weighin_enabled: Optional[bool] = None):
+    if movement_enabled is not None:
+        _set_setting("care_movement_enabled", "true" if movement_enabled else "false")
+    if weighin_enabled is not None:
+        _set_setting("care_weighin_enabled", "true" if weighin_enabled else "false")
+    return _care_settings()
+
+
+async def _maybe_movement_nudge() -> dict:
+    if not _care_settings()["movement_enabled"]:
+        return {"nudged": False, "reason": "opted out"}
+    now_ms = _now_ms()
+    if now_ms - _care_state["last_movement_nudge_at"] < CARE_MOVEMENT_COOLDOWN_S * 1000:
+        return {"nudged": False, "reason": "cooldown"}
+    await report(
+        Report(
+            app="care",
+            title="Stretch break",
+            body="Been at it a while -- maybe stand up and stretch for a minute. No worries if not.",
+            priority="low",
+            key=None,
+        )
+    )
+    _care_state["last_movement_nudge_at"] = now_ms
+    return {"nudged": True}
+
+
+@app.post("/atlas/care/sedentary", dependencies=[Depends(require_token)])
+async def care_sedentary():
+    return await _maybe_movement_nudge()
+
+
+@app.post("/atlas/care/weigh-in", dependencies=[Depends(require_token)])
+def log_weigh_in(w: WeighIn):
+    with hub_db() as conn:
+        cur = conn.execute("INSERT INTO weigh_ins (weight, logged_at) VALUES (?, ?)", (w.weight, _now_ms()))
+        conn.commit()
+        weigh_in_id = cur.lastrowid
+    return {"id": weigh_in_id}
+
+
+@app.get("/atlas/care/weigh-ins", dependencies=[Depends(require_token)])
+def list_weigh_ins(limit: int = 10):
+    with hub_db() as conn:
+        rows = conn.execute("SELECT * FROM weigh_ins ORDER BY logged_at DESC LIMIT ?", (limit,)).fetchall()
+    return {"weigh_ins": [dict(r) for r in rows]}
 
 
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
@@ -2827,6 +2948,26 @@ async def mcp_chronicle_recap(session_id: str) -> dict:
 async def mcp_chronicle_opener(exclude_session_id: str | None = None) -> dict:
     """Compose a 'Last time on...' opener from the most recent recap."""
     return await chronicle_opener(exclude_session_id)
+
+
+@mcp.tool
+def mcp_care_settings(movement_enabled: bool | None = None, weighin_enabled: bool | None = None) -> dict:
+    """Get or set Care Nudges opt-in settings (both off by default)."""
+    if movement_enabled is None and weighin_enabled is None:
+        return get_care_settings()
+    return set_care_settings(movement_enabled=movement_enabled, weighin_enabled=weighin_enabled)
+
+
+@mcp.tool
+async def mcp_care_sedentary() -> dict:
+    """Signal a sedentary work stretch; nudges gently only if opted in and past the cooldown."""
+    return await care_sedentary()
+
+
+@mcp.tool
+def mcp_log_weigh_in(weight: float) -> dict:
+    """Log a weigh-in, used for the opt-in weekly Sunday Brief line."""
+    return log_weigh_in(WeighIn(weight=weight))
 
 
 @mcp.tool
