@@ -28,7 +28,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
-/** Corin's voice: text-to-speech that suspends until the line is finished. */
+/** Atlas's voice: text-to-speech that suspends until the line is finished. */
 object Speaker : TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     @Volatile
@@ -123,7 +123,7 @@ object Speaker : TextToSpeech.OnInitListener {
         })
     }
 
-    /** Offline English voices Corin can choose from. */
+    /** Offline English voices Atlas can choose from. */
     fun voices(): List<String> = try {
         tts?.voices.orEmpty()
             .filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
@@ -218,11 +218,11 @@ object Speaker : TextToSpeech.OnInitListener {
     }
 }
 
-/** Corin's ears: one-shot speech recognition, routed to the glasses mic when possible. */
+/** Atlas's ears: one-shot speech recognition, routed to the glasses mic when possible. */
 data class Heard(val text: String, val quiet: Boolean)
 
 object Ears {
-    /** Earcons are Corin's body language: "listen", "think", "done". */
+    /** Earcons are Atlas's body language: "listen", "think", "done". */
     fun earcon(kind: String) {
         try {
             val tone = when (kind) {
@@ -468,7 +468,7 @@ object Transcriber {
         }
     }
 
-    /** Fallback: Whisper on Obelisk, if the Corin server is linked and has it installed. */
+    /** Fallback: Whisper on Obelisk, if the Atlas server is linked and has it installed. */
     private suspend fun obelisk(pcm: ShortArray): String? = withContext(Dispatchers.IO) {
         com.jondude.anzu.assist.Obelisk.transcribe(AudioMath.toBytes(pcm))
     }

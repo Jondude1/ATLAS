@@ -1,14 +1,14 @@
-# Corin for Razer Anzu
+# Atlas for Razer Anzu
 
-Corin is an AI companion that lives in your Razer Anzu audio glasses. It speaks up on its own through the day, you can talk back, and it handles the useful stuff around that: notifications, timers, notes, the house, research.
+Atlas is an AI companion that lives in your Razer Anzu audio glasses. It speaks up on its own through the day, you can talk back, and it handles the useful stuff around that: notifications, timers, notes, the house, research.
 
 The Anzu has speakers, a microphone and touch controls, with no screen or camera, so everything here is voice-first.
 
 ## What it does
 
 - **Speaks up on its own** at random intervals while the glasses are on, inside your active hours, never during calls.
-- **Conversation window**: after Corin speaks it listens for your reply, so you can just answer.
-- **Glasses gesture**: the Anzu voice-assistant gesture opens Corin (pick it when Android asks which assistant to use).
+- **Conversation window**: after Atlas speaks it listens for your reply, so you can just answer.
+- **Glasses gesture**: the Anzu voice-assistant gesture opens Atlas (pick it when Android asks which assistant to use).
 - **Its own identity**: on first run it writes its own personality and picks its own voice, then keeps them. The personality drifts slowly, one small step per day.
 - **Memory**: durable facts it remembers about you, a full conversation log, and "what did I say about X" recall.
 - **Evening wrap-up** that becomes a journal entry.
@@ -25,14 +25,14 @@ The Anzu has speakers, a microphone and touch controls, with no screen or camera
 1. Install the APK from the latest release.
 2. Open the app, grant permissions, allow notification access.
 3. Settings: add your Anthropic API key. Optional: Home Assistant URL and token, Obelisk server URL, Ollama URL.
-4. Put the glasses on. Corin wakes up, chooses who it is, and says hello.
+4. Put the glasses on. Atlas wakes up, chooses who it is, and says hello.
 
 ## Obelisk (optional)
 
-`obelisk/corin_server.py` is a small FastAPI server that writes every exchange into your Obsidian vault as daily notes, lets recall search the vault, and tracks which device you're on.
+`obelisk/atlas_server.py` is a small FastAPI server that writes every exchange into your Obsidian vault as daily notes, lets recall search the vault, and tracks which device you're on.
 
     pip install fastapi uvicorn
-    CORIN_VAULT=/path/to/vault uvicorn corin_server:app --host 0.0.0.0 --port 8765
+    ATLAS_VAULT=/path/to/vault uvicorn atlas_server:app --host 0.0.0.0 --port 8765
 
 Keep it on Tailscale only; it has no login.
 
@@ -48,11 +48,11 @@ Keep it on Tailscale only; it has no login.
 
 ## Buddie earbuds
 
-Corin treats the Buddie earbuds as a second wearable. When they connect it also opens their always-on audio stream (Bluetooth LE service `ae00`, Opus at 16 kHz, per the open-source Buddie app) and uses it for:
+Atlas treats the Buddie earbuds as a second wearable. When they connect it also opens their always-on audio stream (Bluetooth LE service `ae00`, Opus at 16 kHz, per the open-source Buddie app) and uses it for:
 
-- **Wake word**: say "Corin" and then what you want. For 30 seconds after Corin speaks you can just answer.
+- **Wake word**: say "Atlas" and then what you want. For 30 seconds after Atlas speaks you can just answer.
 - **Only your voice by default**: the earbuds flag when the wearer is speaking, and nothing else is transcribed unless you turn on Ambient context.
-- **Meeting notes**: "Corin, start meeting notes" / "Corin, stop", or the earbuds' own meeting mode. The transcript is summarized into your notes.
+- **Meeting notes**: "Atlas, start meeting notes" / "Atlas, stop", or the earbuds' own meeting mode. The transcript is summarized into your notes.
 
 Both Buddie audio formats are decoded: the default compressed-spectrum stream (244-byte packets, decoder derived from the MIT-licensed Buddie firmware, whose PCA table is bundled as `buddie_pca.bin`) and the Opus stream (84-byte packets). Call audio is dropped unless "Take notes on phone calls" is on. Settings → Buddie earbuds shows a diagnostics line with packets received, speech segments, and what was last understood.
 
@@ -68,11 +68,11 @@ Settings → Voice has three sources:
 - **ElevenLabs**: paste your API key, load your voices (including designed or cloned ones) and pick one.
 - **Custom**: any server with an OpenAI-style `/audio/speech` endpoint, such as OpenAI or a Kokoro or Piper server on Obelisk.
 
-If a premium voice can't be reached, Corin falls back to the phone voice.
+If a premium voice can't be reached, Atlas falls back to the phone voice.
 
 ## Glasses vs earbuds
 
-Corin notices which wearable you put on (the most recent one wins if both are connected) and behaves differently in each:
+Atlas notices which wearable you put on (the most recent one wins if both are connected) and behaves differently in each:
 
 | | Glasses (open-ear) | Earbuds (private) |
 |---|---|---|

@@ -25,7 +25,7 @@ import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-class CorinTest {
+class AtlasTest {
     @Before
     fun setUp() {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -225,15 +225,16 @@ class CorinTest {
     // ---------- wake word ----------
     @Test
     fun wakeWordExtractsTheRequest() {
-        assertEquals("what time is it", Wake.extract("Corin, what time is it", "Corin"))
-        assertEquals("turn off the lights", Wake.extract("hey corin turn off the lights", "Corin"))
-        assertEquals("what's the weather", Wake.extract("what's the weather, Corin?", "Corin"))
-        assertEquals("", Wake.extract("Corin?", "Corin"))
-        assertEquals("add milk to my list", Wake.extract("Corrin add milk to my list", "Corin"))
-        assertNull(Wake.extract("I ate corn on the cob", "Corin"))
-        assertNull(Wake.extract("let's go to the store", "Corin"))
+        assertEquals("what time is it", Wake.extract("Atlas, what time is it", "Atlas"))
+        assertEquals("turn off the lights", Wake.extract("hey atlas turn off the lights", "Atlas"))
+        assertEquals("what's the weather", Wake.extract("what's the weather, Atlas?", "Atlas"))
+        assertEquals("", Wake.extract("Atlas?", "Atlas"))
+        assertEquals("add milk to my list", Wake.extract("Atlus add milk to my list", "Atlas"))
+        assertEquals("status", Wake.extract("At las, status", "Atlas"))
+        assertNull(Wake.extract("we finally got there at last", "Atlas"))
+        assertNull(Wake.extract("let's go to the store", "Atlas"))
+        // the name is whatever he calls it; the older name still works if he switches back
         assertEquals("status", Wake.extract("Sage, status", "Sage"))
-        // spellings the on-phone recognizer produced for real earbud audio
         assertEquals("what time is it?", Wake.extract("Corinne, what time is it?", "Corin"))
         assertEquals("what time is it?", Wake.extract("Corey, what time is it?", "Corin"))
         assertNull(Wake.extract("or what kind of switch", "Corin"))
@@ -285,7 +286,7 @@ class CorinTest {
     @Test
     fun recallFindsPastConversation() {
         Store.appendLog("Jon", "the compressor needs a new belt")
-        Store.appendLog("Corin", "Noted. Want a reminder?")
+        Store.appendLog("Atlas", "Noted. Want a reminder?")
         Store.appendLog("Jon", "what's for dinner")
         val hits = Store.searchLog("compressor belt")
         assertTrue(hits.first().contains("compressor needs a new belt"))

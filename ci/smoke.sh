@@ -51,13 +51,13 @@ adb shell am start -W -n $PKG/.MainActivity || fail "could not start MainActivit
 check "Home screen"
 adb shell dumpsys activity services $PKG | grep -q GlassesService && PASSED="${PASSED}Background service running; " || fail "background service is not running"
 
-for tab in Notes Whisper Settings Corin; do
+for tab in Notes Whisper Settings Atlas; do
   tap "$tab" || { sleep 5; tap "$tab"; } || fail "tab $tab not found: $(texts)"
   check "$tab tab"
 done
 
-# Type a message with no API key: Corin should answer honestly instead of crashing.
-tap "Type to Corin" || fail "message box not found"
+# Type a message with no API key: Atlas should answer honestly instead of crashing.
+tap "Type to Atlas" || fail "message box not found"
 adb shell input text "hello"; adb shell input keyevent 66
 sleep 6
 has "reach a model" || fail "typed message got no reply: $(texts)"
@@ -101,7 +101,7 @@ done
 check "Settings scrolled"
 
 # Voice picker: open the phone voice list from the Voice section.
-tap "Corin"; sleep 1; tap "Settings"; sleep 2
+tap "Atlas"; sleep 1; tap "Settings"; sleep 2
 tap "Voice" || fail "Voice settings row not found: $(texts)"; sleep 2; shot settings_voice_page
 for i in $(seq 1 20); do has "Choose voice" && break; adb shell input swipe 12 1400 12 900 300; sleep 1; done
 tap "Choose voice" || fail "voice picker button not found: $(texts)"
@@ -124,6 +124,6 @@ adb shell cmd uimode night no || true
 adb shell am force-stop $PKG; adb shell am start -W -n $PKG/.MainActivity; sleep 5; shot light_home
 tap "Settings"; sleep 3; shot light_settings
 tap "Notes"; sleep 3; shot light_notes
-note "Device log: $(adb logcat -d -s CORINTEST:I | grep CORINTEST | sed 's/.*CORINTEST: //' | tr '\n' '|' | cut -c1-700)"
+note "Device log: $(adb logcat -d -s ATLASTEST:I | grep ATLASTEST | sed 's/.*ATLASTEST: //' | tr '\n' '|' | cut -c1-700)"
 note "All steps passed: $PASSED"
 echo "SMOKE PASSED"

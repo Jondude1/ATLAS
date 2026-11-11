@@ -18,7 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.jondude.anzu.assist.Brain
-import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.Atlas
 import com.jondude.anzu.assist.Obelisk
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -172,19 +172,23 @@ object AudioMath {
     }
 }
 
-/** Decides whether something Jon said was addressed to Corin. */
+/** Decides whether something Jon said was addressed to Atlas. */
 object Wake {
     private fun variants(name: String): List<String> {
         val n = name.trim().lowercase()
-        // How speech recognizers tend to spell "Corin" when the audio is rough.
-        val extra = if (n == "corin") listOf(
-            "corrin", "coren", "corinne", "koren", "korin", "corrine", "cor in", "corey", "cory", "corine",
-            "coryn", "korrin", "corwin", "corinn", "karin", "koryn", "coreen", "korine"
-        ) else emptyList()
+        // How speech recognizers tend to spell the name when the audio is rough.
+        val extra = when (n) {
+            "atlas" -> listOf("atlus", "at las", "atlass", "adlas", "attlas", "atlis", "at lis", "atless", "alice atlas")
+            "corin" -> listOf(
+                "corrin", "coren", "corinne", "koren", "korin", "corrine", "cor in", "corey", "cory", "corine",
+                "coryn", "korrin", "corwin", "corinn", "karin", "koryn", "coreen", "korine"
+            )
+            else -> emptyList()
+        }
         return (listOf(n) + extra).filter { it.isNotBlank() }
     }
 
-    /** Returns the request (possibly empty, for a bare "Corin?"), or null if he wasn't talking to it. */
+    /** Returns the request (possibly empty, for a bare "Atlas?"), or null if he wasn't talking to it. */
     fun extract(text: String, name: String): String? {
         val t = text.trim()
         for (v in variants(name)) {
@@ -866,7 +870,7 @@ object BuddieLink {
             if (!Glasses.meeting.value && now - meetingOnSince > 3_000) {
                 Meeting.start()
                 Meeting.fromEarbuds = true
-                Corin.announce("Taking meeting notes.")
+                Atlas.announce("Taking meeting notes.")
             }
         } else {
             meetingOnSince = 0
@@ -874,7 +878,7 @@ object BuddieLink {
                 if (meetingOffSince == 0L) meetingOffSince = now
                 if (now - meetingOffSince > 10_000) {
                     meetingOffSince = 0
-                    Corin.scope.launch { Corin.announce(Meeting.finish(ctx)) }
+                    Atlas.scope.launch { Atlas.announce(Meeting.finish(ctx)) }
                 }
             }
         }
@@ -882,8 +886,8 @@ object BuddieLink {
 
     private fun onUtterance(u: Utterance) {
         val ctx = appCtx ?: return
-        // While Corin itself is talking or listening, what the earbuds hear is mostly Corin.
-        if (Glasses.corinState.value != "idle") return
+        // While Atlas itself is talking or listening, what the earbuds hear is mostly Atlas.
+        if (Glasses.atlasState.value != "idle") return
         BuddieStats.segments++
         // Keep the latest segment so it can be played back from Settings to judge the audio.
         try {
@@ -899,7 +903,7 @@ object BuddieLink {
         val mine = if (sensor) u.selfRatio > 0.3f else true
         val meeting = Glasses.meeting.value
         if (!mine && !meeting && !Prefs.buddieAmbient) return
-        Corin.scope.launch {
+        Atlas.scope.launch {
             order.withLock {
                 val text = Transcriber.transcribe(ctx, u.pcm)?.trim().orEmpty()
                 if (text.length < 2) {
@@ -914,18 +918,18 @@ object BuddieLink {
                 if (meeting) {
                     val cmd = if (mine) Wake.extract(text, Prefs.name) else null
                     if (cmd != null && Regex("(?i)\\b(stop|end|finish)\\b").containsMatchIn(cmd)) {
-                        Corin.announce(Meeting.finish(ctx))
+                        Atlas.announce(Meeting.finish(ctx))
                     } else Meeting.add(if (mine && sensor) "Jon" else if (sensor) "Other" else "Voice", text)
                     return@withLock
                 }
                 if (mine) {
                     val cmd = if (Prefs.wakeWord) Wake.extract(text, Prefs.name) else null
                     if (cmd != null) {
-                        Corin.heard(ctx, cmd)
+                        Atlas.heard(ctx, cmd)
                         return@withLock
                     }
-                    if (System.currentTimeMillis() < Corin.windowUntil) {
-                        Corin.heard(ctx, text)
+                    if (System.currentTimeMillis() < Atlas.windowUntil) {
+                        Atlas.heard(ctx, text)
                         return@withLock
                     }
                 }

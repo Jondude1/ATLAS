@@ -35,12 +35,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Runs conversations: one voice at a time, whoever starts it. */
-object Corin {
+object Atlas {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
     val busy: Boolean get() = mutex.isLocked
 
-    /** After Corin speaks, replies heard by the Buddie earbuds count without the wake word until this time. */
+    /** After Atlas speaks, replies heard by the Buddie earbuds count without the wake word until this time. */
     @Volatile
     var windowUntil = 0L
 
@@ -56,46 +56,46 @@ object Corin {
             try {
                 var volume = 1f
                 if (!opening.isNullOrBlank()) {
-                    Glasses.corinState.value = "speaking"
+                    Glasses.atlasState.value = "speaking"
                     Speaker.say(opening)
                     windowUntil = System.currentTimeMillis() + 30_000
                 }
                 if (!canListen || Prefs.listenMode == 0) return
                 repeat(maxTurns) {
-                    Glasses.corinState.value = "listening"
+                    Glasses.atlasState.value = "listening"
                     val heard = Ears.listen(ctx) ?: return
                     Glasses.lastHeard.value = heard.text
                     if (enders.matches(heard.text.trim())) return
                     // Whisper-back: a murmur gets a quiet reply.
                     volume = if (Prefs.whisperBack && heard.quiet) 0.45f else 1f
-                    Glasses.corinState.value = "thinking"
+                    Glasses.atlasState.value = "thinking"
                     Ears.earcon("think")
                     val answer = Brain.reply(ctx, heard.text) { question ->
-                        Glasses.corinState.value = "speaking"
+                        Glasses.atlasState.value = "speaking"
                         Speaker.say(question, volume)
-                        Glasses.corinState.value = "listening"
+                        Glasses.atlasState.value = "listening"
                         val r = Ears.listen(ctx)
-                        Glasses.corinState.value = "thinking"
+                        Glasses.atlasState.value = "thinking"
                         r != null && yes.containsMatchIn(r.text)
                     }
-                    Glasses.corinState.value = "speaking"
+                    Glasses.atlasState.value = "speaking"
                     Speaker.say(answer, volume)
                     windowUntil = System.currentTimeMillis() + 30_000
                 }
             } finally {
-                Glasses.corinState.value = "idle"
+                Glasses.atlasState.value = "idle"
             }
         }
     }
 
-    /** Something Jon said to Corin, already transcribed (the Buddie wake-word path). */
+    /** Something Jon said to Atlas, already transcribed (the Buddie wake-word path). */
     fun heard(ctx: Context, text: String) {
         val app = ctx.applicationContext
         scope.launch {
             mutex.withLock {
                 try {
                     if (text.isBlank()) {
-                        Glasses.corinState.value = "speaking"
+                        Glasses.atlasState.value = "speaking"
                         Speaker.say("Yeah?")
                     } else {
                         Glasses.lastHeard.value = text
@@ -103,15 +103,15 @@ object Corin {
                             windowUntil = 0
                             return@withLock
                         }
-                        Glasses.corinState.value = "thinking"
+                        Glasses.atlasState.value = "thinking"
                         Ears.earcon("think")
                         val answer = Brain.reply(app, text)
-                        Glasses.corinState.value = "speaking"
+                        Glasses.atlasState.value = "speaking"
                         Speaker.say(answer)
                     }
                     windowUntil = System.currentTimeMillis() + 30_000
                 } finally {
-                    Glasses.corinState.value = "idle"
+                    Glasses.atlasState.value = "idle"
                 }
             }
         }
@@ -125,15 +125,15 @@ object Corin {
             mutex.withLock {
                 try {
                     Glasses.lastHeard.value = text
-                    Glasses.corinState.value = "thinking"
+                    Glasses.atlasState.value = "thinking"
                     val answer = Brain.reply(app, text)
                     Glasses.lastSaid.value = answer
                     if (Glasses.connected.value) {
-                        Glasses.corinState.value = "speaking"
+                        Glasses.atlasState.value = "speaking"
                         Speaker.say(answer, 0.6f)
                     }
                 } finally {
-                    Glasses.corinState.value = "idle"
+                    Glasses.atlasState.value = "idle"
                 }
             }
         }
@@ -145,17 +145,17 @@ object Corin {
         scope.launch {
             mutex.withLock {
                 try {
-                    Glasses.corinState.value = "speaking"
+                    Glasses.atlasState.value = "speaking"
                     Speaker.say("Testing. Say something after the tone.")
-                    Glasses.corinState.value = "listening"
+                    Glasses.atlasState.value = "listening"
                     val h = Ears.listen(app)
-                    Glasses.corinState.value = "speaking"
+                    Glasses.atlasState.value = "speaking"
                     Speaker.say(
                         if (h == null) "I didn't catch anything."
                         else "I heard: ${h.text}." + if (h.quiet) " That registered as quiet." else ""
                     )
                 } finally {
-                    Glasses.corinState.value = "idle"
+                    Glasses.atlasState.value = "idle"
                 }
             }
         }
@@ -166,13 +166,13 @@ object Corin {
         scope.launch {
             mutex.withLock {
                 try {
-                    Glasses.corinState.value = "speaking"
+                    Glasses.atlasState.value = "speaking"
                     // Nothing worn: hand off to a house speaker if one is set up.
                     val handedOff = !Glasses.connected.value && Prefs.houseSpeaker &&
                         kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(text) }
                     if (!handedOff) Speaker.say(text)
                 } finally {
-                    Glasses.corinState.value = "idle"
+                    Glasses.atlasState.value = "idle"
                 }
             }
         }
@@ -188,7 +188,7 @@ class AssistActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true)
         setContent {
-            val state by Glasses.corinState.collectAsState()
+            val state by Glasses.atlasState.collectAsState()
             val said by Glasses.lastSaid.collectAsState()
             val heard by Glasses.lastHeard.collectAsState()
             val dark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -217,8 +217,8 @@ class AssistActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch {
-            if (Corin.busy) Speaker.stop()
-            Corin.converse(this@AssistActivity, null, true, 8)
+            if (Atlas.busy) Speaker.stop()
+            Atlas.converse(this@AssistActivity, null, true, 8)
             finish()
         }
     }

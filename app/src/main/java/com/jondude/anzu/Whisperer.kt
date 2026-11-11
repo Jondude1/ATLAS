@@ -6,7 +6,7 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
-import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.Atlas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -55,7 +55,7 @@ object Whisperer {
             return
         }
         downloading = true
-        Corin.scope.launch(Dispatchers.IO) {
+        Atlas.scope.launch(Dispatchers.IO) {
             try {
                 downloadBlocking(app)
             } finally {
@@ -198,7 +198,7 @@ object Whisperer {
 
     /** Free the model's memory when no earbuds are streaming. */
     fun release() {
-        Corin.scope.launch {
+        Atlas.scope.launch {
             lock.withLock {
                 try {
                     rec?.release()

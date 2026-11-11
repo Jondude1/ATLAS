@@ -28,7 +28,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.jondude.anzu.assist.Brain
-import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.Atlas
 import com.jondude.anzu.assist.HomeAssistant
 import com.jondude.anzu.assist.HomeWatch
 import com.jondude.anzu.assist.Obelisk
@@ -49,7 +49,7 @@ import kotlin.random.Random
 
 /**
  * The always-on layer. Watches for the glasses, and while they're on:
- * Corin speaks up on its own, reads timers and calendar heads-ups, and tracks battery.
+ * Atlas speaks up on its own, reads timers and calendar heads-ups, and tracks battery.
  */
 class GlassesService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -66,7 +66,7 @@ class GlassesService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     /**
-     * Keep the CPU awake while the glasses are on (or a timer is pending), so Corin
+     * Keep the CPU awake while the glasses are on (or a timer is pending), so Atlas
      * still speaks up with the phone asleep in a pocket.
      */
     @Synchronized
@@ -109,7 +109,7 @@ class GlassesService : Service() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Corin presence", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL, "Atlas presence", NotificationManager.IMPORTANCE_LOW)
         )
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
@@ -134,7 +134,7 @@ class GlassesService : Service() {
         if (!startedForeground || fromUi) {
             var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             // Mic and location can only be attached while the app is visible; that "arms"
-            // the conversation window so Corin can listen after speaking up on its own.
+            // the conversation window so Atlas can listen after speaking up on its own.
             val mic = fromUi && has(Manifest.permission.RECORD_AUDIO)
             if (mic) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             if (fromUi && has(Manifest.permission.ACCESS_FINE_LOCATION)) {
@@ -253,7 +253,7 @@ class GlassesService : Service() {
             refreshNotification()
             if (Prefs.announceSwitch) scope.launch {
                 delay(3_000) // let audio move to the new device
-                Corin.announce(Wear.switchLine())
+                Atlas.announce(Wear.switchLine())
             }
         }
         Glasses.wearing.value = listOfNotNull(
@@ -345,7 +345,7 @@ class GlassesService : Service() {
                 val first = Brain.awaken()
                 if (first != null) {
                     Prefs.lastGreetDay = today()
-                    Corin.converse(this@GlassesService, first, canListen())
+                    Atlas.converse(this@GlassesService, first, canListen())
                     return@launch
                 }
             }
@@ -353,10 +353,10 @@ class GlassesService : Service() {
             if (Prefs.lastGreetDay != today()) {
                 Prefs.lastGreetDay = today()
                 val hello = Brain.speakUp(this@GlassesService, "greeting") ?: "I'm here."
-                Corin.converse(this@GlassesService, hello, canListen())
+                Atlas.converse(this@GlassesService, hello, canListen())
             } else {
                 val b = Glasses.battery.value
-                Corin.announce(if (b in 0..25) "I'm here. Glasses are at $b percent." else "I'm here.")
+                Atlas.announce(if (b in 0..25) "I'm here. Glasses are at $b percent." else "I'm here.")
             }
         }
     }
@@ -418,7 +418,7 @@ class GlassesService : Service() {
             am.mode == AudioManager.MODE_RINGTONE
         ) return false
         if (!Prefs.talkOverMedia && am.isMusicActive) return false
-        return !Corin.busy
+        return !Atlas.busy
     }
 
     private fun inActiveHours(): Boolean {
@@ -430,13 +430,13 @@ class GlassesService : Service() {
 
     private suspend fun speakUp(kind: String) {
         val line = Brain.speakUp(this, kind) ?: return
-        Corin.converse(this, line, canListen())
+        Atlas.converse(this, line, canListen())
     }
 
     private suspend fun tick() {
         // Timers fire whether or not the glasses are on.
         Timers.due().forEach {
-            Corin.announce("Timer's up: ${it.label}.")
+            Atlas.announce("Timer's up: ${it.label}.")
         }
         updateWakeLock()
         if (!Glasses.connected.value) return
@@ -447,13 +447,13 @@ class GlassesService : Service() {
         val b = Glasses.battery.value
         if (b in 0..10 && !warned10) {
             warned10 = true
-            Corin.announce("Glasses are at $b percent. I'll drop out soon.")
+            Atlas.announce("Glasses are at $b percent. I'll drop out soon.")
         } else if (b in 11..20 && !warned20) {
             warned20 = true
-            Corin.announce("Heads up, glasses battery is at $b percent.")
+            Atlas.announce("Heads up, glasses battery is at $b percent.")
         }
         if (Prefs.calendarHeadsUp) calendarHeadsUp(now)
-        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Corin.announce(it) } }
+        Motion.fresh(3 * 60_000)?.let { loc -> Places.check(loc).forEach { Atlas.announce(it) } }
         ticks++
         if (Glasses.meeting.value) return // stay out of the way while taking notes
         if (Prefs.commuteAlerts && ticks % 10 == 0) commuteCheck(now)
@@ -461,7 +461,7 @@ class GlassesService : Service() {
         // House check every three minutes: only things that need him.
         if (Prefs.homeAlerts && HomeAssistant.configured() && ticks % 6 == 0) {
             val lines = kotlinx.coroutines.withContext(Dispatchers.IO) { HomeWatch.poll() }
-            if (!quietNow) lines.forEach { Corin.announce(it) }
+            if (!quietNow) lines.forEach { Atlas.announce(it) }
         }
         if (quietNow) return
         val driving = Prefs.activityAware && Motion.driving()
@@ -479,7 +479,7 @@ class GlassesService : Service() {
         wasWalking = walking
         if (Prefs.eyeBreaks && Wear.eyeBreaks() && now - lastEyeBreak > 20 * 60_000 && interruptible()) {
             lastEyeBreak = now
-            Corin.announce("Twenty minutes. Look at something far away for twenty seconds.")
+            Atlas.announce("Twenty minutes. Look at something far away for twenty seconds.")
             return
         }
         if (!inActiveHours() || !interruptible()) return
@@ -549,7 +549,7 @@ class GlassesService : Service() {
             }
             out
         }
-        lines.forEach { Corin.announce(it) }
+        lines.forEach { Atlas.announce(it) }
     }
 
     private fun calendarHeadsUp(now: Long) {
@@ -574,7 +574,7 @@ class GlassesService : Service() {
                     if (c.getInt(3) != 0 || begin <= now || key in announcedEvents) continue
                     announcedEvents.add(key)
                     val mins = ((begin - now) / 60_000 + 1).toInt()
-                    Corin.announce("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.")
+                    Atlas.announce("Heads up: ${c.getString(1) ?: "an event"} in $mins minutes.")
                 }
             }
         } catch (_: Exception) {
@@ -658,7 +658,7 @@ class NotifyListener : NotificationListenerService() {
                 Glasses.hold(line)
                 return
             }
-            Corin.announce(if (Wear.senderOnly()) "$app, from $title." else "$app. $title. ${text.take(220)}")
+            Atlas.announce(if (Wear.senderOnly()) "$app, from $title." else "$app. $title. ${text.take(220)}")
         } catch (_: Exception) {
         }
     }

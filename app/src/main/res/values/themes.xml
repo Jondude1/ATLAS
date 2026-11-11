@@ -2,14 +2,14 @@
 <resources>
     <color name="ic_bg">#1B3327</color>
     <color name="window_bg">#EEF2EE</color>
-    <style name="Theme.Corin" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Atlas" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_bg</item>
         <item name="android:statusBarColor">@color/window_bg</item>
         <item name="android:navigationBarColor">@color/window_bg</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
-    <style name="Theme.Corin.Assist" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Atlas.Assist" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>

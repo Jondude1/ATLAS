@@ -84,7 +84,7 @@ jobs:
             bash ci/fetch-deps.sh
             adb logcat -c
             gradle connectedDebugAndroidTest --no-daemon || echo "DEVICE_TESTS_FAILED" > device-tests-failed
-            adb logcat -d -s CORINTEST:I > corintest.log || true
+            adb logcat -d -s ATLASTEST:I > atlastest.log || true
             adb uninstall com.jondude.anzu || true
             bash ci/smoke.sh
       - name: Publish screenshots
@@ -109,8 +109,8 @@ jobs:
                   for x in list(c.findall('failure'))+list(c.findall('error')):
                       bad.append(c.get('name')+': '+(x.text or x.get('message') or '')[:400].replace('\n',' '))
           print(f"::notice title=Device tests::{t} run, {f} failed")
-          if os.path.exists('corintest.log'):
-              lines=[l.split('CORINTEST: ',1)[1].strip() for l in open('corintest.log', errors='ignore') if 'CORINTEST: ' in l]
+          if os.path.exists('atlastest.log'):
+              lines=[l.split('ATLASTEST: ',1)[1].strip() for l in open('atlastest.log', errors='ignore') if 'ATLASTEST: ' in l]
               print("::notice title=Device log::"+' | '.join(lines)[:900])
           for b in bad: print(f"::error title=Device test failed::{b}")
           if f or os.path.exists('device-tests-failed') or t == 0: sys.exit(1)

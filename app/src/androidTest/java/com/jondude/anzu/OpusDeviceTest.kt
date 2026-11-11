@@ -81,7 +81,7 @@ class OpusDeviceTest {
     fun decodesOpusAndFindsTheUtterance() {
         val pcm = ShortArray(16000 * 2) { (8000 * sin(2 * PI * 300 * it / 16000.0)).toInt().toShort() }
         val packets = encode(pcm)
-        Log.i("CORINTEST", "encoded ${packets.size} packets, first sizes ${packets.take(5).map { it.size }}")
+        Log.i("ATLASTEST", "encoded ${packets.size} packets, first sizes ${packets.take(5).map { it.size }}")
         assertTrue("expected about 100 packets, got ${packets.size}", packets.size in 80..120)
 
         val dec = OpusDec()
@@ -99,7 +99,7 @@ class OpusDeviceTest {
         }
         repeat(60) { utterance = utterance ?: seg.feed(ShortArray(320), false) }
         dec.release()
-        Log.i("CORINTEST", "decoded $total samples from ${pcm.size}, peak rms $energy")
+        Log.i("ATLASTEST", "decoded $total samples from ${pcm.size}, peak rms $energy")
 
         assertTrue("decoded $total samples from ${pcm.size}", total > pcm.size * 7 / 10 && total < pcm.size * 13 / 10)
         assertTrue("decoded audio is too quiet: $energy", energy > 1500)
@@ -112,13 +112,13 @@ class OpusDeviceTest {
     fun transcriberReturns() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         Log.i(
-            "CORINTEST",
+            "ATLASTEST",
             "recognizer available=${SpeechRecognizer.isRecognitionAvailable(ctx)} " +
                 "onDevice=${SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)}"
         )
         val pcm = ShortArray(16000) { (6000 * sin(2 * PI * 220 * it / 16000.0)).toInt().toShort() }
         val result = runBlocking { withTimeoutOrNull(25_000) { Transcriber.transcribe(ctx, pcm) ?: "(nothing recognized)" } }
-        Log.i("CORINTEST", "transcriber result: $result")
+        Log.i("ATLASTEST", "transcriber result: $result")
         assertNotNull("transcriber hung", result)
     }
 }

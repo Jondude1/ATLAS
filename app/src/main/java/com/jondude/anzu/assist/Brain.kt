@@ -305,7 +305,7 @@ object Weather {
 }
 
 /**
- * Optional link to the Corin server on Obelisk (see obelisk/corin_server.py in the repo).
+ * Optional link to the Atlas server on Obelisk (see obelisk/atlas_server.py in the repo).
  * Everything here fails quietly: the phone keeps working if the node or Tailscale is down.
  */
 object Obelisk {
@@ -314,10 +314,10 @@ object Obelisk {
 
     fun log(speaker: String, text: String) {
         if (!configured()) return
-        Corin.scope.launch(Dispatchers.IO) {
+        Atlas.scope.launch(Dispatchers.IO) {
             try {
                 Net.postJson(
-                    base() + "/corin/log", emptyMap(),
+                    base() + "/atlas/log", emptyMap(),
                     JSONObject().put("speaker", speaker).put("text", text)
                         .put("device", if (Glasses.connected.value) "glasses" else "phone").toString(), 6_000
                 )
@@ -328,9 +328,9 @@ object Obelisk {
 
     fun presence(device: String) {
         if (!configured()) return
-        Corin.scope.launch(Dispatchers.IO) {
+        Atlas.scope.launch(Dispatchers.IO) {
             try {
-                Net.postJson(base() + "/corin/presence", emptyMap(), JSONObject().put("device", device).toString(), 6_000)
+                Net.postJson(base() + "/atlas/presence", emptyMap(), JSONObject().put("device", device).toString(), 6_000)
             } catch (_: Exception) {
             }
         }
@@ -340,7 +340,7 @@ object Obelisk {
     fun transcribe(pcm: ByteArray): String? {
         if (!configured()) return null
         return try {
-            val (code, body) = Net.postBytes(base() + "/corin/transcribe", pcm, 30_000)
+            val (code, body) = Net.postBytes(base() + "/atlas/transcribe", pcm, 30_000)
             if (code in 200..299) JSONObject(body).optString("text").takeIf { it.isNotBlank() } else null
         } catch (e: Exception) {
             null
@@ -349,7 +349,7 @@ object Obelisk {
 
     /** Blocking vault search. */
     fun search(query: String): String = try {
-        val (code, body) = Net.get(base() + "/corin/search?q=" + URLEncoder.encode(query, "UTF-8"), emptyMap(), 10_000)
+        val (code, body) = Net.get(base() + "/atlas/search?q=" + URLEncoder.encode(query, "UTF-8"), emptyMap(), 10_000)
         if (code in 200..299) {
             val arr = JSONObject(body).optJSONArray("results") ?: JSONArray()
             (0 until arr.length()).joinToString("\n") { arr.getString(it) }
@@ -360,7 +360,7 @@ object Obelisk {
 
     fun pingMs(): Long = try {
         val t = System.currentTimeMillis()
-        val (code, _) = Net.get(base() + "/corin/status", emptyMap(), 5_000)
+        val (code, _) = Net.get(base() + "/atlas/status", emptyMap(), 5_000)
         if (code in 200..299) System.currentTimeMillis() - t else -1
     } catch (e: Exception) {
         -1
@@ -385,7 +385,7 @@ object Local {
     }
 }
 
-/** Timers Corin sets for Jon; the service speaks them when they fire. */
+/** Timers Atlas sets for Jon; the service speaks them when they fire. */
 object Timers {
     data class T(val at: Long, val label: String)
 
@@ -449,7 +449,7 @@ object Timers {
 object Brain {
     private const val API = "https://api.anthropic.com/v1/messages"
 
-    /** Reverses the last thing Corin did, when that's possible. */
+    /** Reverses the last thing Atlas did, when that's possible. */
     @Volatile
     private var lastUndo: (() -> String)? = null
 
@@ -523,7 +523,7 @@ object Brain {
 
     private fun system(ctx: Context): String {
         val mem = Store.memory.value
-        val name = Prefs.name.ifBlank { "Corin" }
+        val name = Prefs.name.ifBlank { "Atlas" }
         return buildString {
             append("You are $name, Jon's AI companion. You live in his wearables, the Razer Anzu audio glasses and the Buddie earbuds: no screen, no camera, just your voice in his ears and his voice back. You are a peer, not a servant: you push back when you disagree and you never flatter. You're company through his day, not a replacement for the people in it.\n\n")
             append("Who you are (you wrote this yourself when you first came online; it is your permanent core): ")
@@ -589,7 +589,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         if (Vault.configured()) {
             a.put(tool("vault_search", "Search Jon's Obsidian vault.", JSONObject().put("query", str("Keywords.")), listOf("query")))
             a.put(tool("vault_read", "Read the start of a note in the vault.", JSONObject().put("note", str("Note name.")), listOf("note")))
-            a.put(tool("vault_note", "Append a line to today's Corin note in the vault.", JSONObject().put("text", str("What to write.")), listOf("text")))
+            a.put(tool("vault_note", "Append a line to today's Atlas note in the vault.", JSONObject().put("text", str("What to write.")), listOf("text")))
         }
         if (Hermes.configured()) {
             a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes on Jon's desktop. Runs in the background; you report the result when it comes back.",
@@ -773,7 +773,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             "ask_hermes" -> {
                 val task = input.optString("task")
                 Store.logAction("Asked Hermes: ${task.take(80)}")
-                Corin.scope.launch(Dispatchers.IO) {
+                Atlas.scope.launch(Dispatchers.IO) {
                     try {
                         val answer = Hermes.ask(task)
                         Store.addNote("Hermes: ${task.take(80)}\n$answer")
@@ -783,9 +783,9 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         } catch (e: Exception) {
                             answer.take(400)
                         }
-                        Corin.announce("Hermes is back. $spoken The full answer is in your notes.")
+                        Atlas.announce("Hermes is back. $spoken The full answer is in your notes.")
                     } catch (e: Exception) {
-                        Corin.announce("Hermes didn't come through on that. ${e.message ?: ""}")
+                        Atlas.announce("Hermes didn't come through on that. ${e.message ?: ""}")
                     }
                 }
                 "Handed to Hermes; you'll report back when it answers."
@@ -804,7 +804,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val topic = input.optString("topic")
                 if (!hasKey()) "Research needs the Anthropic API key." else {
                     Store.logAction("Started research: ${topic.take(80)}")
-                    Corin.scope.launch(Dispatchers.IO) { research(topic) }
+                    Atlas.scope.launch(Dispatchers.IO) { research(topic) }
                     "Research started in the background; you'll report back when it finishes."
                 }
             }
@@ -919,14 +919,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     private fun mirrorToVault(userSpeaker: String, user: String, answer: String) {
         val ctx = appContext ?: return
         if (!Vault.configured()) return
-        Corin.scope.launch(Dispatchers.IO) {
+        Atlas.scope.launch(Dispatchers.IO) {
             val time = SimpleDateFormat("HH:mm", Locale.US).format(Date())
             if (userSpeaker.isNotEmpty()) Vault.appendDaily(ctx, "- $time **$userSpeaker**: ${user.replace('\n', ' ')}")
             Vault.appendDaily(ctx, "- $time **${Prefs.name}**: ${answer.replace('\n', ' ')}")
         }
     }
 
-    /** Jon said (or typed) something; Corin answers. */
+    /** Jon said (or typed) something; Atlas answers. */
     suspend fun reply(
         ctx: Context, userText: String, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
@@ -997,7 +997,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     )
 
     /**
-     * Corin decides to say something unprompted.
+     * Atlas decides to say something unprompted.
      * kind: random, greeting, journal. Returns null if there's nothing to say.
      */
     suspend fun speakUp(ctx: Context, kind: String = "random"): String? = withContext(Dispatchers.IO) {
@@ -1050,7 +1050,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     }
 
     /**
-     * First run: Corin writes its own core identity and picks its voice.
+     * First run: Atlas writes its own core identity and picks its voice.
      * Returns its first words, or null if it couldn't come online.
      */
     suspend fun awaken(): String? = withContext(Dispatchers.IO) {
@@ -1136,15 +1136,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             )
             val text = textOf(resp)
             if (text.isBlank()) {
-                Corin.announce("I looked into $topic but came back empty-handed.")
+                Atlas.announce("I looked into $topic but came back empty-handed.")
                 return
             }
             Store.addNote("Research: $topic\n$text")
             Store.logAction("Finished research: ${topic.take(80)}")
             record("[research errand finished: $topic]", text, "")
-            Corin.announce("I finished looking into $topic. $text I saved it to your notes.")
+            Atlas.announce("I finished looking into $topic. $text I saved it to your notes.")
         } catch (e: Exception) {
-            Corin.announce("The research on $topic failed. ${e.message ?: ""}")
+            Atlas.announce("The research on $topic failed. ${e.message ?: ""}")
         }
     }
 }

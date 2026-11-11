@@ -129,7 +129,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Brain
-import com.jondude.anzu.assist.Corin
+import com.jondude.anzu.assist.Atlas
 import com.jondude.anzu.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -141,7 +141,7 @@ import java.util.Locale
 /** Follows the phone's light or dark setting. */
 private var isDark by mutableStateOf(true)
 
-// Corin's palette: a forest at dusk in dark mode, sage paper in light mode.
+// Atlas's palette: a forest at dusk in dark mode, sage paper in light mode.
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
 private val Gold: Color get() = if (isDark) Color(0xFFE3B655) else Color(0xFF1F5D45)
 private val OnGold: Color get() = if (isDark) Color(0xFF1B1405) else Color(0xFFFFFFFF)
@@ -152,7 +152,7 @@ private val Panel: Color get() = if (isDark) Color(0xFF16231D) else Color(0xFFFF
 private val Fill: Color get() = if (isDark) Color(0xFF213529) else Color(0xFFE3EAE4)
 private val Hairline: Color get() = if (isDark) Color(0xFF26392F) else Color(0xFFD5DED7)
 
-/** The display face (Bricolage Grotesque) for titles and Corin's own words. */
+/** The display face (Bricolage Grotesque) for titles and Atlas's own words. */
 private val Display = FontFamily(
     Font(R.font.bricolage_bold, FontWeight.Bold),
     Font(R.font.bricolage_medium, FontWeight.Medium)
@@ -259,7 +259,7 @@ fun AppRoot(resumes: Int) {
         bottomBar = {
             // A floating bar: the selected tab opens into a labelled pill.
             val items = listOf(
-                "Corin" to Icons.Filled.Home,
+                "Atlas" to Icons.Filled.Home,
                 "Notes" to Icons.Filled.Create,
                 "Whisper" to Icons.Filled.Notifications,
                 "Settings" to Icons.Filled.Settings
@@ -479,7 +479,7 @@ fun PrefField(label: String, initial: String, secret: Boolean = false, lines: In
     )
 }
 
-/** Corin's presence: a sphere of gold light over deep green that breathes, and quickens when listening or thinking. */
+/** Atlas's presence: a sphere of gold light over deep green that breathes, and quickens when listening or thinking. */
 @Composable
 fun Orb(state: String, diameter: Dp = 148.dp) {
     val period = when (state) {
@@ -538,7 +538,7 @@ fun HomeScreen(resumes: Int) {
     val buddie by Glasses.buddieStream.collectAsState()
     val buddieStats by BuddieStats.summary.collectAsState()
     val meeting by Glasses.meeting.collectAsState()
-    val state by Glasses.corinState.collectAsState()
+    val state by Glasses.atlasState.collectAsState()
     val said by Glasses.lastSaid.collectAsState()
     val heard by Glasses.lastHeard.collectAsState()
     var typed by remember { mutableStateOf("") }
@@ -562,7 +562,7 @@ fun HomeScreen(resumes: Int) {
     fun send() {
         val t = typed.trim()
         if (t.isNotEmpty()) {
-            Corin.typed(ctx, t)
+            Atlas.typed(ctx, t)
             typed = ""
         }
     }
@@ -572,7 +572,7 @@ fun HomeScreen(resumes: Int) {
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { LargeTitle(Prefs.name) }
+            Column(Modifier.weight(1f)) { LargeTitle(Prefs.name.uppercase()) }
             Text(
                 state, color = if (state == "idle") Muted else OnGold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(20.dp))
@@ -670,7 +670,7 @@ fun HomeScreen(resumes: Int) {
                     val first = Brain.awaken()
                     waking = false
                     awake = Prefs.identity.isNotBlank()
-                    if (first != null) Corin.announce(first)
+                    if (first != null) Atlas.announce(first)
                 }
             }) { Text(if (waking) "Coming online…" else "Wake ${Prefs.name} for the first time") }
         }
@@ -978,7 +978,7 @@ fun SettingsScreen() {
         }
 
         Section("Identity") {
-            PrefField("Name", Prefs.name) { Prefs.name = it.trim().ifBlank { "Corin" } }
+            PrefField("Name", Prefs.name) { Prefs.name = it.trim().ifBlank { "Atlas" } }
             Text(
                 if (identity.isBlank()) "Not awake yet. On first connection it writes its own personality and picks its own voice, and keeps them."
                 else identity,
@@ -1097,7 +1097,7 @@ fun SettingsScreen() {
             if (voiceNote.isNotBlank()) Text(voiceNote, color = Muted, fontSize = 13.sp)
             SoftButton(onClick = {
                 voiceNote = ""
-                Corin.announce("This is how I sound now. Not bad, or should we keep looking?")
+                Atlas.announce("This is how I sound now. Not bad, or should we keep looking?")
                 scope.launch {
                     kotlinx.coroutines.delay(6000)
                     if (provider != 0 && Speaker.lastCloudError.isNotBlank()) {
@@ -1124,7 +1124,7 @@ fun SettingsScreen() {
                                         "voice" -> {
                                             Prefs.voiceName = id; chosen = id
                                             Speaker.applyVoice()
-                                            Corin.announce("This is how I sound now.")
+                                            Atlas.announce("This is how I sound now.")
                                         }
                                         "engine" -> {
                                             Prefs.ttsEngine = id; Prefs.voiceName = ""; chosen = ""
@@ -1133,7 +1133,7 @@ fun SettingsScreen() {
                                         }
                                         else -> {
                                             Prefs.elevenVoiceId = id; Prefs.elevenVoiceName = label; eleven = label
-                                            Corin.announce("This is how I sound now.")
+                                            Atlas.announce("This is how I sound now.")
                                         }
                                     }
                                     }.padding(vertical = 12.dp, horizontal = 8.dp)
@@ -1162,7 +1162,7 @@ fun SettingsScreen() {
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
-            SoftButton(onClick = { Corin.micTest(ctx) }) { Text("Test voice and microphone") }
+            SoftButton(onClick = { Atlas.micTest(ctx) }) { Text("Test voice and microphone") }
         }
 
         Section("Buddie earbuds") {
@@ -1256,7 +1256,7 @@ fun SettingsScreen() {
                 }
             }
             Text(
-                if (vault.isBlank()) "Obsidian vault: none chosen. Pick the vault folder on this phone and ${Prefs.name} can search it, read notes, and keep each day's conversation in a Corin folder there."
+                if (vault.isBlank()) "Obsidian vault: none chosen. Pick the vault folder on this phone and ${Prefs.name} can search it, read notes, and keep each day's conversation in a Atlas folder there."
                 else "Obsidian vault: " + Uri.decode(vault).substringAfterLast(':'),
                 color = Muted, fontSize = 13.sp
             )
@@ -1267,7 +1267,7 @@ fun SettingsScreen() {
         }
 
         Section("Obelisk and local models") {
-            PrefField("Corin server URL on Obelisk (optional)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
+            PrefField("Atlas server URL on Obelisk (optional)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
             Text("Sends every exchange to your Obsidian vault and lets recall search it. Server file is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
             PrefField("Ollama URL (optional)", Prefs.ollamaUrl) { Prefs.ollamaUrl = it.trim() }
             PrefField("Ollama model", Prefs.ollamaModel) { Prefs.ollamaModel = it.trim() }

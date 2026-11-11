@@ -55,13 +55,19 @@ object Prefs {
     )
 
     fun init(c: Context) {
+        // The settings file keeps its original name so nothing is lost across the rename to Atlas.
         sp = c.getSharedPreferences("corin", Context.MODE_PRIVATE)
+        if (!sp.getBoolean("renamedToAtlas", false)) {
+            val e = sp.edit().putBoolean("renamedToAtlas", true)
+            if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
+            e.apply()
+        }
     }
 
     var apiKey by StrPref("apiKey", "")
     var model by StrPref("model", "claude-haiku-5-5")
-    var name by StrPref("name", "Corin")
-    /** Core identity Corin wrote for itself on first run. Fixed afterwards. */
+    var name by StrPref("name", "Atlas")
+    /** Core identity Atlas wrote for itself on first run. Fixed afterwards. */
     var identity by StrPref("identity", "")
     /** How the personality has shifted lately. Rewritten slowly over time. */
     var drift by StrPref("drift", "")
@@ -84,7 +90,7 @@ object Prefs {
     var localSmallTalk by BoolPref("localSmallTalk", false)
     var amberWords by StrPref("amberWords", "unlock, garage, open the door, alarm, thermostat, oven, heater")
     var redWords by StrPref("redWords", "disarm")
-    /** 0 = never listen, 1 = tap to talk, 2 = conversation window after Corin speaks */
+    /** 0 = never listen, 1 = tap to talk, 2 = conversation window after Atlas speaks */
     var listenMode by IntPref("listenMode", 2)
     var whisperBack by BoolPref("whisperBack", true)
     var triage by BoolPref("triage", true)
@@ -152,7 +158,7 @@ data class Note(val text: String, val time: Long)
 
 data class Item(val text: String, val done: Boolean)
 
-/** How Corin behaves depending on which wearable it's in. */
+/** How Atlas behaves depending on which wearable it's in. */
 object Wear {
     /** Any in-ear, private wearable: the Buddie earbuds or the Pixel Buds. */
     fun onBuds(): Boolean = Glasses.active.value == "buddie" || Glasses.active.value == "pixelbuds"
@@ -195,7 +201,7 @@ object Wear {
         else -> ""
     }
 
-    /** The line Corin says when he swaps wearables mid-session. */
+    /** The line Atlas says when he swaps wearables mid-session. */
     fun switchLine(): String = when {
         onPixelBuds() -> "Pixel Buds. It's just us now."
         onBuds() -> "Earbuds. It's just us now."
@@ -225,7 +231,7 @@ object Usage {
     }
 }
 
-/** Corin's long-term memory, Jon's notes, and the rolling conversation. */
+/** Atlas's long-term memory, Jon's notes, and the rolling conversation. */
 object Store {
     private lateinit var dir: File
     val memory = MutableStateFlow<List<String>>(emptyList())
@@ -389,7 +395,7 @@ object Store {
         return "Cleared $k."
     }
 
-    /** Record something Corin did on its own authority, for the daily digest. */
+    /** Record something Atlas did on its own authority, for the daily digest. */
     @Synchronized
     fun logAction(text: String) {
         actions.value = (listOf(Note(text, System.currentTimeMillis())) + actions.value).take(100)
@@ -473,10 +479,10 @@ object Glasses {
     val connectedSince = MutableStateFlow(0L)
     val micArmed = MutableStateFlow(false)
     /** idle, listening, thinking, speaking */
-    val corinState = MutableStateFlow("idle")
+    val atlasState = MutableStateFlow("idle")
     val lastSaid = MutableStateFlow("")
     val lastHeard = MutableStateFlow("")
-    /** The wearable Corin is speaking through: "glasses", "buddie", or empty. The most recently connected wins. */
+    /** The wearable Atlas is speaking through: "glasses", "buddie", or empty. The most recently connected wins. */
     val active = MutableStateFlow("")
 
     /** What he's wearing right now: "glasses", "Buddie earbuds", both, or empty. */

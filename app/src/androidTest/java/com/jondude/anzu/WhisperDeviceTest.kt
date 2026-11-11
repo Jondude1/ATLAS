@@ -71,7 +71,7 @@ class WhisperDeviceTest {
 
         val t0 = System.currentTimeMillis()
         val direct = runBlocking { Whisperer.transcribe(ctx, clean) }
-        Log.i("CORINTEST", "speech model, clean audio (${System.currentTimeMillis() - t0} ms): $direct")
+        Log.i("ATLASTEST", "speech model, clean audio (${System.currentTimeMillis() - t0} ms): $direct")
         assertNotNull("model failed: ${Whisperer.status.value}", direct)
         assertTrue("clean: $direct", direct!!.lowercase().contains("yellow lamps"))
 
@@ -94,7 +94,7 @@ class WhisperDeviceTest {
             i += 256
         }
         val through = runBlocking { Whisperer.transcribe(ctx, decoded) }
-        Log.i("CORINTEST", "speech model, through earbud codec: $through")
+        Log.i("ATLASTEST", "speech model, through earbud codec: $through")
         assertNotNull(through)
         val t = through!!.lowercase()
         assertTrue("through codec: $through", t.contains("yellow") && t.contains("lamps") && t.contains("night"))

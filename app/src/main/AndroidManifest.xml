@@ -47,9 +47,9 @@
         android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Corin"
+        android:label="ATLAS"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Corin">
+        android:theme="@style/Theme.Atlas">
 
         <activity
             android:name=".MainActivity"
@@ -69,7 +69,7 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:taskAffinity=""
-            android:theme="@style/Theme.Corin.Assist">
+            android:theme="@style/Theme.Atlas.Assist">
             <intent-filter>
                 <action android:name="android.intent.action.VOICE_COMMAND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -88,7 +88,7 @@
         <service
             android:name=".NotifyListener"
             android:exported="true"
-            android:label="Corin notification whisper"
+            android:label="Atlas notification whisper"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

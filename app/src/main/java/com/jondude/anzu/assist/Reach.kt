@@ -27,7 +27,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** Things Corin can do on the phone itself. Every function returns a short line for the model. */
+/** Things Atlas can do on the phone itself. Every function returns a short line for the model. */
 object Phone {
     /** Starting another app from the background needs the "display over other apps" permission. */
     private fun canLaunch(ctx: Context): Boolean = Settings.canDrawOverlays(ctx)
@@ -274,11 +274,11 @@ object Vault {
         return read(ctx, f, 6000).take(3000)
     }
 
-    /** Appends a line to today's note in the vault's Corin folder. Returns false if it couldn't. */
+    /** Appends a line to today's note in the vault's Atlas folder. Returns false if it couldn't. */
     fun appendDaily(ctx: Context, line: String): Boolean {
         val root = root(ctx) ?: return false
         return try {
-            val dir = root.findFile("Corin") ?: root.createDirectory("Corin") ?: return false
+            val dir = root.findFile("Atlas") ?: root.createDirectory("Atlas") ?: return false
             val name = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".md"
             val file = dir.findFile(name) ?: dir.createFile("text/markdown", name) ?: return false
             ctx.contentResolver.openOutputStream(file.uri, "wa")?.use { it.write((line.trimEnd() + "\n").toByteArray()) }
@@ -290,7 +290,7 @@ object Vault {
 }
 
 /**
- * Hermes on Athena: Corin's heavier-duty other half. Anything with an OpenAI-style
+ * Hermes on Athena: Atlas's heavier-duty other half. Anything with an OpenAI-style
  * chat endpoint works here (the Hermes API server, or another agent gateway).
  */
 object Hermes {

@@ -1,4 +1,4 @@
-"""Corin server for Obelisk.
+"""Atlas server for Obelisk.
 
 Gives the phone app a home on your node:
   - every exchange is appended to a daily note in your Obsidian vault
@@ -7,12 +7,12 @@ Gives the phone app a home on your node:
 
 Run:
     pip install fastapi uvicorn
-    CORIN_VAULT=/path/to/ObsidianVault uvicorn corin_server:app --host 0.0.0.0 --port 8765
+    ATLAS_VAULT=/path/to/ObsidianVault uvicorn atlas_server:app --host 0.0.0.0 --port 8765
 
 Optional, for transcribing the Buddie earbud stream with Whisper on the node
 (the phone only falls back to this when Android's own recognizer can't do it):
     pip install faster-whisper numpy
-    CORIN_WHISPER=base.en   (model size; default base.en)
+    ATLAS_WHISPER=base.en   (model size; default base.en)
 
 Then put http://<obelisk-tailscale-name>:8765 in the app under
 Settings -> Obelisk and local models. Keep it on Tailscale only: there is no login.
@@ -26,9 +26,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-VAULT = Path(os.environ.get("CORIN_VAULT", str(Path.home() / "Obsidian"))).expanduser()
-DAILY = VAULT / "Corin" / "Daily"
-app = FastAPI(title="Corin on Obelisk")
+VAULT = Path(os.environ.get("ATLAS_VAULT", str(Path.home() / "Obsidian"))).expanduser()
+DAILY = VAULT / "Atlas" / "Daily"
+app = FastAPI(title="Atlas on Obelisk")
 state = {"device": "unknown", "since": 0.0, "started": time.time()}
 
 
@@ -42,13 +42,13 @@ class Presence(BaseModel):
     device: str
 
 
-@app.post("/corin/log")
+@app.post("/atlas/log")
 def log(entry: LogEntry):
     DAILY.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
     path = DAILY / f"{now:%Y-%m-%d}.md"
     if not path.exists():
-        path.write_text(f"# Corin log, {now:%A %B %d %Y}\n\n", encoding="utf-8")
+        path.write_text(f"# Atlas log, {now:%A %B %d %Y}\n\n", encoding="utf-8")
     text = entry.text.replace("\n", " ").strip()
     with path.open("a", encoding="utf-8") as f:
         if entry.speaker == "journal":
@@ -58,19 +58,19 @@ def log(entry: LogEntry):
     return {"ok": True}
 
 
-@app.post("/corin/presence")
+@app.post("/atlas/presence")
 def presence(p: Presence):
     state["device"] = p.device
     state["since"] = time.time()
     return {"ok": True}
 
 
-@app.get("/corin/presence")
+@app.get("/atlas/presence")
 def where():
     return {"device": state["device"], "since": state["since"]}
 
 
-@app.get("/corin/search")
+@app.get("/atlas/search")
 def search(q: str, limit: int = 8):
     terms = [t for t in re.split(r"\W+", q.lower()) if len(t) > 2]
     hits = []
@@ -89,7 +89,7 @@ def search(q: str, limit: int = 8):
     return {"results": [h[1] for h in hits[:limit]]}
 
 
-@app.get("/corin/status")
+@app.get("/atlas/status")
 def status():
     return {
         "ok": True,
@@ -109,11 +109,11 @@ def _model():
     if _whisper is None:
         from faster_whisper import WhisperModel
 
-        _whisper = WhisperModel(os.environ.get("CORIN_WHISPER", "base.en"), compute_type="auto")
+        _whisper = WhisperModel(os.environ.get("ATLAS_WHISPER", "base.en"), compute_type="auto")
     return _whisper
 
 
-@app.post("/corin/transcribe")
+@app.post("/atlas/transcribe")
 async def transcribe(request: Request):
     """Body: raw 16 kHz mono 16-bit little-endian PCM. Returns {"text": ...}."""
     pcm = await request.body()
