@@ -972,7 +972,7 @@ class AtlasTest {
                 val t = i * ms / 24
                 val v = amp * kotlin.math.sin(2 * Math.PI * cycles * i / 24).toFloat()
                 val o = other * kotlin.math.sin(2 * Math.PI * i / 24).toFloat()
-                if (axisPitch) H.Sample(t, v, o) else H.Sample(t, o, v)
+                if (axisPitch) com.jondude.anzu.assist.HeadGesture.Sample(t, v, o) else com.jondude.anzu.assist.HeadGesture.Sample(t, o, v)
             }
         assertEquals("nod", H.detect(wave(true, 0.3f, 1.5f)))
         assertEquals("shake", H.detect(wave(false, 0.35f, 1.5f)))
