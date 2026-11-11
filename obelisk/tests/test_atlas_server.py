@@ -801,6 +801,56 @@ def test_sunday_brief_uses_parser_when_available(atlas, monkeypatch):
     assert body["brief"] == "A quiet, productive week overall."
 
 
+def test_where_was_i_uses_the_daily_log_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/log", json={"speaker": "Jon", "device": "pixel", "text": "let's look at the garage door fix"})
+
+    resp = client.get("/atlas/where-was-i")
+    assert resp.status_code == 200
+    assert "garage door fix" in resp.json()["answer"]
+
+
+def test_where_was_i_falls_back_through_captures_and_loops(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/capture", json={"text": "idea: shop banner redesign"})
+
+    resp = client.get("/atlas/where-was-i")
+    assert "shop banner redesign" in resp.json()["answer"]
+
+
+def test_where_was_i_says_so_when_nothing_recent(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    resp = client.get("/atlas/where-was-i")
+    assert resp.json()["answer"] == "Nothing recent to pick back up on."
+
+
+def test_where_was_i_uses_parser_when_available(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "You were just looking at the garage door fix."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/log", json={"speaker": "Jon", "device": "pixel", "text": "garage door"})
+    resp = client.get("/atlas/where-was-i")
+    assert resp.json()["answer"] == "You were just looking at the garage door fix."
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

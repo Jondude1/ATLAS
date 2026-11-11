@@ -72,6 +72,8 @@ CATCH_UP_MAX_HOURS = int(os.environ.get("ATLAS_CATCH_UP_MAX_HOURS", "72"))
 SUNDAY_BRIEF_HOUR = int(os.environ.get("ATLAS_SUNDAY_BRIEF_HOUR", "9"))  # local 24h clock, Sunday
 SUNDAY_BRIEF_LOOKBACK_DAYS = int(os.environ.get("ATLAS_SUNDAY_BRIEF_LOOKBACK_DAYS", "7"))
 
+WHERE_WAS_I_LOOKBACK_MIN = int(os.environ.get("ATLAS_WHERE_WAS_I_LOOKBACK_MIN", "180"))
+
 # Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
 # person/car/dog/cat on its cameras today, no printer-specific camera or
 # zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
@@ -937,6 +939,84 @@ async def sunday_brief_compose():
     return await _compose_sunday_brief()
 
 
+def _recent_daily_log_lines(limit: int = 8) -> list[str]:
+    if not DAILY.exists():
+        return []
+    today_path = DAILY / f"{datetime.now():%Y-%m-%d}.md"
+    path = today_path if today_path.exists() else None
+    if path is None:
+        files = sorted(DAILY.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        path = files[0] if files else None
+    if path is None:
+        return []
+    try:
+        lines = [l.strip() for l in path.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+    except OSError:
+        return []
+    lines = [l for l in lines if not l.startswith("# Atlas log")]
+    return lines[-limit:]
+
+
+async def _compose_where_was_i() -> dict:
+    now_ms = _now_ms()
+    cutoff = now_ms - WHERE_WAS_I_LOOKBACK_MIN * 60 * 1000
+    log_lines = _recent_daily_log_lines(limit=8)
+    with hub_db() as conn:
+        recent_reports = conn.execute(
+            "SELECT * FROM reports WHERE at >= ? ORDER BY at DESC LIMIT 5", (cutoff,)
+        ).fetchall()
+        latest_capture = conn.execute("SELECT * FROM captures ORDER BY created_at DESC LIMIT 1").fetchone()
+        latest_loop = conn.execute(
+            "SELECT * FROM open_loops WHERE acked_at IS NULL ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    pieces = []
+    if log_lines:
+        pieces.append("Recent log:\n" + "\n".join(log_lines))
+    if recent_reports:
+        pieces.append(
+            "Recent reports:\n"
+            + "\n".join(f"- [{r['app']}] {r['title']}: {r['body']}".strip() for r in recent_reports)
+        )
+    if latest_capture:
+        pieces.append(f"Most recent quick-capture: {latest_capture['text']}")
+    if latest_loop:
+        pieces.append(f"Most recent still-open loop: {latest_loop['text']}")
+    context_text = "\n\n".join(pieces)
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Remind the person what they were just doing or talking about, from the "
+                    "activity given. One or two short spoken sentences, plain English, no "
+                    "markdown. If there's nothing recent, say so briefly."
+                ),
+            },
+            {"role": "user", "content": context_text or "(nothing recent)"},
+        ],
+        max_tokens=100,
+        timeout_s=30,
+    )
+    if reply is None:
+        if log_lines:
+            reply = f"Last logged: {log_lines[-1]}"
+        elif recent_reports:
+            r = recent_reports[0]
+            reply = f"Last thing noted: [{r['app']}] {r['title']}"
+        elif latest_capture:
+            reply = f"You last jotted down: {latest_capture['text']}"
+        elif latest_loop:
+            reply = f"You still need to: {latest_loop['text']}"
+        else:
+            reply = "Nothing recent to pick back up on."
+    return {"answer": reply, "updated": now_ms}
+
+
+@app.get("/atlas/where-was-i", dependencies=[Depends(require_token)])
+async def where_was_i():
+    return await _compose_where_was_i()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -1682,6 +1762,12 @@ def mcp_sunday_brief() -> dict:
 async def mcp_sunday_brief_compose() -> dict:
     """Compose the Sunday Brief now instead of waiting for Sunday morning."""
     return await sunday_brief_compose()
+
+
+@mcp.tool
+async def mcp_where_was_i() -> dict:
+    """Remind the person what they were just doing or talking about."""
+    return await where_was_i()
 
 
 @mcp.tool
