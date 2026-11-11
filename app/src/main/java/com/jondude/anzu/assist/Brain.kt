@@ -1054,6 +1054,20 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     ): String = withContext(Dispatchers.IO) {
         // "Say that again" repeats the last full answer without a model call.
         if (Spoken.isRepeatRequest(userText) && Spoken.lastFull.isNotBlank()) return@withContext Spoken.lastFull
+        // Quick capture: "idea: …", "note …", "todo …", "remind me to …" (no time in it) is filed at once, no model needed.
+        Capture.parse(userText)?.let { (kind, text) ->
+            val said = Capture.file(ctx, kind, text)
+            record(userText, said)
+            return@withContext said
+        }
+        // "Catch me up" asks the hub for everything reported since he last asked.
+        if (Hub.configured() && Spoken.isCatchUpRequest(userText)) {
+            val text = Hub.catchMeUp()?.let { Spoken.trimWords(it, 120) }
+                ?: if (Hub.needsToken) "The hub wants its token before it'll catch you up. It goes in Settings, Obelisk."
+                else "I can't reach the hub on Obelisk right now, so I can't catch you up."
+            record(userText, text)
+            return@withContext text
+        }
         // "Brief me" goes straight to the hub: fast, held to its spoken length, and it works even with no model.
         if (Hub.configured() && Spoken.isBriefRequest(userText)) {
             val b = Hub.brief(0)
@@ -1320,11 +1334,15 @@ object Routing {
 /** Rules for what gets spoken: briefs are held to a word budget, because every word costs attention in the ear. */
 object Spoken {
     private val briefAsk = Regex(
-        "^(\\W*(hey |ok |okay )?(atlas\\W*)?)?(brief me|(give me |what'?s |read me )?(the |my )?(morning |evening |daily )?(brief|briefing|rundown)|catch me up|what did i miss)\\W*(please)?\\W*$",
+        "^(\\W*(hey |ok |okay )?(atlas\\W*)?)?(brief me|(give me |what'?s |read me )?(the |my )?(morning |evening |daily )?(brief|briefing|rundown))\\W*(please)?\\W*$",
         RegexOption.IGNORE_CASE
     )
 
     fun isBriefRequest(text: String): Boolean = briefAsk.matches(text.trim())
+
+    private val catchUpAsk = Regex("^(\\W*(hey |ok |okay )?(atlas\\W*)?)?(catch me up|what('?s| has) (been )?(going on|happening)( while i was (out|gone|away))?|what did i miss)\\W*(please)?\\W*$", RegexOption.IGNORE_CASE)
+
+    fun isCatchUpRequest(text: String): Boolean = catchUpAsk.matches(text.trim())
 
     private val repeatAsk = Regex(
         "^(\\W*(atlas\\W*)?)?(say (that|it) again|repeat (that|it)|what did you (just )?say|come again|pardon|sorry\\??)\\W*(please)?\\W*$",
@@ -1453,5 +1471,50 @@ object Helios {
         if (code in 200..299) pick(body) else null
     } catch (e: Exception) {
         null
+    }
+}
+
+
+/**
+ * Quick-Capture (roadmap #12, app half): "Atlas, idea: …", "note …", "todo …", "remind me to …". Saved on the phone at
+ * once, filed with the hub as a capture report (the hub sorts the day's captures nightly), and anything that needs
+ * follow-up also becomes an open loop that rides the brief until it's done.
+ */
+object Capture {
+    private val pattern = Regex(
+        "^\\W*(?:(?:hey |ok |okay )?atlas\\W*)?(idea|note|todo|to-?do|remind me(?: to)?|remember to)\\b[\\s:,.-]*(.+)$",
+        RegexOption.IGNORE_CASE
+    )
+    private val timeWords = Regex("(?i)\\b(in \\d+|at \\d|tomorrow|tonight|this (morning|afternoon|evening)|next (week|month)|on (mon|tues|wednes|thurs|fri|satur|sun)day|minutes?|hours?|o'?clock|noon|midnight|when i (get|arrive|leave))\\b")
+
+    /** (kind, text) if this is a quick capture the phone can file itself; null to let the model handle it. */
+    fun parse(said: String): Pair<String, String>? {
+        val m = pattern.find(said.trim()) ?: return null
+        val trigger = m.groupValues[1].lowercase()
+        val text = m.groupValues[2].trim().trimEnd('.', '!').replaceFirstChar { it.uppercase() }
+        if (text.split(Regex("\\s+")).size < 2) return null
+        val kind = when {
+            trigger.startsWith("idea") -> "idea"
+            trigger.startsWith("note") -> "note"
+            trigger.startsWith("remind") || trigger.startsWith("remember") -> "remind"
+            else -> "todo"
+        }
+        // A reminder with a time in it is a timer or a place reminder: the model does those properly.
+        if (kind == "remind" && timeWords.containsMatchIn(text)) return null
+        return kind to text
+    }
+
+    fun label(kind: String) = when (kind) { "idea" -> "Idea"; "note" -> "Note"; "remind" -> "Reminder"; else -> "To do" }
+
+    fun file(ctx: Context, kind: String, text: String): String {
+        Store.addNote("${label(kind)}: $text")
+        val key = "capture-${System.currentTimeMillis()}"
+        Hub.report("capture", kind, text, key = key)
+        if (kind == "remind" || kind == "todo") Atlas.scope.launch(Dispatchers.IO) { Hub.openLoop(text, "capture", key) }
+        return when (kind) {
+            "idea" -> "Saved the idea."
+            "note" -> "Noted."
+            else -> "Got it. I'll keep it on your list until it's done."
+        }
     }
 }

@@ -182,6 +182,29 @@ object Hub {
         }
     }
 
+    /** Blocking. Posts an open loop (it rides the brief until acked). */
+    fun openLoop(text: String, source: String, key: String?) {
+        if (!configured()) return
+        try {
+            val o = JSONObject().put("text", text).put("source", source)
+            if (key != null) o.put("key", key)
+            Net.postJson(base() + "/atlas/open-loop", auth(), o.toString(), 8_000)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Blocking. "Catch me up": what's been reported since he last asked, composed by the hub; null if unreachable. */
+    fun catchMeUp(): String? {
+        if (!configured()) return null
+        return try {
+            val (code, body) = Net.get(base() + "/atlas/catch-me-up", auth(), 60_000)
+            needsToken = code == 401 || code == 403
+            if (code in 200..299) JSONObject(body).optString("summary").takeIf { it.isNotBlank() } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Builds a report in the hub's format. */
     fun reportJson(app: String, title: String, body: String, priority: String, key: String?): JSONObject {
         val p = priority.lowercase().takeIf { it in setOf("low", "normal", "urgent") } ?: "normal"

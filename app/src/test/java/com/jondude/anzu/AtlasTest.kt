@@ -702,7 +702,7 @@ class AtlasTest {
     @Test
     fun spokenBriefKeepsToItsBudget() {
         val S = com.jondude.anzu.assist.Spoken
-        listOf("brief me", "Atlas, brief me", "what's the brief?", "give me the morning briefing", "catch me up", "What did I miss")
+        listOf("brief me", "Atlas, brief me", "what's the brief?", "give me the morning briefing")
             .forEach { assertTrue(it, S.isBriefRequest(it)) }
         listOf("brief me on the garage door later", "write a brief for work").forEach { assertFalse(it, S.isBriefRequest(it)) }
         assertEquals(120, S.budget(8)); assertEquals(60, S.budget(21))
@@ -894,5 +894,22 @@ class AtlasTest {
         assertEquals("work hours", r(hour = 10, weekday = true))
         assertNull(r(hour = 10, weekday = true, work = false))
         assertNull(r(event = "Dentist"))
+    }
+
+    @Test
+    fun quickCaptureAndCatchUp() {
+        val C = com.jondude.anzu.assist.Capture
+        assertEquals("idea" to "Glow-in-the-dark coloring book for kids", C.parse("Atlas, idea: glow-in-the-dark coloring book for kids"))
+        assertEquals("todo" to "Order more PLA", C.parse("todo order more PLA."))
+        assertEquals("remind" to "Call the vet about Fiona", C.parse("remind me to call the vet about Fiona"))
+        assertEquals("note" to "Garage door sticks in the cold", C.parse("Atlas note, garage door sticks in the cold"))
+        assertNull(C.parse("remind me to call the vet in 20 minutes"))   // a timer: the model handles it
+        assertNull(C.parse("what's a good idea for dinner?"))
+        assertNull(C.parse("note"))
+        val S = com.jondude.anzu.assist.Spoken
+        assertTrue(S.isCatchUpRequest("Atlas, catch me up"))
+        assertTrue(S.isCatchUpRequest("what did I miss?"))
+        assertTrue(S.isCatchUpRequest("what's been going on while I was out"))
+        assertFalse(S.isBriefRequest("catch me up"))
     }
 }

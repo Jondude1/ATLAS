@@ -1078,6 +1078,17 @@ fun NotesScreen() {
             }
         }
 
+        val captures = notes.filter { n -> listOf("Idea: ", "Note: ", "Reminder: ", "To do: ").any { n.text.startsWith(it) } }
+        if (captures.isNotEmpty()) Section("Captured") {
+            captures.takeLast(12).reversed().forEach { n ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text(n.text.substringBefore(": "), color = Gold, fontSize = 13.sp)
+                    Text(n.text.substringAfter(": "), color = Cream, fontSize = 16.sp, lineHeight = 22.sp)
+                    Text(timeAgo(n.time), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Light)
+                }
+            }
+            Text("Say \"${Prefs.name}, idea: …\", \"note …\", \"todo …\" or \"remind me to …\". Your hub sorts them overnight.", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Light)
+        }
         Section("Checklists") {
             if (lists.isEmpty()) EmptyHint("Say “add milk to my grocery list” and then “what's my next step?”")
             lists.forEach { (name, listItems) ->
