@@ -152,7 +152,7 @@ private val Muted: Color get() = if (isDark) Color(0xFF8E8E93) else Color(0xFF6B
 private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
 private val Panel: Color get() = if (isDark) Color(0xFF161616) else Color(0xFFF5F5F5)
 private val Fill: Color get() = if (isDark) Color(0xFF242424) else Color(0xFFE8E8E8)
-private val Hairline: Color get() = if (isDark) Color(0xFF2A2A2A) else Color(0xFFDDDDDD)
+private val Hairline: Color get() = if (isDark) Color(0xFF333333) else Color(0xFFD9D9D9)
 
 /** The display face (Bricolage Grotesque) for titles and Atlas's own words. */
 private val Display = FontFamily(
@@ -368,15 +368,8 @@ fun Section(title: String, content: @Composable () -> Unit) {
             title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 20.sp,
             modifier = Modifier.padding(start = 6.dp, bottom = 8.dp, top = 6.dp)
         )
-        Card(
-            Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Panel),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-        ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                content()
-            }
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            content()
         }
     }
 }
@@ -422,12 +415,23 @@ fun Bubble(speaker: String, text: String, mine: Boolean) {
     }
 }
 
+/** A small outlined action: 40dp tall, hairline border, no fill. */
+@Composable
+fun QuietButton(label: String, onClick: () -> Unit) {
+    androidx.compose.material3.OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.height(40.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Hairline),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cream)
+    ) { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
+}
+
 /** One cell of the home screen's grid. */
 @Composable
 fun Tile(modifier: Modifier, tint: Color = Panel, content: @Composable () -> Unit) {
     Column(
         modifier.clip(RoundedCornerShape(16.dp)).background(tint).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.SpaceBetween
     ) { content() }
 }
 
@@ -568,11 +572,18 @@ fun HomeScreen(resumes: Int) {
             .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        LargeTitle(Prefs.name.uppercase())
-        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(20.dp))
-            Orb(state, 200.dp)
-            // No running transcript here: one quiet status line, and a typed answer only while it's fresh.
+        // Layout from the design review: title, the ring centred with one status line,
+        // then metrics, quick actions, and the message field resting at the bottom.
+        Text(
+            Prefs.name.uppercase(), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream,
+            modifier = Modifier.padding(top = 16.dp)
+        )
+        Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Tapping the ring starts talking.
+            Box(
+                Modifier.clip(CircleShape).clickable(onClickLabel = "Talk") { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }
+            ) { Orb(state, 168.dp) }
+            Spacer(Modifier.height(16.dp))
             Text(
                 when (state) {
                     "listening" -> "Listening"
@@ -582,88 +593,65 @@ fun HomeScreen(resumes: Int) {
                 },
                 fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Cream
             )
-            Spacer(Modifier.height(20.dp))
             if (replyUntil > 0 && said.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    said, color = Muted, fontSize = 16.sp, lineHeight = 23.sp,
-                    textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp)
-                )
+                Spacer(Modifier.height(12.dp))
+                Text(said, color = Muted, fontSize = 16.sp, lineHeight = 23.sp, textAlign = TextAlign.Center)
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Tile(Modifier.weight(1.5f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
-                Text("Wearing", color = Muted, fontSize = 13.sp)
-                Column {
-                    Text(
-                        when {
-                            !connected -> "Nothing"
-                            activeWear == "buddie" -> "Earbuds"
-                            activeWear == "pixelbuds" -> "Pixel Buds"
-                            else -> "Glasses"
-                        },
-                        fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream
-                    )
-                    Text(
-                        when {
-                            !connected -> "Put them on and I'm there"
-                            activeWear == "buddie" -> "Private, hands-free"
-                            activeWear == "pixelbuds" -> "Private"
-                            else -> "Open-ear, discreet"
-                        },
-                        color = Muted, fontSize = 13.sp
-                    )
-                }
+        Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Tile(Modifier.weight(1f).height(80.dp).clip(RoundedCornerShape(16.dp)).clickable { devicesOpen = true }) {
+                Text("Wearing", color = Muted, fontSize = 12.sp)
+                Text(
+                    when {
+                        !connected -> "Nothing"
+                        activeWear == "buddie" -> "Earbuds"
+                        else -> "Glasses"
+                    },
+                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream, maxLines = 1
+                )
             }
-            Tile(Modifier.weight(1f).fillMaxHeight(), tint = if (connected && battery in 0..20) MaterialTheme.colorScheme.error.copy(alpha = 0.18f) else Panel) {
-                Text("Battery", color = Muted, fontSize = 13.sp)
+            Tile(Modifier.weight(1f).height(80.dp)) {
+                Text("Battery", color = Muted, fontSize = 12.sp)
                 Text(
                     if (connected && battery >= 0) "$battery%" else "–",
-                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream
+                    fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp,
+                    color = if (connected && battery in 0..20) MaterialTheme.colorScheme.error else Cream
                 )
             }
         }
-        TextField(
+        Spacer(Modifier.height(24.dp))
+        val quiet = quietUntil > System.currentTimeMillis()
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            QuietButton("Speak up") { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) }
+            QuietButton(if (quiet) "Resume" else "Quiet 1h") {
+                Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
+                quietUntil = Prefs.quietUntil
+            }
+        }
+        if (quiet) Text(
+            "Staying quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))}.",
+            color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        androidx.compose.material3.OutlinedTextField(
             value = typed,
             onValueChange = { typed = it },
-            label = { Text("Type to ${Prefs.name}") },
+            placeholder = { Text("Type to ${Prefs.name}", color = Muted) },
             singleLine = true, // so Enter on a hardware or wrist keyboard sends
             shape = RoundedCornerShape(28.dp),
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = Panel, focusedContainerColor = Panel,
-                unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
-                unfocusedLabelColor = Muted, focusedLabelColor = Gold, cursorColor = Gold
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = Color.Transparent, focusedContainerColor = Color.Transparent,
+                unfocusedBorderColor = Hairline, focusedBorderColor = Gold, cursorColor = Gold
             ),
             trailingIcon = {
                 IconButton(onClick = { send() }) { Icon(Icons.Filled.Send, contentDescription = "Send", tint = Gold) }
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() })
         )
-        val quiet = quietUntil > System.currentTimeMillis()
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) },
-                modifier = Modifier.weight(1f).height(52.dp)
-            ) { Text("Talk", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
-            SoftButton(
-                onClick = { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) },
-                modifier = Modifier.weight(1f).height(52.dp)
-            ) { Text("Speak up", maxLines = 1) }
-            SoftButton(
-                onClick = {
-                    Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
-                    quietUntil = Prefs.quietUntil
-                },
-                modifier = Modifier.weight(1f).height(52.dp)
-            ) { Text(if (quiet) "Resume" else "Quiet 1h", maxLines = 1) }
-        }
-        if (quiet) Text(
-            "Staying quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))}.",
-            color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp)
-        )
+        Spacer(Modifier.height(12.dp))
         if (!awake && Prefs.apiKey.isNotBlank()) {
             Button(enabled = !waking, modifier = Modifier.fillMaxWidth().height(52.dp), onClick = {
                 waking = true
