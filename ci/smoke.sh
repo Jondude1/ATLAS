@@ -102,6 +102,7 @@ check "Settings scrolled"
 
 # Voice picker: open the phone voice list from the Voice section.
 tap "Corin"; sleep 1; tap "Settings"; sleep 2
+tap "Voice" || fail "Voice settings row not found: $(texts)"; sleep 2; shot settings_voice_page
 for i in $(seq 1 20); do has "Choose voice" && break; adb shell input swipe 12 1400 12 900 300; sleep 1; done
 tap "Choose voice" || fail "voice picker button not found: $(texts)"
 sleep 3

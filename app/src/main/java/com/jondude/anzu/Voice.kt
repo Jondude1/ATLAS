@@ -81,48 +81,21 @@ object Speaker : TextToSpeech.OnInitListener {
         tts?.voices.orEmpty()
             .filter { it.locale.language == "en" }
             .sortedWith(compareByDescending<android.speech.tts.Voice> { it.quality }.thenBy { it.name })
-            .map {
-                val quality = when {
-                    it.quality >= android.speech.tts.Voice.QUALITY_VERY_HIGH -> "very high"
-                    it.quality >= android.speech.tts.Voice.QUALITY_HIGH -> "high"
-                    it.quality >= android.speech.tts.Voice.QUALITY_NORMAL -> "normal"
-                    else -> "low"
+            .let { sorted ->
+                // People can't tell "en-au-x-aua-local" from "en-au-x-aub-local"; number them per country instead.
+                val seen = HashMap<String, Int>()
+                sorted.map {
+                    val country = it.locale.displayCountry.ifBlank { "English" }
+                    val n = (seen[country] ?: 0) + 1
+                    seen[country] = n
+                    val quality = when {
+                        it.quality >= android.speech.tts.Voice.QUALITY_VERY_HIGH -> "best quality"
+                        it.quality >= android.speech.tts.Voice.QUALITY_HIGH -> "high quality"
+                        else -> "standard"
+                    }
+                    it.name to "$country $n · $quality" + (if (it.isNetworkConnectionRequired) " · needs internet" else "")
                 }
-                it.name to "${it.locale.displayCountry.ifBlank { "English" }} · $quality" +
-                    (if (it.isNetworkConnectionRequired) " · needs internet" else "") + " · ${it.name}"
             }
-    } catch (e: Exception) {
-        emptyList()
-    }
-
-    override fun onInit(status: Int) {
-        val t = tts ?: return
-        if (status != TextToSpeech.SUCCESS) return
-        t.setAudioAttributes(attrs)
-        ready = true
-        applyVoice()
-        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {
-                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
-            }
-
-            override fun onError(utteranceId: String?, errorCode: Int) {
-                utteranceId?.let { waiters.remove(it)?.complete(Unit) }
-            }
-        })
-    }
-
-    /** Offline English voices Corin can choose from. */
-    fun voices(): List<String> = try {
-        tts?.voices.orEmpty()
-            .filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
-            .map { it.name }.sorted().take(16)
     } catch (e: Exception) {
         emptyList()
     }

@@ -80,6 +80,33 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.unit.Dp
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -171,9 +198,10 @@ private fun fieldColors() = TextFieldDefaults.colors(
 
 /** A quiet secondary button: tinted fill, no outline. */
 @Composable
-fun SoftButton(onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
+fun SoftButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable () -> Unit) {
     Button(
         onClick = onClick,
+        modifier = modifier,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(containerColor = Gold.copy(alpha = 0.14f), contentColor = Gold),
         elevation = null
@@ -286,11 +314,13 @@ fun AppRoot(resumes: Int) {
                     }
                 }
             }
-            when (tab) {
-                0 -> HomeScreen(resumes)
-                1 -> NotesScreen()
-                2 -> WhisperScreen()
-                else -> SettingsScreen()
+            Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { t ->
+                when (t) {
+                    0 -> HomeScreen(resumes)
+                    1 -> NotesScreen()
+                    2 -> WhisperScreen()
+                    else -> SettingsScreen()
+                }
             }
         }
     }
@@ -305,11 +335,50 @@ fun LargeTitle(text: String) {
     )
 }
 
-/** A titled group of related controls on one rounded panel. */
+/** Settings is an index of pages; this tells each Section whether it is a row in the index or the open page. */
+class SettingsNav(val page: String?, val open: (String) -> Unit)
+
+val LocalSettingsNav = compositionLocalOf<SettingsNav?> { null }
+
+private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
+    "Brain" to (Icons.Filled.Star to "API key, model, what it knows about you"),
+    "Identity" to (Icons.Filled.Face to "Name and personality"),
+    "Presence" to (Icons.Filled.Favorite to "When and how often it speaks up"),
+    "Glasses and earbuds" to (Icons.Filled.Person to "How it behaves in each wearable"),
+    "Voice" to (Icons.Filled.PlayArrow to "Phone voices, ElevenLabs, custom"),
+    "Listening" to (Icons.Filled.Phone to "Microphone and talking back"),
+    "Buddie earbuds" to (Icons.Filled.Build to "Wake word, stream, diagnostics"),
+    "Home Assistant" to (Icons.Filled.Home to "Your house and what needs a spoken okay"),
+    "Hermes and your vault" to (Icons.Filled.Share to "Hand-offs to Hermes, Obsidian"),
+    "Obelisk and local models" to (Icons.Filled.Lock to "Your own server and models"),
+    "App" to (Icons.Filled.Info to "Version, updates, usage")
+)
+
+/** A titled group of related controls on one rounded panel. Inside Settings it doubles as a page. */
 @Composable
 fun Section(title: String, content: @Composable () -> Unit) {
+    val nav = LocalSettingsNav.current
+    if (nav != null && nav.page == null) {
+        val (icon, subtitle) = settingsIndex[title] ?: (Icons.Filled.Settings to "")
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel)
+                .clickable { nav.open(title) }.padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(Gold.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = Gold, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(title, color = Cream, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                if (subtitle.isNotBlank()) Text(subtitle, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
+        }
+        return
+    }
+    if (nav != null && nav.page != title) return
     Column {
-        Text(
+        if (nav == null) Text(
             title, fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp,
             modifier = Modifier.padding(start = 6.dp, bottom = 8.dp, top = 6.dp)
         )
@@ -319,9 +388,50 @@ fun Section(title: String, content: @Composable () -> Unit) {
             colors = CardDefaults.cardColors(containerColor = Panel),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 content()
             }
+        }
+    }
+}
+
+/** A label on the left and its current value on the right. */
+@Composable
+fun InfoRow(label: String, value: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(label, color = Muted, fontSize = 15.sp, modifier = Modifier.width(132.dp))
+        Text(value, color = Cream, fontSize = 15.sp, modifier = Modifier.weight(1f))
+    }
+}
+
+/** One thing still to set up, with the button that does it. */
+@Composable
+fun SetupRow(title: String, why: String, action: String, onClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(why, color = Muted, fontSize = 13.sp, lineHeight = 17.sp)
+        }
+        Button(onClick = onClick) { Text(action) }
+    }
+}
+
+/** A gentle placeholder for a list with nothing in it yet. */
+@Composable
+fun EmptyHint(text: String) {
+    Text(text, color = Muted, fontSize = 15.sp, lineHeight = 21.sp)
+}
+
+/** One line of today's conversation as a chat bubble. */
+@Composable
+fun Bubble(speaker: String, text: String, mine: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+        Column(
+            Modifier.fillMaxWidth(0.86f).clip(RoundedCornerShape(20.dp))
+                .background(if (mine) Gold.copy(alpha = 0.16f) else Panel).padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            Text(speaker, color = if (mine) Gold else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(text, color = Cream, fontSize = 15.sp, lineHeight = 21.sp)
         }
     }
 }
@@ -513,69 +623,109 @@ fun HomeScreen(resumes: Int) {
                 )
             }
         }
-        Section("Talk") {
-            TextField(
-                value = typed,
-                onValueChange = { typed = it },
-                label = { Text("Type to ${Prefs.name}") },
-                singleLine = true, // so Enter on a hardware or wrist keyboard sends
-                shape = RoundedCornerShape(16.dp),
-                colors = fieldColors(),
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { send() })
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) }) { Text("Talk") }
-                SoftButton(onClick = { send() }) { Text("Send") }
-                SoftButton(onClick = {
-                    GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW)
-                }) { Text("Speak up") }
-            }
-            val quiet = quietUntil > System.currentTimeMillis()
-            SoftButton(onClick = {
-                Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
-                quietUntil = Prefs.quietUntil
-            }) { Text(if (quiet) "Quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))} · resume" else "Quiet for an hour") }
-            if (!awake && Prefs.apiKey.isNotBlank()) {
-                Button(enabled = !waking, onClick = {
-                    waking = true
-                    scope.launch {
-                        val first = Brain.awaken()
-                        waking = false
-                        awake = Prefs.identity.isNotBlank()
-                        if (first != null) Corin.announce(first)
+        TextField(
+            value = typed,
+            onValueChange = { typed = it },
+            label = { Text("Type to ${Prefs.name}") },
+            singleLine = true, // so Enter on a hardware or wrist keyboard sends
+            shape = RoundedCornerShape(28.dp),
+            colors = TextFieldDefaults.colors(
+                unfocusedContainerColor = Panel, focusedContainerColor = Panel,
+                unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
+                unfocusedLabelColor = Muted, focusedLabelColor = Gold, cursorColor = Gold
+            ),
+            trailingIcon = {
+                IconButton(onClick = { send() }) { Icon(Icons.Filled.Send, contentDescription = "Send", tint = Gold) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() })
+        )
+        val quiet = quietUntil > System.currentTimeMillis()
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = { ctx.startActivity(Intent(ctx, AssistActivity::class.java)) },
+                modifier = Modifier.weight(1f).height(52.dp)
+            ) { Text("Talk", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            SoftButton(
+                onClick = { GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW) },
+                modifier = Modifier.weight(1f).height(52.dp)
+            ) { Text("Speak up", maxLines = 1) }
+            SoftButton(
+                onClick = {
+                    Prefs.quietUntil = if (quiet) 0L else System.currentTimeMillis() + 60 * 60_000
+                    quietUntil = Prefs.quietUntil
+                },
+                modifier = Modifier.weight(1f).height(52.dp)
+            ) { Text(if (quiet) "Resume" else "Quiet 1h", maxLines = 1) }
+        }
+        if (quiet) Text(
+            "Staying quiet until ${SimpleDateFormat("h:mm a", Locale.US).format(Date(quietUntil))}.",
+            color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp)
+        )
+        if (!awake && Prefs.apiKey.isNotBlank()) {
+            Button(enabled = !waking, modifier = Modifier.fillMaxWidth().height(52.dp), onClick = {
+                waking = true
+                scope.launch {
+                    val first = Brain.awaken()
+                    waking = false
+                    awake = Prefs.identity.isNotBlank()
+                    if (first != null) Corin.announce(first)
+                }
+            }) { Text(if (waking) "Coming online…" else "Wake ${Prefs.name} for the first time") }
+        }
+
+        val overlay = remember(resumes) { Settings.canDrawOverlays(ctx) }
+        if (missing.isNotEmpty() || !listenerOn || !unrestricted || !overlay || Prefs.apiKey.isBlank()) {
+            Section("Finish setting up") {
+                if (Prefs.apiKey.isBlank()) Text("Add your Anthropic API key under Settings → Brain so ${Prefs.name} can think.", color = Cream, fontSize = 15.sp)
+                if (missing.isNotEmpty()) SetupRow(
+                    "Permissions", "Bluetooth, microphone, notifications, location, calendar, contacts, and texts and calls on your say-so.", "Grant"
+                ) { launcher.launch(REQUESTED) }
+                if (!listenerOn) SetupRow("Notification access", "So ${Prefs.name} can read messages to you.", "Allow") {
+                    ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
+                if (!unrestricted) SetupRow("Background running", "Keeps ${Prefs.name} talking while the phone is in your pocket.", "Allow") {
+                    try {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+                        )
+                    } catch (_: Exception) {
                     }
-                }) { Text(if (waking) "Coming online…" else "Wake ${Prefs.name} for the first time") }
+                }
+                if (!overlay) SetupRow("Opening apps", "Lets ${Prefs.name} open apps, start navigation and set alarms from your pocket.", "Allow") {
+                    try {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+                    } catch (_: Exception) {
+                    }
+                }
             }
         }
 
         val today = remember(said, heard, resumes) {
-            Store.todayLog().lines().filter { it.isNotBlank() }.takeLast(10)
-                .map { it.removePrefix("- ").replace("**", "") }
+            val line = Regex("^- (\\d\\d:\\d\\d) \\*\\*(.+?)\\*\\*: (.*)$")
+            Store.todayLog().lines().mapNotNull { line.find(it) }
+                .map { Triple(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }
+                .filter { it.second == "Jon" || it.second == Prefs.name }
+                .takeLast(8)
         }
         if (today.isNotEmpty()) {
-            Section("Today") {
-                today.forEach { Text(it, fontSize = 13.sp, color = Muted) }
+            Text(
+                "Today", fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp,
+                modifier = Modifier.padding(start = 6.dp, top = 6.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                today.forEach { (time, who, text) -> Bubble("$who · $time", text, who == "Jon") }
             }
         }
 
-        Section("Wearables") {
-            if (meeting) Text("Taking meeting notes", color = Gold, fontWeight = FontWeight.Bold)
-            Text(
-                if (connected) "Wearing ${wearing.ifBlank { "glasses" }}" + (if (battery >= 0) " · battery $battery%" else "") +
-                    " · worn ${Glasses.wornMinutes()} min"
-                else "Not connected"
-            )
-            Text(if (deviceName.isBlank()) "No glasses chosen yet (anything named Anzu is picked up automatically)" else "Glasses: $deviceName", color = Muted, fontSize = 13.sp)
-            if (connected && activeWear.isNotBlank()) Text("Mode: ${Wear.label()}", color = Gold, fontSize = 13.sp)
-            Text("Buddie earbuds stream: $buddie", color = Muted, fontSize = 13.sp)
-            if (buddie != "off") Text(buddieStats, color = Muted, fontSize = 12.sp)
-            Text(
-                if (armed) "Conversation window armed: ${Prefs.name} can listen after speaking up."
-                else "Conversation window not armed. Opening this app arms it until the phone restarts.",
-                color = Muted, fontSize = 13.sp
-            )
+        Section("Devices") {
+            if (meeting) Text("Taking meeting notes", color = Gold, fontWeight = FontWeight.SemiBold)
+            InfoRow("Glasses", deviceName.ifBlank { "Not chosen yet. Anything named Anzu is picked up." })
+            if (connected) InfoRow("Worn", "${Glasses.wornMinutes()} min" + (if (activeWear.isNotBlank()) " · ${Wear.label()}" else ""))
+            if (buddie != "off") InfoRow("Earbud stream", buddie)
+            InfoRow("Reply microphone", if (armed) "Ready" else "Open this app once after a restart")
+            InfoRow("Last seen", timeAgo(Prefs.lastSeenTime))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SoftButton(onClick = { picking = true }) { Text("Choose glasses") }
                 SoftButton(onClick = {
@@ -585,63 +735,18 @@ fun HomeScreen(resumes: Int) {
                     } catch (_: Exception) {
                     }
                 }) { Text("Ping") }
-            }
-            Text("Last seen: ${timeAgo(Prefs.lastSeenTime)}", color = Muted, fontSize = 13.sp)
-            if (Prefs.lastSeenLat.isNotBlank()) {
-                SoftButton(onClick = {
-                    val q = "${Prefs.lastSeenLat},${Prefs.lastSeenLon}"
-                    try {
-                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$q?q=$q(Glasses)")))
-                    } catch (_: Exception) {
-                    }
-                }) { Text("Where I last had them") }
-            }
-        }
-
-        val overlay = remember(resumes) { Settings.canDrawOverlays(ctx) }
-        if (missing.isNotEmpty() || !listenerOn || !unrestricted || !overlay || Prefs.apiKey.isBlank()) {
-            Section("Setup") {
-                if (missing.isNotEmpty()) {
-                    Text("Bluetooth, microphone, notifications, location, calendar, contacts, and sending texts and calls on your say-so.")
-                    Button(onClick = { launcher.launch(REQUESTED) }) { Text("Grant permissions") }
-                }
-                if (!listenerOn) {
-                    Text("Notification access lets ${Prefs.name} read messages to you.")
-                    Button(onClick = {
-                        ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    }) { Text("Allow notification access") }
-                }
-                if (!unrestricted) {
-                    Text("Turn off battery optimization so ${Prefs.name} keeps talking while the phone is in your pocket.")
-                    Button(onClick = {
+                if (Prefs.lastSeenLat.isNotBlank()) {
+                    SoftButton(onClick = {
+                        val q = "${Prefs.lastSeenLat},${Prefs.lastSeenLon}"
                         try {
-                            ctx.startActivity(
-                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
-                            )
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$q?q=$q(Glasses)")))
                         } catch (_: Exception) {
                         }
-                    }) { Text("Allow background running") }
+                    }) { Text("Find") }
                 }
-                if (!overlay) {
-                    Text("Allow display over other apps so ${Prefs.name} can open apps, start navigation and set alarms while the phone is in your pocket.")
-                    Button(onClick = {
-                        try {
-                            ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-                        } catch (_: Exception) {
-                        }
-                    }) { Text("Allow opening apps") }
-                }
-                if (Prefs.apiKey.isBlank()) Text("Add your Anthropic API key in Settings so ${Prefs.name} can think.")
             }
         }
-
-        Section("Talking from the glasses") {
-            Text(
-                "Use the Anzu voice-assistant gesture and pick ${Prefs.name} when Android asks which app to use " +
-                    "(or set it under Settings → Apps → Default apps → Digital assistant app).",
-                color = Muted, fontSize = 13.sp
-            )
-        }
+        Spacer(Modifier.height(8.dp))
     }
 
     if (picking) {
@@ -658,18 +763,22 @@ fun HomeScreen(resumes: Int) {
         }
         AlertDialog(
             onDismissRequest = { picking = false },
+            containerColor = Panel, titleContentColor = Cream, textContentColor = Cream,
             confirmButton = { TextButton(onClick = { picking = false }) { Text("Close") } },
-            title = { Text("Paired devices") },
+            title = { Text("Which are your glasses?", fontFamily = Display, fontWeight = FontWeight.Medium) },
             text = {
                 Column {
                     if (devices.isEmpty()) Text("No paired devices found. Pair the glasses in Bluetooth settings first.")
                     devices.forEach { (name, address) ->
-                        TextButton(onClick = {
-                            Prefs.deviceName = name
-                            Prefs.deviceAddress = address
-                            deviceName = name
-                            picking = false
-                        }) { Text(name) }
+                        Text(
+                            name, color = Cream, fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                Prefs.deviceName = name
+                                Prefs.deviceAddress = address
+                                deviceName = name
+                                picking = false
+                            }.padding(vertical = 12.dp, horizontal = 8.dp)
+                        )
                     }
                 }
             }
@@ -684,119 +793,149 @@ fun NotesScreen() {
     val actions by Store.actions.collectAsState()
     val lists by Store.lists.collectAsState()
     var draft by remember { mutableStateOf("") }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            LargeTitle("Notes")
-            Text("Notes and ideas", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = draft, onValueChange = { draft = it },
-                    label = { Text("New note") }, modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp), colors = fieldColors()
+        LargeTitle("Notes")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = draft, onValueChange = { draft = it },
+                label = { Text("New note") }, modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(28.dp),
+                colors = TextFieldDefaults.colors(
+                    unfocusedContainerColor = Panel, focusedContainerColor = Panel,
+                    unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
+                    unfocusedLabelColor = Muted, focusedLabelColor = Gold, cursorColor = Gold
                 )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { Store.addNote(draft); draft = "" }) { Text("Add") }
-            }
+            )
+            Spacer(Modifier.width(10.dp))
+            Button(onClick = { Store.addNote(draft); draft = "" }, modifier = Modifier.height(52.dp)) { Text("Add") }
         }
-        if (notes.isEmpty()) item { Text("Say \"note that…\" or \"save this idea\" and it lands here.", color = Muted) }
-        items(notes.size) { i ->
-            val n = notes[i]
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(n.text)
-                        Text(timeAgo(n.time), color = Muted, fontSize = 12.sp)
-                    }
-                    TextButton(onClick = { Store.removeNote(i) }) { Text("Delete") }
+        if (notes.isEmpty()) {
+            EmptyHint("No notes yet. Type one above, or say “note that…” and it lands here.")
+        }
+        notes.forEachIndexed { i, n ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel).padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(n.text, color = Cream, fontSize = 16.sp, lineHeight = 22.sp)
+                    Text(timeAgo(n.time), color = Muted, fontSize = 12.sp)
                 }
+                IconButton(onClick = { Store.removeNote(i) }) { Icon(Icons.Filled.Close, contentDescription = "Delete note", tint = Muted) }
             }
         }
-        item {
-            Spacer(Modifier.height(12.dp))
-            Text("Checklists", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
-            if (lists.isEmpty()) Text("Say \"add milk to my grocery list\" or \"what's my next step?\"", color = Muted)
+
+        Section("Checklists") {
+            if (lists.isEmpty()) EmptyHint("Say “add milk to my grocery list” and then “what's my next step?”")
             lists.forEach { (name, listItems) ->
-                Card(
-                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                            TextButton(onClick = { Store.listClear(name) }) { Text("Delete") }
-                        }
-                        listItems.forEachIndexed { i, item ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = item.done, onCheckedChange = { Store.listToggle(name, i) })
-                                Text(item.text, color = if (item.done) Muted else Cream)
-                            }
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(name.replaceFirstChar { it.uppercase() }, Modifier.weight(1f), color = Cream, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                        TextButton(onClick = { Store.listClear(name) }) { Text("Remove") }
+                    }
+                    listItems.forEachIndexed { i, item ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { Store.listToggle(name, i) }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(22.dp).clip(CircleShape).background(if (item.done) Gold else Fill),
+                                contentAlignment = Alignment.Center
+                            ) { if (item.done) Icon(Icons.Filled.Check, contentDescription = null, tint = OnGold, modifier = Modifier.size(14.dp)) }
+                            Spacer(Modifier.width(12.dp))
+                            Text(item.text, color = if (item.done) Muted else Cream, fontSize = 16.sp)
                         }
                     }
                 }
             }
         }
-        item {
-            Spacer(Modifier.height(12.dp))
-            Text("What ${Prefs.name} remembers", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
-            if (memory.isEmpty()) Text("Nothing yet. It builds up as you talk.", color = Muted)
-        }
-        items(memory.size) { i ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(memory[i], Modifier.weight(1f))
-                TextButton(onClick = { Store.removeMemory(i) }) { Text("Forget") }
+
+        Section("What ${Prefs.name} remembers") {
+            if (memory.isEmpty()) EmptyHint("Nothing yet. It builds up as you talk.")
+            memory.forEachIndexed { i, fact ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(fact, Modifier.weight(1f), color = Cream, fontSize = 15.sp, lineHeight = 21.sp)
+                    TextButton(onClick = { Store.removeMemory(i) }) { Text("Forget") }
+                }
             }
         }
-        item {
-            Spacer(Modifier.height(12.dp))
-            Text("Done on its own", fontFamily = Display, color = Cream, fontWeight = FontWeight.Medium, fontSize = 21.sp)
-            if (actions.isEmpty()) Text("Nothing yet.", color = Muted)
+
+        Section("Done on its own") {
+            if (actions.isEmpty()) EmptyHint("Nothing yet. Anything ${Prefs.name} does without being asked shows up here.")
+            actions.take(30).forEach { a ->
+                Column {
+                    Text(a.text, color = Cream, fontSize = 15.sp, lineHeight = 21.sp)
+                    Text(timeAgo(a.time), color = Muted, fontSize = 12.sp)
+                }
+            }
         }
-        items(actions.take(30)) { a ->
-            Text("${timeAgo(a.time)} · ${a.text}", fontSize = 13.sp, color = Muted)
-        }
-        item { Spacer(Modifier.height(24.dp)) }
+        Spacer(Modifier.height(12.dp))
     }
 }
+
+private class AppRow(val label: String, val pkg: String, val icon: ImageBitmap?)
 
 @Composable
 fun WhisperScreen() {
     val ctx = LocalContext.current
-    var apps by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var apps by remember { mutableStateOf<List<AppRow>>(emptyList()) }
     var allowed by remember { mutableStateOf(Prefs.allowedApps) }
     LaunchedEffect(Unit) {
         apps = withContext(Dispatchers.IO) {
             try {
                 val pm = ctx.packageManager
                 pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-                    .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
-                    .distinctBy { it.second }
-                    .sortedWith(compareByDescending<Pair<String, String>> { it.second in allowed }.thenBy { it.first.lowercase() })
+                    .distinctBy { it.activityInfo.packageName }
+                    .map {
+                        val icon = try {
+                            it.loadIcon(pm).toBitmap(72, 72).asImageBitmap()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        AppRow(it.loadLabel(pm).toString(), it.activityInfo.packageName, icon)
+                    }
+                    .sortedWith(compareByDescending<AppRow> { it.pkg in allowed }.thenBy { it.label.lowercase() })
             } catch (e: Exception) {
                 emptyList()
             }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
             LargeTitle("Whisper")
-            Section("Notification whisper") {
-                ToggleRow("Read notifications to me", "Only while the glasses are on", Prefs.readNotifications) { Prefs.readNotifications = it }
-                ToggleRow("Triage", "Messages, calls and reminders now; everything else waits until you ask \"what did I miss?\"", Prefs.triage) { Prefs.triage = it }
-                Text("Whether the message itself is read out is set per wearable in Settings, under Glasses and earbuds.", color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(6.dp))
+            Section("Reading to you") {
+                ToggleRow("Read notifications to me", "Only while you're wearing something", Prefs.readNotifications) { Prefs.readNotifications = it }
+                ToggleRow("Triage", "Messages, calls and reminders right away. Everything else waits until you ask what you missed.", Prefs.triage) { Prefs.triage = it }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Apps allowed to reach your ears", fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream, fontSize = 21.sp, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
+            Text(
+                "Apps allowed to reach your ears", fontFamily = Display, fontWeight = FontWeight.Medium, color = Cream,
+                fontSize = 21.sp, modifier = Modifier.padding(start = 6.dp, top = 18.dp, bottom = 4.dp)
+            )
         }
-        items(apps, key = { it.second }) { (label, pkg) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = pkg in allowed, onCheckedChange = { on ->
-                    allowed = if (on) allowed + pkg else allowed - pkg
-                    Prefs.allowedApps = allowed
-                })
-                Text(label)
+        items(apps, key = { it.pkg }) { app ->
+            val on = app.pkg in allowed
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Panel).padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (app.icon != null) Image(app.icon, contentDescription = null, modifier = Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)))
+                else Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Fill))
+                Text(app.label, Modifier.weight(1f).padding(horizontal = 14.dp), color = Cream, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Switch(
+                    checked = on,
+                    onCheckedChange = { v ->
+                        allowed = if (v) allowed + app.pkg else allowed - app.pkg
+                        Prefs.allowedApps = allowed
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = OnGold, checkedTrackColor = Gold,
+                        uncheckedThumbColor = Muted, uncheckedTrackColor = Fill, uncheckedBorderColor = Color.Transparent
+                    )
+                )
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -812,12 +951,26 @@ fun SettingsScreen() {
     var rate by remember { mutableStateOf(Prefs.speechRate.toFloat()) }
     var mode by remember { mutableIntStateOf(Prefs.listenMode) }
     var identity by remember { mutableStateOf(Prefs.identity) }
+    var page by remember { mutableStateOf<String?>(null) }
+    val scrollState = rememberScrollState()
+    LaunchedEffect(page) { scrollState.scrollTo(0) }
+    BackHandler(enabled = page != null) { page = null }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(if (page == null) 8.dp else 16.dp)
     ) {
-        LargeTitle("Settings")
+        val open = page
+        if (open == null) {
+            LargeTitle("Settings")
+            Spacer(Modifier.height(4.dp))
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                IconButton(onClick = { page = null }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Cream) }
+                Text(open, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = Cream)
+            }
+        }
+        CompositionLocalProvider(LocalSettingsNav provides SettingsNav(page) { page = it }) {
         Section("Brain") {
             PrefField("Anthropic API key", Prefs.apiKey, secret = true) { Prefs.apiKey = it.trim() }
             PrefField("Model", Prefs.model) { Prefs.model = it.trim() }
@@ -957,13 +1110,16 @@ fun SettingsScreen() {
             if (pick.isNotBlank()) {
                 AlertDialog(
                     onDismissRequest = { pick = "" },
+                    containerColor = Panel, titleContentColor = Cream, textContentColor = Cream,
                     confirmButton = { TextButton(onClick = { pick = "" }) { Text("Close") } },
-                    title = { Text(if (pick == "engine") "Speech engine" else "Voices (tap to hear)") },
+                    title = { Text(if (pick == "engine") "Speech engine" else "Voices (tap to hear)", fontFamily = Display, fontWeight = FontWeight.Medium) },
                     text = {
                         LazyColumn(Modifier.height(380.dp)) {
                             if (options.isEmpty()) item { Text("Nothing found.") }
                             items(options) { (id, label) ->
-                                TextButton(onClick = {
+                                Text(
+                                    label, color = Cream, fontSize = 16.sp,
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
                                     when (pick) {
                                         "voice" -> {
                                             Prefs.voiceName = id; chosen = id
@@ -980,7 +1136,8 @@ fun SettingsScreen() {
                                             Corin.announce("This is how I sound now.")
                                         }
                                     }
-                                }) { Text(label) }
+                                    }.padding(vertical = 12.dp, horizontal = 8.dp)
+                                )
                             }
                         }
                     }
@@ -1000,6 +1157,7 @@ fun SettingsScreen() {
                     else SoftButton(onClick = { mode = i; Prefs.listenMode = i }) { Text(label) }
                 }
             }
+            Text("From the glasses, use the Anzu voice-assistant gesture and pick ${Prefs.name} when Android asks which app to use.", color = Muted, fontSize = 13.sp)
             ToggleRow("Use the glasses microphone", "Off uses the phone's mic", Prefs.useGlassesMic) { Prefs.useGlassesMic = it }
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
@@ -1124,6 +1282,7 @@ fun SettingsScreen() {
                 SoftButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
                 SoftButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
             }
+        }
         }
         Spacer(Modifier.height(24.dp))
     }
