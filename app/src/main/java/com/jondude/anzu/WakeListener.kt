@@ -92,6 +92,28 @@ object WakeListener {
         null
     }
 
+    /** Runs the spotter over 16 kHz audio and says whether it heard the wake word (used by the device test). */
+    fun spots(ctx: Context, pcm: ShortArray): Boolean {
+        val kws = spotter(ctx) ?: return false
+        val stream = kws.createStream()
+        var hit = false
+        try {
+            var i = 0
+            while (i < pcm.size && !hit) {
+                val n = minOf(1600, pcm.size - i)
+                stream.acceptWaveform(FloatArray(n) { pcm[i + it] / 32768f }, 16000)
+                while (kws.isReady(stream)) {
+                    kws.decode(stream)
+                    if (kws.getResult(stream).keyword.isNotBlank()) { hit = true; kws.reset(stream) }
+                }
+                i += n
+            }
+        } finally {
+            stream.release()
+        }
+        return hit
+    }
+
     private fun scoDevice(am: AudioManager): AudioDeviceInfo? = try {
         am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
     } catch (_: Exception) {
