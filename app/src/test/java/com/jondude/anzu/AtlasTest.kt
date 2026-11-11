@@ -232,6 +232,14 @@ class AtlasTest {
         assertEquals("add milk to my list", Wake.extract("Atlus add milk to my list", "Atlas"))
         assertEquals("status", Wake.extract("At las, status", "Atlas"))
         assertNull(Wake.extract("we finally got there at last", "Atlas"))
+        // near-misses where he'd actually address it
+        assertEquals("what time is it", Wake.extract("Atles, what time is it", "Atlas"))
+        assertEquals("what time is it", Wake.extract("At last, what time is it", "Atlas"))
+        assertEquals("what time is it", Wake.extract("At less what time is it", "Atlas"))
+        assertEquals("turn the lights off", Wake.extract("Hey Atlast, turn the lights off", "Atlas"))
+        assertEquals("what time is it", Wake.extract("what time is it, Adlas?", "Atlas"))
+        assertNull(Wake.extract("the last train leaves at six", "Atlas"))
+        assertNull(Wake.extract("alas, poor Yorick", "Atlas"))
         assertNull(Wake.extract("let's go to the store", "Atlas"))
         // the name is whatever he calls it; the older name still works if he switches back
         assertEquals("status", Wake.extract("Sage, status", "Sage"))

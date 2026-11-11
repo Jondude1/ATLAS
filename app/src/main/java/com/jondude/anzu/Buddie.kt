@@ -197,6 +197,45 @@ object Wake {
             val before = t.substring(0, m.range.first).trim().trimEnd(',', '.', ' ')
             return if (after.isNotBlank()) after else before
         }
+        return fuzzy(t, name)
+    }
+
+    private fun distance(a: String, b: String): Int {
+        val d = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) d[i][0] = i
+        for (j in 0..b.length) d[0][j] = j
+        for (i in 1..a.length) for (j in 1..b.length) {
+            d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+        }
+        return d[a.length][b.length]
+    }
+
+    /**
+     * Near-misses of the name, but only where people actually address someone: as the first word
+     * ("Atles, what time is it") or the last ("what time is it, Adlas?"). A near-miss must start with
+     * the same letter, so ordinary words like "last" don't count. "At last" counts only at the start.
+     */
+    private fun fuzzy(text: String, name: String): String? {
+        val n = name.trim().lowercase()
+        if (n.length < 4) return null
+        val words = Regex("[A-Za-z']+|[^A-Za-z'\\s]+").findAll(text).map { it.value }.toList()
+        val tokens = words.withIndex().filter { it.value.first().isLetter() }
+        if (tokens.isEmpty()) return null
+        fun near(w: String) = w.lowercase().let { it.length in (n.length - 1)..(n.length + 1) && it.first() == n.first() && distance(it, n) <= 1 }
+        fun rest(fromIndex: Int) = words.drop(fromIndex).joinToString(" ").replace(Regex(" ([,.!?;:])"), "$1").trim().trimStart(',', '.', ' ')
+        var first = 0
+        if (tokens[0].value.lowercase() in setOf("hey", "ok", "okay", "yo") && tokens.size > 1) first = 1
+        val head = tokens[first]
+        if (near(head.value)) return rest(head.index + 1)
+        // "at last" / "at less" said as one word at the very start
+        if (tokens.size > first + 1) {
+            val joined = (head.value + tokens[first + 1].value).lowercase()
+            if (head.value.lowercase() == "at" && distance(joined, n) <= 2) return rest(tokens[first + 1].index + 1)
+        }
+        val tail = tokens.last()
+        if (tokens.size > 1 && near(tail.value)) {
+            return words.take(tail.index).joinToString(" ").replace(Regex(" ([,.!?;:])"), "$1").trim().trimEnd(',', '.', ' ')
+        }
         return null
     }
 }
