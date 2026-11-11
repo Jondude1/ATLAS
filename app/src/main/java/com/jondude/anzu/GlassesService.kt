@@ -463,6 +463,7 @@ class GlassesService : Service() {
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
             val b = kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.brief(0) }
             if (b != null) {
+                AtlasWidget.push(this, b.text, b.urgent.map { "${it.app}: ${it.title}" })
                 val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val inCall = am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION ||
                     am.mode == AudioManager.MODE_RINGTONE

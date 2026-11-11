@@ -822,4 +822,11 @@ class AtlasTest {
         assertNull(cut)
         assertEquals(0, Loud.gainMb(1f)); assertEquals(602, Loud.gainMb(2f))
     }
+
+    @Test
+    fun widgetLeadsWithUrgent() {
+        assertEquals("Garage is open." to "house: Door unlocked  +1",
+            AtlasWidget.lines("Garage is open. Two packages came.", listOf("house: Door unlocked", "athena: sonarr down")))
+        assertEquals("Standing by" to null, AtlasWidget.lines("", emptyList()))
+    }
 }
