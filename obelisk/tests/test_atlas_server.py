@@ -904,6 +904,46 @@ def test_outage_check_tries_every_configured_host(atlas, monkeypatch):
     assert calls == mod.OUTAGE_CHECK_HOSTS
 
 
+def test_account_check_files_an_urgent_report_for_a_new_alert(atlas):
+    mod, client = atlas
+    mod.ACCOUNT_ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.ACCOUNT_ALERTS_FILE.write_text(
+        "- Google | New sign-in from Chrome on Windows, Columbus OH | 2026-11-11\n", encoding="utf-8"
+    )
+
+    resp = client.post("/atlas/account/check")
+    assert resp.json() == {"checked": 1, "filed": 1}
+
+    reports = client.get("/atlas/reports", params={"app": "account"}).json()["reports"]
+    assert len(reports) == 1
+    assert reports[0]["priority"] == "urgent"
+    assert "Google" in reports[0]["title"]
+
+
+def test_account_check_does_not_refile_an_already_seen_alert(atlas):
+    mod, client = atlas
+    mod.ACCOUNT_ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.ACCOUNT_ALERTS_FILE.write_text("- Google | New sign-in, Columbus OH | 2026-11-11\n", encoding="utf-8")
+
+    client.post("/atlas/account/check")
+    second = client.post("/atlas/account/check").json()
+    assert second == {"checked": 1, "filed": 0}
+
+    reports = client.get("/atlas/reports", params={"app": "account"}).json()["reports"]
+    assert len(reports) == 1
+
+
+def test_account_check_handles_missing_file_and_malformed_lines(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/account/check")
+    assert resp.json() == {"checked": 0, "filed": 0}
+
+    mod.ACCOUNT_ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mod.ACCOUNT_ALERTS_FILE.write_text("# header\n- incomplete line\n", encoding="utf-8")
+    resp = client.post("/atlas/account/check")
+    assert resp.json() == {"checked": 0, "filed": 0}
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

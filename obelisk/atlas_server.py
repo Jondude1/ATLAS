@@ -84,6 +84,17 @@ OUTAGE_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_OUTAGE_CHECK_INTERVAL_S", "1
 _outage_state = {"last_up": None}
 _outage_task: Optional[asyncio.Task] = None
 
+# Account Sentinel (#6). No account-provider API access exists from this
+# environment (same blocker class as #21/#24/#26), so this is the Money
+# Sentinel pattern: a hand-maintained vault file, promoted to urgent so an
+# alert can't quietly get buried -- written from the Nov 5 lesson.
+ACCOUNT_ALERTS_FILE = Path(
+    os.environ.get("ATLAS_ACCOUNT_ALERTS_FILE", str(VAULT / "Atlas" / "account_alerts.md"))
+).expanduser()
+ACCOUNT_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_ACCOUNT_CHECK_INTERVAL_S", "600"))
+_account_alerts_seen: set = set()
+_account_task: Optional[asyncio.Task] = None
+
 # Print Sentinel hub half v1. Honest limit: Frigate on Athena only tracks
 # person/car/dog/cat on its cameras today, no printer-specific camera or
 # zone — so this is camera-liveness watch + pre-flight snapshot data, NOT
@@ -124,6 +135,7 @@ async def _atlas_lifespan(app):
             _schedule_gatekeeper()
             _schedule_sunday_brief()
             _schedule_outage_watch()
+            _schedule_account_watch()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -135,6 +147,7 @@ async def _atlas_lifespan(app):
         _schedule_gatekeeper()
         _schedule_sunday_brief()
         _schedule_outage_watch()
+        _schedule_account_watch()
         yield
 
 
@@ -1100,6 +1113,73 @@ async def outage_check():
     return await _check_internet_outage()
 
 
+def _parse_account_alert_line(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 3 or not parts[0]:
+        return None
+    return {"account": parts[0], "detail": parts[1], "date": parts[2]}
+
+
+def _read_account_alerts() -> list[dict]:
+    if not ACCOUNT_ALERTS_FILE.exists():
+        return []
+    alerts = []
+    for line in ACCOUNT_ALERTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parsed = _parse_account_alert_line(line)
+        if parsed:
+            alerts.append(parsed)
+    return alerts
+
+
+async def _check_account_alerts() -> dict:
+    alerts = _read_account_alerts()
+    filed = 0
+    for alert in alerts:
+        key = f"account-alert:{alert['account']}:{alert['detail']}:{alert['date']}"
+        if key in _account_alerts_seen:
+            continue
+        await report(
+            Report(
+                app="account",
+                title=f"New sign-in: {alert['account']}",
+                body=f"{alert['detail']} — {alert['date']}",
+                priority="urgent",
+                key=key,
+            )
+        )
+        _account_alerts_seen.add(key)
+        filed += 1
+    return {"checked": len(alerts), "filed": filed}
+
+
+async def _account_loop():
+    while True:
+        await asyncio.sleep(ACCOUNT_CHECK_INTERVAL_S)
+        try:
+            await _check_account_alerts()
+        except Exception:
+            pass
+
+
+def _schedule_account_watch():
+    global _account_task
+    if _account_task is not None and not _account_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _account_task = loop.create_task(_account_loop())
+
+
+@app.post("/atlas/account/check", dependencies=[Depends(require_token)])
+async def account_check():
+    return await _check_account_alerts()
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -1857,6 +1937,12 @@ async def mcp_where_was_i() -> dict:
 async def mcp_outage_check() -> dict:
     """Check Obelisk's own internet reachability now; reports if it just went down or came back."""
     return await outage_check()
+
+
+@mcp.tool
+async def mcp_account_check() -> dict:
+    """Check for new account sign-in alerts logged in the vault; files any unseen ones as urgent."""
+    return await account_check()
 
 
 @mcp.tool
