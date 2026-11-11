@@ -150,6 +150,8 @@ SLICER_SETTING_BOUNDS = {
 PLACE_TRIGGER_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_PLACE_TRIGGER_CHECK_INTERVAL_S", "300"))
 _place_trigger_task: Optional[asyncio.Task] = None
 
+CHRONICLE_MAX_WORDS = 150  # a recap can run a bit longer than a spoken brief
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -408,6 +410,27 @@ def init_hub_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chronicle_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'note',
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chronicle_session ON chronicle_notes(session_id)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chronicle_recaps (
+                session_id TEXT PRIMARY KEY,
+                recap TEXT NOT NULL,
+                composed_at INTEGER NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -489,6 +512,16 @@ class PlaceTrigger(BaseModel):
 
 class PlaceTriggerEvent(BaseModel):
     event: str
+
+
+class ChronicleNote(BaseModel):
+    text: str
+    session_id: Optional[str] = None
+    kind: str = "note"  # loot | name | ruling | note
+
+
+class ChronicleRecapRequest(BaseModel):
+    session_id: str
 
 
 def _now_ms() -> int:
@@ -1708,6 +1741,113 @@ async def triggers_event(e: PlaceTriggerEvent):
     return await _fire_triggers_for_event(e.event)
 
 
+@app.post("/atlas/chronicle/note", dependencies=[Depends(require_token)])
+def chronicle_note(n: ChronicleNote):
+    session_id = n.session_id or datetime.now().strftime("%Y-%m-%d")
+    with hub_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO chronicle_notes (session_id, text, kind, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, n.text, n.kind, _now_ms()),
+        )
+        conn.commit()
+        note_id = cur.lastrowid
+    return {"id": note_id, "session_id": session_id}
+
+
+@app.get("/atlas/chronicle/notes", dependencies=[Depends(require_token)])
+def chronicle_notes(session_id: str):
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chronicle_notes WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
+        ).fetchall()
+    return {"notes": [dict(r) for r in rows]}
+
+
+@app.get("/atlas/chronicle/sessions", dependencies=[Depends(require_token)])
+def chronicle_sessions():
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT session_id, COUNT(*) AS note_count, MAX(created_at) AS last_at "
+            "FROM chronicle_notes GROUP BY session_id ORDER BY last_at DESC"
+        ).fetchall()
+    return {"sessions": [dict(r) for r in rows]}
+
+
+async def _compose_chronicle_recap(session_id: str) -> dict:
+    with hub_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chronicle_notes WHERE session_id = ? ORDER BY created_at ASC", (session_id,)
+        ).fetchall()
+    if not rows:
+        return {"session_id": session_id, "recap": "No notes captured for that session.", "note_count": 0}
+    notes_text = "\n".join(f"- [{r['kind']}] {r['text']}" for r in rows)
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Write a short D&D session recap from these whispered voice notes (loot, "
+                    "names, rulings). Plain spoken English, at most 150 words, no markdown, "
+                    "no lists -- tell it like a story beat, not a log."
+                ),
+            },
+            {"role": "user", "content": notes_text},
+        ],
+        max_tokens=260,
+        timeout_s=60,
+    )
+    recap = reply if reply else "; ".join(f"[{r['kind']}] {r['text']}" for r in rows[:10])
+    recap = " ".join(recap.split()[:CHRONICLE_MAX_WORDS])
+    now_ms = _now_ms()
+    with hub_db() as conn:
+        conn.execute(
+            "INSERT INTO chronicle_recaps (session_id, recap, composed_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET recap = excluded.recap, composed_at = excluded.composed_at",
+            (session_id, recap, now_ms),
+        )
+        conn.commit()
+    return {"session_id": session_id, "recap": recap, "note_count": len(rows)}
+
+
+@app.post("/atlas/chronicle/recap", dependencies=[Depends(require_token)])
+async def chronicle_recap(r: ChronicleRecapRequest):
+    return await _compose_chronicle_recap(r.session_id)
+
+
+async def _compose_chronicle_opener(exclude_session_id: Optional[str] = None) -> dict:
+    with hub_db() as conn:
+        if exclude_session_id:
+            row = conn.execute(
+                "SELECT * FROM chronicle_recaps WHERE session_id != ? ORDER BY composed_at DESC LIMIT 1",
+                (exclude_session_id,),
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM chronicle_recaps ORDER BY composed_at DESC LIMIT 1").fetchone()
+    if row is None:
+        return {"opener": "No previous session recap to open with.", "session_id": None}
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Turn this D&D session recap into a short 'Last time on...' opening line "
+                    "for the next session. Plain spoken English, at most 50 words, no markdown."
+                ),
+            },
+            {"role": "user", "content": row["recap"]},
+        ],
+        max_tokens=100,
+        timeout_s=30,
+    )
+    opener = reply if reply else f"Last time on {row['session_id']}: {row['recap']}"
+    return {"opener": opener, "session_id": row["session_id"]}
+
+
+@app.get("/atlas/chronicle/opener", dependencies=[Depends(require_token)])
+async def chronicle_opener(exclude_session_id: Optional[str] = None):
+    return await _compose_chronicle_opener(exclude_session_id)
+
+
 async def _frigate_get(path: str, timeout_s: float = 5) -> Optional[dict]:
     """Calls Frigate's read-only API. Returns None (never raises) if it's down."""
     try:
@@ -2663,6 +2803,30 @@ async def mcp_triggers_check() -> dict:
 async def mcp_triggers_event(event: str) -> dict:
     """Signal an app-detected event (e.g. 'home', 'jenna') to fire any matching pending triggers."""
     return await triggers_event(PlaceTriggerEvent(event=event))
+
+
+@mcp.tool
+def mcp_chronicle_note(text: str, session_id: str | None = None, kind: str = "note") -> dict:
+    """Capture a whispered D&D session note (loot, a name, a ruling); defaults session_id to today's date."""
+    return chronicle_note(ChronicleNote(text=text, session_id=session_id, kind=kind))
+
+
+@mcp.tool
+def mcp_chronicle_sessions() -> dict:
+    """List D&D sessions with notes, newest first."""
+    return chronicle_sessions()
+
+
+@mcp.tool
+async def mcp_chronicle_recap(session_id: str) -> dict:
+    """Compose a session recap from its captured notes."""
+    return await chronicle_recap(ChronicleRecapRequest(session_id=session_id))
+
+
+@mcp.tool
+async def mcp_chronicle_opener(exclude_session_id: str | None = None) -> dict:
+    """Compose a 'Last time on...' opener from the most recent recap."""
+    return await chronicle_opener(exclude_session_id)
 
 
 @mcp.tool

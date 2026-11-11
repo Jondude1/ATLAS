@@ -1318,6 +1318,71 @@ def test_trigger_event_with_no_match_fires_nothing(atlas):
     assert resp["fired"] == 0
 
 
+def test_chronicle_note_defaults_session_to_today(atlas):
+    mod, client = atlas
+    resp = client.post("/atlas/chronicle/note", json={"text": "found a +1 dagger", "kind": "loot"})
+    body = resp.json()
+    today = mod.datetime.now().strftime("%Y-%m-%d")
+    assert body["session_id"] == today
+
+    notes = client.get("/atlas/chronicle/notes", params={"session_id": today}).json()["notes"]
+    assert len(notes) == 1
+    assert notes[0]["kind"] == "loot"
+
+
+def test_chronicle_sessions_lists_grouped_counts(atlas):
+    mod, client = atlas
+    client.post("/atlas/chronicle/note", json={"text": "a", "session_id": "session-1"})
+    client.post("/atlas/chronicle/note", json={"text": "b", "session_id": "session-1"})
+    client.post("/atlas/chronicle/note", json={"text": "c", "session_id": "session-2"})
+
+    sessions = {s["session_id"]: s["note_count"] for s in client.get("/atlas/chronicle/sessions").json()["sessions"]}
+    assert sessions == {"session-1": 2, "session-2": 1}
+
+
+def test_chronicle_recap_composes_and_falls_back(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/chronicle/note", json={"text": "slew the owlbear", "session_id": "s1", "kind": "note"})
+    client.post("/atlas/chronicle/note", json={"text": "found a +1 dagger", "session_id": "s1", "kind": "loot"})
+
+    body = client.post("/atlas/chronicle/recap", json={"session_id": "s1"}).json()
+    assert body["note_count"] == 2
+    assert "owlbear" in body["recap"]
+    assert "dagger" in body["recap"]
+
+
+def test_chronicle_recap_empty_session(atlas):
+    mod, client = atlas
+    body = client.post("/atlas/chronicle/recap", json={"session_id": "nope"}).json()
+    assert body == {"session_id": "nope", "recap": "No notes captured for that session.", "note_count": 0}
+
+
+def test_chronicle_opener_uses_the_most_recent_recap(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    client.post("/atlas/chronicle/note", json={"text": "slew the owlbear", "session_id": "s1"})
+    client.post("/atlas/chronicle/recap", json={"session_id": "s1"})
+
+    body = client.get("/atlas/chronicle/opener").json()
+    assert body["session_id"] == "s1"
+    assert "owlbear" in body["opener"]
+
+
+def test_chronicle_opener_with_no_recaps_yet(atlas):
+    mod, client = atlas
+    body = client.get("/atlas/chronicle/opener").json()
+    assert body == {"opener": "No previous session recap to open with.", "session_id": None}
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
