@@ -106,6 +106,7 @@ async def _atlas_lifespan(app):
             _schedule_print_watch()
             _schedule_filament_check()
             _schedule_athena_container_watch()
+            _schedule_gatekeeper()
             yield
     except RuntimeError:
         _schedule_athena_refresh()
@@ -114,6 +115,7 @@ async def _atlas_lifespan(app):
         _schedule_print_watch()
         _schedule_filament_check()
         _schedule_athena_container_watch()
+        _schedule_gatekeeper()
         yield
 
 
@@ -933,6 +935,63 @@ async def print_watch_check():
     return await _check_print_camera()
 
 
+async def _check_gatekeeper() -> dict:
+    after = _gate_watermark["after"]
+    if after is None:
+        # First-ever check: start watching from now, don't backfill Frigate's
+        # whole history as a flood of "someone was just at your door" reports.
+        _gate_watermark["after"] = time.time()
+        return {"checked": 0, "filed": 0}
+    newest = after
+    checked = 0
+    filed = 0
+    for camera in GATE_CAMERAS:
+        events = await _frigate_get(f"/api/events?cameras={camera}&labels=person&after={after}&limit=20") or []
+        for event in events:
+            checked += 1
+            start = event.get("start_time") or after
+            newest = max(newest, start)
+            when = datetime.fromtimestamp(start).strftime("%-I:%M %p")
+            await report(
+                Report(
+                    app="gatekeeper",
+                    title=f"Someone at the {camera.replace('_', ' ')}",
+                    body=f"Detected at {when}",
+                    priority="normal",
+                    key=f"gatekeeper:{event.get('id')}",
+                )
+            )
+            filed += 1
+    if newest > after:
+        _gate_watermark["after"] = newest + 0.001
+    return {"checked": checked, "filed": filed}
+
+
+async def _gatekeeper_loop():
+    while True:
+        await asyncio.sleep(GATE_CHECK_INTERVAL_S)
+        try:
+            await _check_gatekeeper()
+        except Exception:
+            pass
+
+
+def _schedule_gatekeeper():
+    global _gate_task
+    if _gate_task is not None and not _gate_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _gate_task = loop.create_task(_gatekeeper_loop())
+
+
+@app.post("/atlas/gatekeeper/check", dependencies=[Depends(require_token)])
+async def gatekeeper_check():
+    return await _check_gatekeeper()
+
+
 def _parse_filament_line(line: str) -> Optional[dict]:
     line = line.strip()
     if not line.startswith("-"):
@@ -1157,6 +1216,15 @@ ATHENA_CONTAINER_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_ATHENA_CONTAINER_C
 _CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 _container_health_state: dict[str, bool] = {}  # name -> is_down
 _athena_container_task: Optional[asyncio.Task] = None
+
+# Gatekeeper's Digest (#3): reuses Frigate's existing, already-live person
+# detection on the real entry cameras. No separate composition machinery —
+# each sighting becomes a normal hub report under app "gatekeeper" and
+# rides the existing brief/digest pipeline like any other reporter.
+GATE_CAMERAS = [c.strip() for c in os.environ.get("ATLAS_GATE_CAMERAS", "front_porch,back_deck").split(",") if c.strip()]
+GATE_CHECK_INTERVAL_S = int(os.environ.get("ATLAS_GATE_CHECK_INTERVAL_S", "300"))
+_gate_watermark = {"after": None}  # None = not started yet; first check only sets the baseline
+_gate_task: Optional[asyncio.Task] = None
 
 
 def require_athena_token(authorization: Optional[str] = Header(default=None)):
@@ -1488,6 +1556,12 @@ async def mcp_print_preflight() -> dict:
 async def mcp_print_watch_check() -> dict:
     """Check the print-area camera's liveness now and report if it just went offline or came back."""
     return await print_watch_check()
+
+
+@mcp.tool
+async def mcp_gatekeeper_check() -> dict:
+    """Check the gate cameras for new person sightings now and file reports for any found."""
+    return await gatekeeper_check()
 
 
 @mcp.tool

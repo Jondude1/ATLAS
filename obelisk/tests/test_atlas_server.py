@@ -639,6 +639,73 @@ def test_filament_check_handles_missing_files(atlas):
     assert resp.json() == {"materials_checked": 0, "filed": 0}
 
 
+def test_gatekeeper_first_check_sets_baseline_without_filing(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_frigate_get(path, timeout_s=5):
+        raise AssertionError("first check should not call Frigate at all")
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    resp = client.post("/atlas/gatekeeper/check")
+    assert resp.json() == {"checked": 0, "filed": 0}
+    assert client.get("/atlas/reports", params={"app": "gatekeeper"}).json()["reports"] == []
+
+
+def test_gatekeeper_files_a_report_for_a_new_sighting(atlas, monkeypatch):
+    mod, client = atlas
+    client.post("/atlas/gatekeeper/check")  # establishes the baseline
+
+    async def fake_frigate_get(path, timeout_s=5):
+        if "front_porch" in path:
+            return [{"id": "evt-1", "start_time": mod.time.time()}]
+        return []
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    resp = client.post("/atlas/gatekeeper/check")
+    assert resp.json() == {"checked": 1, "filed": 1}
+
+    reports = client.get("/atlas/reports", params={"app": "gatekeeper"}).json()["reports"]
+    assert len(reports) == 1
+    assert "front porch" in reports[0]["title"].lower()
+
+
+def test_gatekeeper_only_queries_configured_cameras(atlas, monkeypatch):
+    mod, client = atlas
+    client.post("/atlas/gatekeeper/check")
+    queried = []
+
+    async def fake_frigate_get(path, timeout_s=5):
+        queried.append(path)
+        return []
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    client.post("/atlas/gatekeeper/check")
+    for camera in mod.GATE_CAMERAS:
+        assert any(camera in p for p in queried)
+    assert not any("living_room" in p for p in queried)
+
+
+def test_gatekeeper_does_not_duplicate_the_same_event(atlas, monkeypatch):
+    mod, client = atlas
+    client.post("/atlas/gatekeeper/check")
+
+    async def fake_frigate_get(path, timeout_s=5):
+        if "front_porch" in path:
+            return [{"id": "evt-1", "start_time": mod.time.time()}]
+        return []
+
+    monkeypatch.setattr(mod, "_frigate_get", fake_frigate_get)
+    client.post("/atlas/gatekeeper/check")  # files it
+    # Watermark has advanced past evt-1's start_time now, so a second poll
+    # with the same canned response simulates the boundary-overlap case
+    # rather than a genuine re-delivery; the dedupe key is what actually
+    # protects against duplicates either way.
+    client.post("/atlas/gatekeeper/check")
+
+    reports = client.get("/atlas/reports", params={"app": "gatekeeper"}).json()["reports"]
+    assert len(reports) == 1
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 
