@@ -8,6 +8,7 @@ import com.jondude.anzu.Glasses
 import com.jondude.anzu.Motion
 import com.jondude.anzu.Places
 import com.jondude.anzu.Usage
+import com.jondude.anzu.When
 import com.jondude.anzu.Prefs
 import com.jondude.anzu.Speaker
 import com.jondude.anzu.Store
@@ -531,6 +532,8 @@ object Brain {
             if (Prefs.drift.isNotBlank()) append("How you've been shifting lately: ").append(Prefs.drift).append('\n')
             append(
                 """
+Time is real for you. Each of Jon's messages is stamped with when he said it, and the current time is below. Hours between messages mean separate conversations: don't answer as if he just said something from this morning, don't call something "earlier" or "just now" unless it was, and if you pick up an old thread, say how long ago it was. Never put time stamps in your own replies.
+
 Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on his desktop, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
@@ -914,17 +917,32 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     private fun ask(system: String, prompt: String, maxTokens: Int): String =
         textOf(call(system, JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), null, maxTokens))
 
+    /**
+     * Past exchanges, each stamped with when it happened, so the model can tell a conversation
+     * from two minutes ago apart from one this morning.
+     */
+    fun timedHistory(now: Long = System.currentTimeMillis()): List<Pair<String, String>> =
+        Store.recentTimed(now).flatMap { (u, r, t) ->
+            listOf("user" to "[${When.ago(t, now)}] $u", "assistant" to r)
+        }
+
+    /** What Jon just said, stamped with the time and how long since they last spoke. */
+    fun stampNow(text: String, now: Long = System.currentTimeMillis()): String {
+        val last = Store.recentTimed(now).lastOrNull()?.third
+        val gap = if (last == null) "first thing you've talked about in a while" else {
+            val m = (now - last) / 60_000
+            if (m < 5) "continuing the conversation" else "new conversation; you last spoke ${When.ago(last, now)}"
+        }
+        return "[now, ${When.stamp(now)}, $gap] $text"
+    }
+
     private fun historyMessages(): JSONArray {
         val a = JSONArray()
-        Store.recentExchanges().forEach { (u, r) ->
-            a.put(JSONObject().put("role", "user").put("content", u))
-            a.put(JSONObject().put("role", "assistant").put("content", r))
-        }
+        timedHistory().forEach { (role, content) -> a.put(JSONObject().put("role", role).put("content", content)) }
         return a
     }
 
-    private fun historyPairs(): List<Pair<String, String>> =
-        Store.recentExchanges().flatMap { listOf("user" to it.first, "assistant" to it.second) }
+    private fun historyPairs(): List<Pair<String, String>> = timedHistory()
 
     private fun record(user: String, answer: String, userSpeaker: String = "Jon") {
         Store.addExchange(user, answer)
@@ -963,7 +981,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         if (hasKey()) {
             try {
                 val messages = historyMessages()
-                messages.put(JSONObject().put("role", "user").put("content", userText))
+                messages.put(JSONObject().put("role", "user").put("content", stampNow(userText)))
                 val tools = tools()
                 var resp = call(sys, messages, tools, 400)
                 var rounds = 0
@@ -997,7 +1015,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         // Fallback tier: local model (no tools), then Home Assistant, then an honest shrug.
         if (Local.configured()) {
             try {
-                val answer = Local.chat(sys, historyPairs() + ("user" to userText)).ifBlank { "Hm. I've got nothing." }
+                val answer = Local.chat(sys, historyPairs() + ("user" to stampNow(userText))).ifBlank { "Hm. I've got nothing." }
                 record(userText, answer)
                 return@withContext answer
             } catch (_: Exception) {
@@ -1050,8 +1068,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             "walk" -> "He's just headed out on a walk, which is a good moment for a real conversation. Bring one of his saved ideas back up if there is one, or open a topic worth chewing on."
             else -> options.random()
         }
-        val recentSaid = Store.recentExchanges().takeLast(4).joinToString(" | ") { it.second.take(100) }
-        val prompt = "[Jon hasn't said anything. You're choosing to speak up on your own. $directive " +
+        val recentSaid = Store.recentTimed().takeLast(4).joinToString(" | ") { "(${When.ago(it.third)}) " + it.second.take(100) }
+        val prompt = "[It's ${When.stamp(System.currentTimeMillis())}. Jon hasn't said anything. You're choosing to speak up on your own. $directive " +
             "One or two sentences. Sometimes end with something he can answer, but not every time. " +
             "Don't repeat yourself; recently you said: $recentSaid]"
         val sys = system(ctx)

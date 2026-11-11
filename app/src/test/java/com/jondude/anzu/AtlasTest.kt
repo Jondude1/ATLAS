@@ -306,8 +306,28 @@ class AtlasTest {
     fun historyKeepsOnlyRecentExchanges() {
         repeat(12) { Store.addExchange("q$it", "a$it") }
         val h = Store.recentExchanges()
-        assertEquals(8, h.size)
+        assertEquals(10, h.size)
         assertEquals("q11", h.last().first)
+    }
+
+    @Test
+    fun conversationsKnowWhenTheyHappened() {
+        val now = 1_800_000_000_000L
+        Store.addExchange("morning question", "morning answer", now - 5 * 60 * 60_000L)
+        Store.addExchange("lunch question", "lunch answer", now - 70 * 60_000L)
+        Store.addExchange("old question", "old answer", now - 30 * 60 * 60_000L) // over 12 hours: dropped
+        val h = com.jondude.anzu.assist.Brain.timedHistory(now)
+        assertEquals(4, h.size)
+        assertTrue(h[0].second, h[0].second.startsWith("[5 hours ago") || h[0].second.startsWith("[yesterday"))
+        assertTrue(h[2].second, h[2].second.startsWith("[an hour ago"))
+        assertEquals("lunch answer", h[3].second)
+        val stamped = com.jondude.anzu.assist.Brain.stampNow("what's up", now)
+        assertTrue(stamped, stamped.contains("new conversation; you last spoke an hour ago"))
+        assertTrue(stamped.endsWith("] what's up"))
+        Store.addExchange("just now", "yep", now - 60_000L)
+        assertTrue(com.jondude.anzu.assist.Brain.stampNow("and another", now).contains("continuing the conversation"))
+        assertEquals("just now", When.ago(now - 30_000L, now))
+        assertEquals("12 minutes ago", When.ago(now - 12 * 60_000L, now))
     }
 
     @Test

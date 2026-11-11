@@ -209,6 +209,29 @@ object Wear {
     }
 }
 
+/** How long ago something was, in words a person would say. */
+object When {
+    fun ago(t: Long, now: Long = System.currentTimeMillis()): String {
+        val m = (now - t) / 60_000
+        val clock = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(t))
+        return when {
+            m < 2 -> "just now"
+            m < 60 -> "$m minutes ago"
+            m < 120 -> "an hour ago, at $clock"
+            m < 24 * 60 && sameDay(t, now) -> "${m / 60} hours ago, at $clock"
+            m < 48 * 60 -> "yesterday at $clock"
+            else -> java.text.SimpleDateFormat("EEEE MMM d 'at' h:mm a", java.util.Locale.US).format(java.util.Date(t))
+        }
+    }
+
+    private fun sameDay(a: Long, b: Long): Boolean {
+        val f = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+        return f.format(java.util.Date(a)) == f.format(java.util.Date(b))
+    }
+
+    fun stamp(t: Long): String = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(t))
+}
+
 /** Rough daily token meter so API spend stays visible. */
 object Usage {
     private fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
@@ -238,7 +261,8 @@ object Store {
     val notes = MutableStateFlow<List<Note>>(emptyList())
     val actions = MutableStateFlow<List<Note>>(emptyList())
     val lists = MutableStateFlow<Map<String, List<Item>>>(emptyMap())
-    private val history = ArrayList<Pair<String, String>>()
+    /** Recent exchanges with when they happened: (what he said, the answer, epoch ms). */
+    private val history = ArrayList<Triple<String, String, Long>>()
 
     fun init(c: Context) {
         dir = c.filesDir
@@ -265,7 +289,9 @@ object Store {
         val h = readArray("history.json")
         for (i in 0 until h.length()) {
             val o = h.getJSONObject(i)
-            history.add(o.optString("u") to o.optString("a"))
+            // entries from before timestamps were kept have no time; they're too old to matter
+            val t = o.optLong("t", 0L)
+            if (t > 0) history.add(Triple(o.optString("u"), o.optString("a"), t))
         }
     }
 
@@ -454,16 +480,21 @@ object Store {
     }
 
     @Synchronized
-    fun addExchange(user: String, assistant: String) {
-        history.add(user to assistant)
-        while (history.size > 8) history.removeAt(0)
+    fun addExchange(user: String, assistant: String, at: Long = System.currentTimeMillis()) {
+        history.add(Triple(user, assistant, at))
+        while (history.size > 10) history.removeAt(0)
         val a = JSONArray()
-        history.forEach { a.put(JSONObject().put("u", it.first).put("a", it.second)) }
+        history.forEach { a.put(JSONObject().put("u", it.first).put("a", it.second).put("t", it.third)) }
         write("history.json", a)
     }
 
+    /** Exchanges from the last 12 hours, oldest first, with their times. Older ones live in the log. */
     @Synchronized
-    fun recentExchanges(): List<Pair<String, String>> = history.toList()
+    fun recentTimed(now: Long = System.currentTimeMillis()): List<Triple<String, String, Long>> =
+        history.filter { now - it.third < 12 * 60 * 60_000L }
+
+    @Synchronized
+    fun recentExchanges(): List<Pair<String, String>> = recentTimed().map { it.first to it.second }
 
     @Synchronized
     fun clearHistory() {
