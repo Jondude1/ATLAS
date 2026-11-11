@@ -242,10 +242,10 @@ def _prune_old_reports(conn: sqlite3.Connection):
     conn.execute("DELETE FROM reports WHERE at < ?", (cutoff,))
 
 
-async def _chat(messages: list[dict], max_tokens: int = 300) -> Optional[str]:
+async def _chat(messages: list[dict], max_tokens: int = 300, timeout_s: float = 30) -> Optional[str]:
     """Calls the OpenAI-style endpoint. Returns None (never raises) if it's down."""
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
             resp = await client.post(
                 f"{LLM_URL.rstrip('/')}/chat/completions",
                 json={"model": LLM_MODEL, "messages": messages, "max_tokens": max_tokens},
@@ -255,6 +255,19 @@ async def _chat(messages: list[dict], max_tokens: int = 300) -> Optional[str]:
             return data["choices"][0]["message"]["content"].strip()
     except Exception:
         return None
+
+
+def _age_str(at_ms: int, now_ms: int) -> str:
+    secs = max(0, int((now_ms - at_ms) / 1000))
+    if secs < 60:
+        return f"{secs} sec ago"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins} min ago"
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs} hr ago"
+    return f"{hrs // 24} d ago"
 
 
 def _fallback_brief(rows: list[sqlite3.Row]) -> str:
@@ -267,35 +280,62 @@ def _fallback_brief(rows: list[sqlite3.Row]) -> str:
 
 
 async def _rebuild_brief():
-    with hub_db() as conn:
-        _prune_old_reports(conn)
-        conn.commit()
-        rows = conn.execute("SELECT * FROM reports ORDER BY at DESC LIMIT 50").fetchall()
-        urgent_rows = conn.execute(
-            "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
-        ).fetchall()
+    # Fix #3: if a report lands while we wait on the model, rebuild once more
+    # after finishing so it is not missed until some later report.
+    for _attempt in range(2):
+        query_started_ms = _now_ms()
+        with hub_db() as conn:
+            _prune_old_reports(conn)
+            conn.commit()
+            max_id_row = conn.execute("SELECT COALESCE(MAX(id), 0) AS m FROM reports").fetchone()
+            max_id_at_start = max_id_row["m"]
+            cutoff = query_started_ms - 24 * 3600 * 1000
+            # Fix #2: only the last 24 hours, plus any untold urgent items.
+            rows = conn.execute(
+                "SELECT * FROM reports WHERE at >= ? OR (priority = 'urgent' AND told = 0) "
+                "ORDER BY at DESC LIMIT 50",
+                (cutoff,),
+            ).fetchall()
+            urgent_rows = conn.execute(
+                "SELECT * FROM reports WHERE priority = 'urgent' AND told = 0 ORDER BY at DESC"
+            ).fetchall()
 
-    reports_text = "\n".join(f"- [{r['app']}] {r['title']}: {r['body']}".strip() for r in rows)
-    reply = await _chat(
-        [
-            {
-                "role": "system",
-                "content": (
-                    "You brief a voice assistant on what matters right now, across every app "
-                    "reporting in. Plain spoken English, at most 120 words, no markdown, no lists."
-                ),
-            },
-            {"role": "user", "content": reports_text or "(no reports)"},
-        ],
-        max_tokens=220,
-    )
-    brief = reply if reply else _fallback_brief(rows)
-    _brief_cache["brief"] = brief
-    _brief_cache["updated"] = _now_ms()
-    _brief_cache["urgent"] = [
-        {"id": r["id"], "app": r["app"], "title": r["title"], "body": r["body"], "at": r["at"]}
-        for r in urgent_rows
-    ]
+        now_ms = _now_ms()
+        reports_text = "\n".join(
+            f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip()
+            for r in rows
+        )
+        current_time = datetime.now().strftime("%A %Y-%m-%d %H:%M")
+        reply = await _chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You brief a voice assistant on what matters right now, across every app "
+                        "reporting in. Plain spoken English, at most 120 words, no markdown, no lists."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Current time: {current_time}\n\n{reports_text or '(no reports)'}",
+                },
+            ],
+            max_tokens=220,
+            timeout_s=90,  # Fix #4: a cold local model needs longer than 20s.
+        )
+        brief = reply if reply else _fallback_brief(rows)
+        _brief_cache["brief"] = brief
+        _brief_cache["updated"] = _now_ms()
+        _brief_cache["urgent"] = [
+            {"id": r["id"], "app": r["app"], "title": r["title"], "body": r["body"], "at": r["at"]}
+            for r in urgent_rows
+        ]
+        with hub_db() as conn:
+            arrived = conn.execute(
+                "SELECT COUNT(*) AS c FROM reports WHERE id > ?", (max_id_at_start,)
+            ).fetchone()["c"]
+        if not arrived:
+            break
 
 
 async def _debounced_rebuild():
@@ -363,7 +403,10 @@ def ack(a: Ack):
 async def ask(a: Ask):
     with hub_db() as conn:
         rows = conn.execute("SELECT * FROM reports ORDER BY at DESC LIMIT 200").fetchall()
-    reports_text = "\n".join(f"- [{r['app']}] {r['title']}: {r['body']}".strip() for r in rows)
+    now_ms = _now_ms()
+    reports_text = "\n".join(
+        f"- [{_age_str(r['at'], now_ms)}] [{r['app']}] {r['title']}: {r['body']}".strip() for r in rows
+    )
     vault_hits = _search_vault(a.question, limit=6)
     vault_text = "\n".join(vault_hits)
     reply = await _chat(
@@ -381,6 +424,7 @@ async def ask(a: Ask):
             },
         ],
         max_tokens=160,
+        timeout_s=25,
     )
     if reply is None:
         matches = [r for r in rows if a.question.lower() in (r["title"] + " " + r["body"]).lower()]
@@ -399,10 +443,11 @@ class Delegate(BaseModel):
 
 
 async def _run_hermes_oneshot(task: str) -> str:
-    """Runs `hermes -z <task>` one-shot and returns its stdout, or a short
-    explanation of what went wrong. Never raises and never blocks past the
-    delegate timeout — Hermes is a CLI agent, not a standing server, so a
-    subprocess is the straightforward way to hand it a job and get an answer."""
+    """Runs `hermes -z <task>` one-shot and returns its stdout on success.
+    Raises HTTPException(502) when Hermes is missing, times out, or exits
+    non-zero (fix #5) — a failure must never be spoken as Hermes's answer.
+    Hermes is a CLI agent, not a standing server, so a subprocess is the
+    straightforward way to hand it a job and get an answer."""
     try:
         proc = await asyncio.create_subprocess_exec(
             HERMES_BIN,
@@ -416,17 +461,22 @@ async def _run_hermes_oneshot(task: str) -> str:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return "Hermes didn't answer in time."
+            raise HTTPException(status_code=502, detail="Hermes didn't answer in time.")
         if proc.returncode != 0:
             detail = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
-            return f"Hermes couldn't run that: {detail[:200]}"
-        return stdout.decode(errors="ignore").strip() or "Hermes didn't say anything back."
+            raise HTTPException(status_code=502, detail=f"Hermes couldn't run that: {detail[:200]}")
+        answer = stdout.decode(errors="ignore").strip()
+        if not answer:
+            raise HTTPException(status_code=502, detail="Hermes didn't say anything back.")
+        return answer
     except FileNotFoundError:
-        return "Hermes isn't installed on this node."
+        raise HTTPException(status_code=502, detail="Hermes isn't installed on this node.")
 
 
 @app.post("/atlas/delegate", dependencies=[Depends(require_token)])
 async def delegate(d: Delegate):
+    # Fix #5: _run_hermes_oneshot raises 502 on any Hermes failure, so the
+    # report below is filed only on success and failures surface as errors.
     answer = await _run_hermes_oneshot(d.task)
     await report(Report(app="Hermes", title=d.task[:120], body=answer, key=None))
     return {"answer": answer}
