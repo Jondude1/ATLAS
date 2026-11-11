@@ -85,6 +85,7 @@ object Prefs {
     var speechModel by StrPref("speechModel", "gpt-4o-mini-tts")
     var speechVoice by StrPref("speechVoice", "alloy")
     var obeliskUrl by StrPref("obeliskUrl", "")
+    var hubToken by StrPref("hubToken", "")
     var ollamaUrl by StrPref("ollamaUrl", "")
     var ollamaModel by StrPref("ollamaModel", "mistral-nemo")
     var localSmallTalk by BoolPref("localSmallTalk", false)

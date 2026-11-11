@@ -1350,8 +1350,9 @@ fun SettingsScreen() {
         }
 
         Section("Obelisk and local models") {
-            PrefField("Atlas server URL on Obelisk (optional)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
-            Text("Sends every exchange to your Obsidian vault and lets recall search it. Server file is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
+            PrefField("Hub on Obelisk (for example http://obelisk:8765)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim() }
+            PrefField("Hub token, if you set one", Prefs.hubToken, secret = true) { Prefs.hubToken = it.trim() }
+            Text("Your apps report to the hub, its local model digests everything for free, and ${Prefs.name} only reads a short brief. It also logs every exchange to your vault. The server is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
             PrefField("Ollama URL (optional)", Prefs.ollamaUrl) { Prefs.ollamaUrl = it.trim() }
             PrefField("Ollama model", Prefs.ollamaModel) { Prefs.ollamaModel = it.trim() }
             ToggleRow("Use the local model for small talk", "Unprompted remarks cost nothing; falls back to Claude if the node is unreachable", Prefs.localSmallTalk) { Prefs.localSmallTalk = it }

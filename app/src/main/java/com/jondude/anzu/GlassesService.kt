@@ -445,7 +445,20 @@ class GlassesService : Service() {
             Atlas.announce("Timer's up: ${it.label}.")
         }
         updateWakeLock()
-        if (!Glasses.connected.value) return
+        // Urgent items from the hub: say them if he's wearing something, otherwise hold for later.
+        if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
+            val b = kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.brief(0) }
+            if (b != null && b.urgent.isNotEmpty()) {
+                if (Glasses.connected.value && System.currentTimeMillis() >= Prefs.quietUntil) {
+                    b.urgent.take(3).forEach { Atlas.announce("${it.app}: ${it.title}.") }
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { com.jondude.anzu.assist.Hub.ack(b.urgent.take(3).map { it.id }) }
+                } else b.urgent.forEach { Glasses.hold("${it.app}: ${it.title}") }
+            }
+        }
+        if (!Glasses.connected.value) {
+            ticks++
+            return
+        }
         // Either earbud can be worn alone; if the audio stream has gone quiet, look for the other one.
         if (Prefs.buddieListen && synchronized(worn) { worn.containsValue("buddie") }) BuddieLink.nudge(this)
         val now = System.currentTimeMillis()

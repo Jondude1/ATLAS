@@ -95,6 +95,15 @@
             </intent-filter>
         </service>
 
+        <!-- Jon's other phone apps report to ATLAS here; ATLAS forwards to the hub on Obelisk. -->
+        <receiver
+            android:name=".assist.ReportReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.jondude.atlas.REPORT" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

@@ -539,6 +539,11 @@ Everything you write is spoken aloud. One to three short sentences unless he cle
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on his desktop, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
+            Hub.brief()?.let { b ->
+                if (b.text.isNotBlank()) append("\nThe brief from your hub on Obelisk (digested from everything Jon's apps and systems report): ").append(b.text).append('\n')
+                if (b.urgent.isNotEmpty()) append("Urgent and not yet told to Jon: ").append(b.urgent.joinToString("; ") { "${it.app}: ${it.title}" }).append('\n')
+                append("For anything beyond the brief, use ask_hub rather than guessing.\n")
+            }
             Mcp.summary().takeIf { it.isNotBlank() }?.let {
                 append("\nSystems you're connected to, whose tools you can use directly (their tool names start with x_): ").append(it).append('\n')
             }
@@ -597,6 +602,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("vault_read", "Read the start of a note in the vault.", JSONObject().put("note", str("Note name.")), listOf("note")))
             a.put(tool("vault_note", "Append a line to today's Atlas note in the vault.", JSONObject().put("text", str("What to write.")), listOf("text")))
         }
+        if (Hub.configured()) {
+            a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
+                JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
+        }
         if (Hermes.configured()) {
             a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes on Jon's desktop. Runs in the background; you report the result when it comes back.",
                 JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
@@ -646,6 +655,13 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             append(if (ms >= 0) "Home Assistant reachable, $ms milliseconds. " else "Home Assistant unreachable. ")
         }
         if (Local.configured()) append("Local model tier configured. ")
+        append(
+            when {
+                !Hub.configured() -> "The Obelisk hub isn't set up. "
+                Hub.brief(0) != null -> "The Obelisk hub is answering. "
+                else -> "The Obelisk hub isn't answering. "
+            }
+        )
         append(if (Hermes.configured()) "Hermes is linked. " else "Hermes is not linked. ")
         Mcp.servers().forEach { s -> append("${s.name}: ${Mcp.status.value[s.name] ?: if (s.enabled) "not checked yet" else "off"}. ") }
         append(if (Vault.configured()) "Obsidian vault is linked. " else "No Obsidian vault chosen. ")
@@ -774,6 +790,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     msg
                 }
             }
+            "ask_hub" -> Hub.ask(input.optString("question")) ?: "The hub on Obelisk didn't answer."
             "vault_search" -> Vault.search(ctx, input.optString("query")).take(2400)
             "vault_read" -> Vault.readNote(ctx, input.optString("note"))
             "vault_note" -> if (Vault.appendDaily(ctx, "- " + input.optString("text"))) {

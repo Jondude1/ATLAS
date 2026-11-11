@@ -612,6 +612,25 @@ class AtlasTest {
         }
     }
 
+    // ---------- hub on Obelisk ----------
+    @Test
+    fun hubBriefAndReportsFollowTheContract() {
+        val b = com.jondude.anzu.assist.Hub.parseBrief(
+            """{"brief":"Quiet evening. Orbit has two new ideas.","urgent":[{"id":4,"app":"Home","title":"Garage open 40 min","body":"","at":1}],"updated":5}"""
+        )!!
+        assertEquals("Quiet evening. Orbit has two new ideas.", b.text)
+        assertEquals(4L, b.urgent[0].id)
+        assertEquals("Garage open 40 min", b.urgent[0].title)
+        assertNull(com.jondude.anzu.assist.Hub.parseBrief("not json"))
+        val r = com.jondude.anzu.assist.Hub.reportJson("Orbit", "New idea", "Desk HUD", "URGENT", "idea-7")
+        assertEquals("urgent", r.getString("priority"))
+        assertEquals("idea-7", r.getString("key"))
+        assertEquals("normal", com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "whenever", null).getString("priority"))
+        assertFalse(com.jondude.anzu.assist.Hub.reportJson("X", "t", "", "low", null).has("key"))
+        assertFalse(com.jondude.anzu.assist.Hub.configured())
+        assertNull(com.jondude.anzu.assist.Hub.brief())
+    }
+
     // ---------- updater / usage ----------
     @Test
     fun updaterReadsBuildNumbers() {
