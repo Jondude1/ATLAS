@@ -1147,6 +1147,68 @@ def test_routine_run_404_for_unknown_name(atlas):
     assert resp.status_code == 404
 
 
+def test_slicer_profile_defaults_when_no_file(atlas):
+    mod, client = atlas
+    body = client.get("/atlas/slicer/profile").json()
+    assert body["settings"] == mod.DEFAULT_SLICER_SETTINGS
+
+
+def test_slicer_tune_uses_llm_proposal_and_persists(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "CHANGE: retraction_speed_mms=55\nWHY: Faster retraction cuts down on oozing."
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    resp = client.post("/atlas/slicer/tune", json={"symptom": "the last print had stringing"})
+    body = resp.json()
+    assert body["changed"] is True
+    assert body["setting"] == "retraction_speed_mms"
+    assert body["new_value"] == 55.0
+    assert "oozing" in body["reason"]
+
+    profile = client.get("/atlas/slicer/profile").json()["settings"]
+    assert profile["retraction_speed_mms"] == 55.0
+
+    reports = client.get("/atlas/reports", params={"app": "slicer"}).json()["reports"]
+    assert len(reports) == 1
+    assert "retraction_speed_mms" in reports[0]["title"]
+
+
+def test_slicer_tune_clamps_an_out_of_bounds_llm_value(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return "CHANGE: nozzle_temp_c=9999\nWHY: way too hot"
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.post("/atlas/slicer/tune", json={"symptom": "warping at the corners"}).json()
+    assert body["new_value"] == mod.SLICER_SETTING_BOUNDS["nozzle_temp_c"][1]
+
+
+def test_slicer_tune_falls_back_to_keyword_when_model_is_down(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.post("/atlas/slicer/tune", json={"symptom": "stringing between towers"}).json()
+    assert body["setting"] == "retraction_distance_mm"
+    assert body["new_value"] == mod.DEFAULT_SLICER_SETTINGS["retraction_distance_mm"] + 0.2
+
+
+def test_slicer_tune_no_tweak_for_unrecognized_symptom_when_model_is_down(atlas, monkeypatch):
+    mod, client = atlas
+
+    async def fake_chat(messages, max_tokens=300, timeout_s=30):
+        return None
+
+    monkeypatch.setattr(mod, "_chat", fake_chat)
+    body = client.post("/atlas/slicer/tune", json={"symptom": "it sounds funny"}).json()
+    assert body == {"changed": False, "reason": "No specific tweak suggested for that symptom."}
+
+
 def test_athena_status_refresh_is_token_safe(atlas, monkeypatch):
     """Regression (Helios, live Nov 11): the auto-refresh must never raise 401.
 

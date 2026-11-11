@@ -124,6 +124,21 @@ FILAMENT_FILE = Path(
 QUEUE_FILE = Path(os.environ.get("ATLAS_QUEUE_FILE", str(VAULT / "Atlas" / "print_queue.md"))).expanduser()
 FILAMENT_CHECK_HOUR = int(os.environ.get("ATLAS_FILAMENT_CHECK_HOUR", "7"))  # local 24h clock
 
+# Conversational Slicer Tuning (#20): advisory only -- no OctoPrint/Moonraker
+# or any slicer-control service exists to apply a setting automatically, so
+# this tracks a settings profile in the vault and proposes a bounded tweak
+# Jon applies himself. Bounds are enforced in code, not just the prompt, so
+# a bad model response can't produce an absurd suggestion.
+SLICER_PROFILE_FILE = Path(
+    os.environ.get("ATLAS_SLICER_PROFILE_FILE", str(VAULT / "Atlas" / "slicer_profile.md"))
+).expanduser()
+DEFAULT_SLICER_SETTINGS = {"retraction_distance_mm": 0.8, "retraction_speed_mms": 40.0, "nozzle_temp_c": 200.0}
+SLICER_SETTING_BOUNDS = {
+    "retraction_distance_mm": (0.0, 10.0),
+    "retraction_speed_mms": (5.0, 100.0),
+    "nozzle_temp_c": (150.0, 260.0),
+}
+
 # Created up front (not after the routes) because the MCP sub-app's session
 # manager needs its lifespan wired into the parent FastAPI app at construction.
 mcp = FastMCP("atlas-hub")
@@ -437,6 +452,10 @@ class Routine(BaseModel):
 
 class RoutineRun(BaseModel):
     name: str
+
+
+class SlicerTune(BaseModel):
+    symptom: str
 
 
 def _now_ms() -> int:
@@ -1756,6 +1775,114 @@ async def filament_check():
     return await _check_filament_for_queue()
 
 
+def _parse_slicer_line(line: str) -> Optional[tuple]:
+    line = line.strip()
+    if not line.startswith("-"):
+        return None
+    parts = [p.strip() for p in line[1:].split("|")]
+    if len(parts) < 2 or not parts[0]:
+        return None
+    try:
+        return (parts[0], float(parts[1]))
+    except ValueError:
+        return None
+
+
+def _read_slicer_settings() -> dict:
+    settings = dict(DEFAULT_SLICER_SETTINGS)
+    if SLICER_PROFILE_FILE.exists():
+        for line in SLICER_PROFILE_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+            parsed = _parse_slicer_line(line)
+            if parsed:
+                settings[parsed[0]] = parsed[1]
+    return settings
+
+
+def _write_slicer_settings(settings: dict) -> None:
+    SLICER_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Atlas Conversational Slicer Tuning -- current profile (hub-managed)", ""]
+    lines.extend(f"- {name} | {value}" for name, value in settings.items())
+    SLICER_PROFILE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _fallback_slicer_tweak(symptom: str, current: dict) -> tuple:
+    low = symptom.lower()
+    if "string" in low:
+        return "retraction_distance_mm", current.get("retraction_distance_mm", 0.8) + 0.2, (
+            "Increased retraction distance slightly to reduce stringing."
+        )
+    if "warp" in low:
+        return "nozzle_temp_c", current.get("nozzle_temp_c", 200.0) - 5, (
+            "Lowered nozzle temp slightly to reduce warping."
+        )
+    return None, None, None
+
+
+async def _tune_slicer(symptom: str) -> dict:
+    current = _read_slicer_settings()
+    settings_text = "\n".join(f"- {k}: {v}" for k, v in current.items())
+    reply = await _chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You tune FDM 3D-printer slicer settings. Given the current settings and "
+                    "a reported print symptom, propose exactly one targeted change. Reply as "
+                    "exactly two lines: 'CHANGE: <setting>=<value>' then 'WHY: <reason>', "
+                    "using one of these setting names: "
+                    + ", ".join(DEFAULT_SLICER_SETTINGS)
+                    + ". Keep changes modest."
+                ),
+            },
+            {"role": "user", "content": f"Current settings:\n{settings_text}\n\nSymptom: {symptom}"},
+        ],
+        max_tokens=100,
+        timeout_s=30,
+    )
+    setting = value = reason = None
+    if reply:
+        for line in reply.splitlines():
+            if line.upper().startswith("CHANGE:") and "=" in line:
+                name, _, val = line.split(":", 1)[1].partition("=")
+                try:
+                    if name.strip() in current:
+                        setting, value = name.strip(), float(val.strip())
+                except ValueError:
+                    pass
+            elif line.upper().startswith("WHY:"):
+                reason = line.split(":", 1)[1].strip()
+    if setting is None:
+        setting, value, fallback_reason = _fallback_slicer_tweak(symptom, current)
+        reason = reason or fallback_reason
+    if setting is None:
+        return {"changed": False, "reason": "No specific tweak suggested for that symptom."}
+    lo, hi = SLICER_SETTING_BOUNDS.get(setting, (float("-inf"), float("inf")))
+    value = max(lo, min(hi, value))
+    old_value = current.get(setting)
+    current[setting] = value
+    _write_slicer_settings(current)
+    await report(
+        Report(
+            app="slicer",
+            title=f"Tuned {setting}",
+            body=f"{old_value} -> {value}. {reason or ''}".strip(),
+            priority="normal",
+            key=None,
+        )
+    )
+    return {"changed": True, "setting": setting, "old_value": old_value, "new_value": value, "reason": reason}
+
+
+@app.get("/atlas/slicer/profile", dependencies=[Depends(require_token)])
+def slicer_profile():
+    return {"settings": _read_slicer_settings()}
+
+
+@app.post("/atlas/slicer/tune", dependencies=[Depends(require_token)])
+async def slicer_tune(t: SlicerTune):
+    return await _tune_slicer(t.symptom)
+
+
 @app.post("/atlas/ask", dependencies=[Depends(require_token)])
 async def ask(a: Ask):
     with hub_db() as conn:
@@ -2356,6 +2483,18 @@ def mcp_print_queue() -> dict:
 async def mcp_filament_check() -> dict:
     """Check whether on-hand filament covers the queued jobs; reports any material that's short."""
     return await filament_check()
+
+
+@mcp.tool
+def mcp_slicer_profile() -> dict:
+    """Get the current slicer settings profile tracked by the hub."""
+    return slicer_profile()
+
+
+@mcp.tool
+async def mcp_slicer_tune(symptom: str) -> dict:
+    """Given a reported print symptom, propose one bounded slicer-setting tweak and record it."""
+    return await slicer_tune(SlicerTune(symptom=symptom))
 
 
 @mcp.tool
