@@ -19,17 +19,17 @@ alive() { adb shell pidof $PKG >/dev/null 2>&1; }
 crashed() { adb logcat -d -s AndroidRuntime:E | grep -q "Process: $PKG"; }
 dump() {
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml > ui.xml
-  # The emulator's own launcher sometimes hangs ("Pixel Launcher isn't responding"). That's not our app: wait it out.
+  # The emulator's own launcher sometimes hangs ("Pixel Launcher isn't responding"). That's not our app: close it.
   if grep -q "isn&apos;t responding\|isn't responding" ui.xml && ! grep -q "ATLAS isn\|Atlas isn" ui.xml; then
     local xy; xy=$(python3 - <<'PY'
 import re
 x = open('ui.xml', encoding='utf-8', errors='ignore').read()
-m = re.findall(r'text="Wait"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', x)
+m = re.findall(r'text="Close app"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', x)
 if m:
     a, b, c, d = map(int, m[-1]); print((a + c) // 2, (b + d) // 2)
 PY
 )
-    [ -n "$xy" ] && { echo "dismissing a system 'not responding' dialog"; adb shell input tap $xy; sleep 2; }
+    [ -n "$xy" ] && { echo "closing a hung system app: $(grep -o '[A-Za-z ]*isn&apos;t responding' ui.xml | head -1)" >&2; adb shell input tap $xy; sleep 2; }
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml > ui.xml
   fi
 }
