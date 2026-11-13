@@ -1025,4 +1025,32 @@ class AtlasTest {
         assertEquals("Nothing's queued. I can't check the print camera.", W.line(null, null, null, null))
         assertEquals("The hub wants its token first. It goes in Settings, Obelisk.", com.jondude.anzu.assist.Hub.failure(401))
     }
+
+    @Test
+    fun storyIsCappedAndBlankKeepsPrevious() {
+        val R = com.jondude.anzu.assist.Relevance
+        val long = (1..400).joinToString(" ") { "w$it" }
+        val out = R.storyUpdate("old", long, 300)
+        assertEquals(300, out.split(" ").size)
+        assertTrue(out.endsWith("w300"))
+        assertEquals("old", R.storyUpdate("old", "  ", 300))
+        assertEquals("short one", R.storyUpdate("old", " short one ", 300))
+    }
+
+    @Test
+    fun memorySelectionIsRelevanceFirst() {
+        val R = com.jondude.anzu.assist.Relevance
+        val few = (1..40).map { "fact $it" }
+        assertEquals(few, R.select(few, "anything", 40))
+        val facts = (1..80).map { "Unrelated item number $it" }.toMutableList()
+        facts[5] = "Ashley teaches violin lessons"
+        facts[10] = "Jon builds a garden shed"
+        val picked = R.select(facts, "Ashley asked about the garden", 40)
+        assertEquals(40, picked.size)
+        assertTrue(facts[5] in picked && facts[10] in picked)
+        assertEquals(picked, facts.filter { it in picked })
+        // ties (no overlap) fall to recency: the last 40 stored, in stored order
+        val plain = (1..80).map { "Plain entry $it" }
+        assertEquals(plain.takeLast(40), R.select(plain, "zzz", 40))
+    }
 }

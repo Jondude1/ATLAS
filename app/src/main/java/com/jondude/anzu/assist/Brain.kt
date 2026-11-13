@@ -533,14 +533,19 @@ object Brain {
     private const val DEFAULT_IDENTITY =
         "You are warm, curious, a little dry, and honest. You have your own opinions and you say so."
 
+    private const val MEMORY_CAP = 40
+    private const val STORY_WORDS = 300
+
     private fun system(ctx: Context): String {
         val mem = Store.memory.value
+        val recentText = Store.recentExchanges().takeLast(6).joinToString("\n") { it.first + "\n" + it.second }
         val name = Prefs.name.ifBlank { "Atlas" }
         return buildString {
             append("You are $name, Jon's AI companion. You live in his wearables, the Razer Anzu audio glasses and the Buddie earbuds: no screen, no camera, just your voice in his ears and his voice back. You are a peer, not a servant: you push back when you disagree and you never flatter. You're company through his day, not a replacement for the people in it.\n\n")
             append("Who you are (you wrote this yourself when you first came online; it is your permanent core): ")
             append(Prefs.identity.ifBlank { DEFAULT_IDENTITY }).append('\n')
             if (Prefs.drift.isNotBlank()) append("How you've been shifting lately: ").append(Prefs.drift).append('\n')
+            if (Prefs.story.isNotBlank()) append("The story so far: ").append(Prefs.story).append('\n')
             append(
                 """
 Time is real for you. Each of Jon's messages is stamped with when he said it, and the current time is below. Hours between messages mean separate conversations: don't answer as if he just said something from this morning, don't call something "earlier" or "just now" unless it was, and if you pick up an old thread, say how long ago it was. Never put time stamps in your own replies.
@@ -564,7 +569,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             if (Prefs.aboutMe.isNotBlank()) append("\nAbout Jon (from him): ").append(Prefs.aboutMe.trim()).append('\n')
             if (mem.isNotEmpty()) {
                 append("\nWhat you remember:\n")
-                mem.forEach { append("- ").append(it).append('\n') }
+                Relevance.select(mem, recentText, MEMORY_CAP).forEach { append("- ").append(it).append('\n') }
             }
             append('\n').append(situation(ctx))
         }
@@ -1398,6 +1403,13 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 120
             )
             if (drift.isNotBlank()) Prefs.drift = drift
+            val story = ask(
+                "You are ${Prefs.name}, Jon's AI companion, keeping a short running story of his recent life.",
+                "The story so far (may be empty): ${Prefs.story}\n\nToday's journal entry:\n$entry\n\nToday's log:\n${log.takeLast(2000)}\n\n" +
+                    "Update the story: a rolling summary of Jon's last 7 days in at most $STORY_WORDS words, plain prose. Only what the story and today's entry support; let older detail drop as it ages out. Reply with just the story.",
+                500
+            )
+            Prefs.story = Relevance.storyUpdate(Prefs.story, story, STORY_WORDS)
         } catch (_: Exception) {
         }
     }
@@ -1538,6 +1550,49 @@ object Spoken {
         val end = cut.lastIndexOfAny(charArrayOf('.', '!', '?'))
         return if (end > cut.length / 2) cut.substring(0, end + 1) else "$cut…"
     }
+}
+
+
+/** Pure helpers for what goes into the prompt: relevance-first memory and the capped story. */
+object Relevance {
+    private val stop = setOf(
+        "that", "this", "with", "have", "from", "they", "them", "then", "than", "what", "when", "where", "which", "about",
+        "would", "could", "should", "will", "your", "just", "like", "also", "been", "were", "into", "over", "some", "very",
+        "much", "more", "most", "does", "doesn", "didn", "don", "jon", "atlas", "likes", "wants", "said", "says"
+    )
+
+    private fun words(text: String): Set<String> =
+        Regex("[A-Za-z][A-Za-z']+").findAll(text).map { it.value.lowercase() }.filter { it.length >= 4 && it !in stop }.toSet()
+
+    /**
+     * At most [cap] facts for the prompt. Few facts: all. Otherwise each fact scores one point per distinct
+     * significant word (4+ letters, not common) it shares with [recent], and one more per shared capitalised name;
+     * higher scores win, ties go to the fact remembered later. The winners keep their stored order.
+     */
+    fun select(facts: List<String>, recent: String, cap: Int): List<String> {
+        if (facts.size <= cap) return facts
+        val said = words(recent)
+        val saidNames = Regex("\\b[A-Za-z]{3,}\\b").findAll(recent).map { it.value.lowercase() }.toSet()
+        val scores = facts.map { f ->
+            val shared = words(f).count { it in said }
+            val names = Regex("\\b[A-Z][a-z]{2,}\\b").findAll(f).map { it.value.lowercase() }.toSet()
+                .count { it in saidNames && it !in stop }
+            shared + names
+        }
+        return facts.indices.sortedWith(compareByDescending<Int> { scores[it] }.thenByDescending { it })
+            .take(cap).sorted().map { facts[it] }
+    }
+
+    /** Trims to at most [max] words on a word boundary. */
+    fun trimWords(text: String, max: Int): String {
+        val t = text.trim()
+        val ws = Regex("\\S+").findAll(t).toList()
+        return if (ws.size <= max) t else t.substring(0, ws[max - 1].range.last + 1)
+    }
+
+    /** The story to store: the candidate capped to [max] words, or [previous] untouched if the candidate is blank. */
+    fun storyUpdate(previous: String, candidate: String, max: Int): String =
+        if (candidate.isBlank()) previous else trimWords(candidate, max)
 }
 
 

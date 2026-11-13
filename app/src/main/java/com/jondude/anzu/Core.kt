@@ -169,6 +169,7 @@ object Prefs {
     var identity by StrPref("identity", "")
     /** How the personality has shifted lately. Rewritten slowly over time. */
     var drift by StrPref("drift", "")
+    var story by StrPref("story", "")
     var lastDriftDay by StrPref("lastDriftDay", "")
     var voiceName by StrPref("voiceName", "")
     /** 0 = the phone's speech engine, 1 = ElevenLabs, 2 = any OpenAI-style speech server */
