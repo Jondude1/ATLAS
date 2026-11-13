@@ -96,8 +96,8 @@ object Net {
     fun postJson(url: String, headers: Map<String, String>, body: String, timeoutMs: Int = 30_000, connectTimeoutMs: Int = 8_000) =
         request("POST", url, headers, body, timeoutMs, connectTimeoutMs)
 
-    fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 10_000) =
-        request("GET", url, headers, null, timeoutMs)
+    fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 10_000, connectTimeoutMs: Int = 8_000) =
+        request("GET", url, headers, null, timeoutMs, connectTimeoutMs)
 }
 
 object HomeAssistant {

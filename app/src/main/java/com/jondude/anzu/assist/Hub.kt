@@ -51,7 +51,7 @@ object Hub {
         val now = System.currentTimeMillis()
         cached?.let { if (now - fetchedAt < maxAgeMs) return it }
         return try {
-            val (code, body) = Net.get(base() + "/atlas/brief", auth(), 6_000)
+            val (code, body) = Net.get(base() + "/atlas/brief", auth(), 6_000, connectTimeoutMs = 2_000)
             needsToken = code == 401 || code == 403
             if (code !in 200..299) return cached
             parseBrief(body)?.also { cached = it; fetchedAt = now; lastSpokenLoops = parseLoops(body) }

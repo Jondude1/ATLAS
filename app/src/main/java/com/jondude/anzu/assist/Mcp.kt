@@ -139,7 +139,7 @@ object Mcp {
         val conn = URL(com.jondude.anzu.tailnet(server.url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
-            conn.connectTimeout = 8_000
+            conn.connectTimeout = 4_000
             conn.readTimeout = timeoutMs
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
