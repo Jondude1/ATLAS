@@ -1333,7 +1333,11 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 null
             }
         }
-        if (text == null && !hasKey() && !Local.configured()) {
+        if (text == null && !hasKey()) {
+            // Helios fix (regression from abb5aef): the local tier is hardwired now (A6), so
+            // "not configured" no longer covers "configured but unreachable". Without this,
+            // Speak up returns silence whenever Ollama can't be reached and there's no API
+            // key — the canned line is the honest fallback (issue #4, Amendment 3 / R1).
             text = if (kind == "greeting") "I'm here." else canned.random()
         }
         text?.also { record("[${Prefs.name} spoke up on its own]", it, "") }
