@@ -529,6 +529,7 @@ fun knowsLine(
         append(
             when (wear) {
                 "buddie" -> " Your earbuds are on"
+                "pixelbuds" -> " Your Pixel Buds are on"
                 "galaxybuds" -> " Your Galaxy Buds are on"
                 else -> " Your glasses are on"
             }
@@ -1289,7 +1290,22 @@ fun SettingsScreen() {
         CompositionLocalProvider(LocalSettingsNav provides SettingsNav(page) { page = it }) {
         Section("Brain") {
             PrefField("Anthropic API key", Prefs.apiKey, secret = true) { Prefs.apiKey = it.trim() }
-            PrefField("Model", Prefs.model) { Prefs.model = it.trim() }
+            var model by remember { mutableStateOf(Prefs.model) }
+            var custom by remember { mutableStateOf(Prefs.model !in Prefs.KNOWN_MODELS) }
+            Text("Model", color = Cream, fontSize = 16.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "Sonnet 5.5 (recommended)" to "claude-sonnet-5-5",
+                    "Sonnet 4.5" to "claude-sonnet-4-5",
+                    "Haiku 4.5 (economy)" to "claude-haiku-4-5"
+                ).forEach { (label, id) ->
+                    if (!custom && model == id) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground), elevation = null) { Text(label) }
+                    else SoftButton(onClick = { model = id; custom = false; Prefs.model = id }) { Text(label) }
+                }
+                if (custom) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground), elevation = null) { Text("Custom…") }
+                else SoftButton(onClick = { custom = true }) { Text("Custom…") }
+            }
+            if (custom) PrefField("Custom model ID", model) { model = it; Prefs.model = it.trim() }
             PrefField("About you (things it should know from day one)", Prefs.aboutMe, lines = 3) { Prefs.aboutMe = it }
         }
 

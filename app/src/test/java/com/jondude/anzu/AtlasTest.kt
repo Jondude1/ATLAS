@@ -55,7 +55,7 @@ class AtlasTest {
         assertEquals("buddie", wearableKind("Buddie-1234", "BB", ""))
         assertEquals("buddie", wearableKind("Buddie", "BB", "AA"))
         assertEquals("glasses", wearableKind("Renamed", "AA", "AA"))
-        assertNull(wearableKind("Jon's Pixel Buds Pro 2", "CC", "AA")) // set aside for now
+        assertEquals("pixelbuds", wearableKind("Jon's Pixel Buds Pro 2", "CC", "AA"))
         assertNull(wearableKind("CMF Watch Pro 2-C599", "EE", "AA"))
         assertNull(wearableKind("Some Anzu clone", "DD", "AA"))
     }
@@ -851,7 +851,7 @@ class AtlasTest {
     fun galaxyBudsAndMicChoices() {
         assertEquals("galaxybuds", wearableKind("Galaxy Buds2 Pro (A1B2)", "AA", ""))
         assertEquals("galaxybuds", wearableKind("Jon's Buds+", "AB", ""))
-        assertNull(wearableKind("Pixel Buds Pro 2", "AC", ""))
+        assertEquals("pixelbuds", wearableKind("Pixel Buds Pro 2", "AC", ""))
         assertEquals("buddie", wearableKind("Buddie-L", "AD", ""))
         assertEquals("Phone mic", MicRoute.choiceLabel(2))
         Glasses.active.value = "galaxybuds"

@@ -781,6 +781,7 @@ class NotifyListener : NotificationListenerService() {
 fun wearableKind(name: String, address: String, savedGlassesAddress: String): String? = when {
     savedGlassesAddress.isNotBlank() && address == savedGlassesAddress -> "glasses"
     name.contains("buddie", ignoreCase = true) -> "buddie"
+    name.contains("pixel", ignoreCase = true) && name.contains("buds", ignoreCase = true) -> "pixelbuds"
     name.contains("galaxy buds", ignoreCase = true) || (name.contains("buds", ignoreCase = true) && !name.contains("pixel", ignoreCase = true)) -> "galaxybuds"
     savedGlassesAddress.isBlank() && name.contains("anzu", ignoreCase = true) -> "glasses"
     else -> null

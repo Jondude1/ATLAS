@@ -1089,7 +1089,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         system: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, timeoutMs: Int = 30_000
     ): JSONObject {
         val body = JSONObject()
-            .put("model", Prefs.model.trim().ifBlank { "claude-haiku-5-5" })
+            .put("model", Prefs.model.trim().ifBlank { "claude-sonnet-5-5" })
             .put("max_tokens", maxTokens)
             .put("system", system)
             .put("messages", messages)

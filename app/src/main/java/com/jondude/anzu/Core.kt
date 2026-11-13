@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONArray
@@ -134,6 +135,18 @@ object Prefs {
             if (m.isNullOrBlank() || m == "mistral-nemo" || m == "mistral") e.putString("ollamaModel", "qwen3:14b-ha")
             e.apply()
         }
+        if (!sp.getBoolean("modelFixV1", false)) {
+            // Spec A2: the old default "claude-haiku-5-5" is not a real model ID, so every primary-brain call
+            // failed and fell back silently. Reset blank/bogus/non-Claude values; keep deliberate custom IDs.
+            val e = sp.edit().putBoolean("modelFixV1", true)
+            val m = sp.getString("model", "")?.trim().orEmpty()
+            val keep = m in KNOWN_MODELS || (m.startsWith("claude-") && m != "claude-haiku-5-5")
+            if (!keep) {
+                e.putString("model", "claude-sonnet-5-5")
+                Log.i("Prefs", "modelFixV1: reset model '$m' -> claude-sonnet-5-5")
+            }
+            e.apply()
+        }
         if (!sp.getBoolean("renamedToAtlas", false)) {
             val e = sp.edit().putBoolean("renamedToAtlas", true)
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
@@ -141,8 +154,10 @@ object Prefs {
         }
     }
 
+    val KNOWN_MODELS = listOf("claude-sonnet-5-5", "claude-sonnet-4-5", "claude-haiku-4-5")
+
     var apiKey by StrPref("apiKey", "")
-    var model by StrPref("model", "claude-haiku-5-5")
+    var model by StrPref("model", "claude-sonnet-5-5")
     var name by StrPref("name", "Atlas")
     /** Core identity Atlas wrote for itself on first run. Fixed afterwards. */
     var identity by StrPref("identity", "")
