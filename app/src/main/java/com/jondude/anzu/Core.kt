@@ -51,16 +51,22 @@ const val OBELISK_HUB = "http://100.65.202.81:8765"
 /** Home Assistant (port 80). */
 const val HOME_ASSISTANT = "http://100.68.172.113"
 /** Athena, the Windows desktop. */
-const val ATHENA = "100.88.113.24"
+const val ATHENA = "100.67.98.121"
 /** Obelisk, the local AI node (Ollama, Hermes, the hub). */
 const val OBELISK = "100.65.202.81"
+/** Ollama on Obelisk (hardwired, spec A6). */
+const val OLLAMA = "http://100.65.202.81:11434"
+/** Helios relay MCP on Athena (hardwired, spec A6). */
+const val HELIOS_RELAY = "http://100.67.98.121:8095/mcp"
 
 /** MagicDNS names → tailnet IPs, so an address typed or saved by name still works when the name won't resolve. */
 val TAILNET = mapOf(
     "obalisk.tail8dab0b.ts.net" to "100.65.202.81",
     "obalisk" to "100.65.202.81",
-    "athena.tail8dab0b.ts.net" to "100.88.113.24",
-    "athena" to "100.88.113.24",
+    "athena.tail8dab0b.ts.net" to "100.67.98.121",
+    "athena" to "100.67.98.121",
+    "athena-2.tail8dab0b.ts.net" to "100.67.98.121",
+    "athena-2" to "100.67.98.121",
     "homeassistant-1.tail8dab0b.ts.net" to "100.68.172.113",
     "homeassistant-1" to "100.68.172.113"
 )
@@ -116,6 +122,18 @@ object Prefs {
             }
             e.apply()
         }
+        if (!sp.getBoolean("hardwireV1", false)) {
+            // Spec A1+A6 (issue #4, Set 1, Helios step-in): server locations are hardwired —
+            // Jon is the only user. Force the built-in addresses and move the local model
+            // off Mistral/Nemo onto qwen3:14b-ha.
+            val e = sp.edit().putBoolean("hardwireV1", true)
+            e.putString("obeliskUrl", OBELISK_HUB)
+            e.putString("haUrl", HOME_ASSISTANT)
+            e.putString("ollamaUrl", OLLAMA)
+            val m = sp.getString("ollamaModel", "")
+            if (m.isNullOrBlank() || m == "mistral-nemo" || m == "mistral") e.putString("ollamaModel", "qwen3:14b-ha")
+            e.apply()
+        }
         if (!sp.getBoolean("renamedToAtlas", false)) {
             val e = sp.edit().putBoolean("renamedToAtlas", true)
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
@@ -145,8 +163,8 @@ object Prefs {
     var speechVoice by StrPref("speechVoice", "alloy")
     var obeliskUrl by StrPref("obeliskUrl", OBELISK_HUB)
     var hubToken by StrPref("hubToken", "")
-    var ollamaUrl by StrPref("ollamaUrl", "")
-    var ollamaModel by StrPref("ollamaModel", "mistral-nemo")
+    var ollamaUrl by StrPref("ollamaUrl", OLLAMA)
+    var ollamaModel by StrPref("ollamaModel", "qwen3:14b-ha")
     var localSmallTalk by BoolPref("localSmallTalk", false)
     var amberWords by StrPref("amberWords", "unlock, garage, open the door, alarm, thermostat, oven, heater")
     var redWords by StrPref("redWords", "disarm")

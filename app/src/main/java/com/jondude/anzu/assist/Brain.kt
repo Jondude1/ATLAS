@@ -388,7 +388,7 @@ object Local {
         messages.forEach { (role, content) -> arr.put(JSONObject().put("role", role).put("content", content)) }
         val (code, body) = Net.postJson(
             Prefs.ollamaUrl.trim().trimEnd('/') + "/api/chat", emptyMap(),
-            JSONObject().put("model", Prefs.ollamaModel.trim()).put("messages", arr).put("stream", false).toString(),
+            JSONObject().put("model", Prefs.ollamaModel.trim()).put("messages", arr).put("stream", false).put("keep_alive", "30m").toString(),
             45_000
         )
         if (code !in 200..299) throw RuntimeException("Ollama $code")
