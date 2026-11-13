@@ -585,12 +585,25 @@ def _prune_old_reports(conn: sqlite3.Connection):
 
 
 async def _chat(messages: list[dict], max_tokens: int = 300, timeout_s: float = 30) -> Optional[str]:
-    """Calls the OpenAI-style endpoint. Returns None (never raises) if it's down."""
+    """Calls the OpenAI-style endpoint. Returns None (never raises) if it's down.
+
+    Qwen3 models (qwen3:14b-ha included) are "thinking" models by default:
+    without a cue to skip the reasoning preamble, they can spend the whole
+    max_tokens budget on chain-of-thought and return empty content, which
+    _rebuild_brief/ask then treat as "model's down" and silently use the
+    deterministic fallback instead (B1.1, live-confirmed via finish_reason
+    "length" + empty content on the exact brief prompt). Qwen3's own inline
+    control token /no_think, prepended to the system message here, is the
+    fix -- centralized so every _chat() caller inherits it.
+    """
+    primed = messages
+    if messages and messages[0].get("role") == "system":
+        primed = [dict(messages[0], content=f"/no_think {messages[0]['content']}")] + messages[1:]
     try:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             resp = await client.post(
                 f"{LLM_URL.rstrip('/')}/chat/completions",
-                json={"model": LLM_MODEL, "messages": messages, "max_tokens": max_tokens},
+                json={"model": LLM_MODEL, "messages": primed, "max_tokens": max_tokens},
             )
             resp.raise_for_status()
             data = resp.json()

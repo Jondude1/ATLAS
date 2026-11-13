@@ -8,6 +8,7 @@ import sys
 
 import asyncio
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -322,6 +323,54 @@ def test_capture_key_replaces_earlier_capture(atlas):
     captures = client.get("/atlas/captures").json()["captures"]
     assert len(captures) == 1
     assert captures[0]["text"] == "idea: shop banner v2"
+
+
+def test_chat_prepends_no_think_to_the_system_message(atlas, monkeypatch):
+    mod, client = atlas
+    captured = {}
+
+    async def fake_post(self, url, json=None, **kwargs):
+        captured["json"] = json
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "hi"}}]},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    import asyncio as _asyncio
+
+    reply = _asyncio.run(
+        mod._chat(
+            [
+                {"role": "system", "content": "You are a brief composer."},
+                {"role": "user", "content": "reports here"},
+            ]
+        )
+    )
+    assert reply == "hi"
+    sent_messages = captured["json"]["messages"]
+    assert sent_messages[0]["content"] == "/no_think You are a brief composer."
+    assert sent_messages[1]["content"] == "reports here"  # user message untouched
+
+
+def test_chat_leaves_messages_alone_without_a_leading_system_role(atlas, monkeypatch):
+    mod, client = atlas
+    captured = {}
+
+    async def fake_post(self, url, json=None, **kwargs):
+        captured["json"] = json
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200, request=request, json={"choices": [{"message": {"content": "hi"}}]}
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    import asyncio as _asyncio
+
+    _asyncio.run(mod._chat([{"role": "user", "content": "no system role here"}]))
+    assert captured["json"]["messages"][0]["content"] == "no system role here"
 
 
 def test_captures_sort_uses_local_model_when_available(atlas, monkeypatch):
