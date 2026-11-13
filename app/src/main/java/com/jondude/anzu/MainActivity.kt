@@ -419,10 +419,9 @@ private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
     "Brain" to (Icons.Filled.Star to "API key, model, what it knows about you"),
     "Identity" to (Icons.Filled.Face to "Name and personality"),
     "Presence" to (Icons.Filled.Favorite to "When and how often it speaks up"),
-    "Glasses and earbuds" to (Icons.Filled.Person to "How it behaves in each wearable"),
+    "Earbuds" to (Icons.Filled.Person to "Volume, mic sensitivity, how often it speaks"),
     "Voice" to (Icons.Filled.PlayArrow to "Phone voices, ElevenLabs, custom"),
     "Listening" to (Icons.Filled.Phone to "Microphone and talking back"),
-    "Buddie earbuds" to (Icons.Filled.Build to "Wake word, stream, diagnostics"),
     "Home Assistant" to (Icons.Filled.Home to "Your house and what needs a spoken okay"),
     "Connections" to (Icons.Filled.Share to "Everything Atlas can reach and control"),
     "Athena" to (Icons.Filled.Build to "Containers on Athena, and a command line to it"),
@@ -1264,7 +1263,6 @@ fun SettingsScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by Updater.status.collectAsState()
-    var chat by remember { mutableStateOf(Prefs.chattiness.toFloat()) }
     var rate by remember { mutableStateOf(Prefs.speechRate.toFloat()) }
     var mode by remember { mutableIntStateOf(Prefs.listenMode) }
     var identity by remember { mutableStateOf(Prefs.identity) }
@@ -1353,22 +1351,11 @@ fun SettingsScreen() {
             ToggleRow("Leave-now alerts", "For calendar events with a location, based on the current drive time", Prefs.commuteAlerts) { Prefs.commuteAlerts = it }
         }
 
-        Section("Glasses and earbuds") {
+        Section("Earbuds") {
             val often = listOf("now and then (about every 2 hours)", "regularly (about every 50 minutes)", "chatty (about every 20 minutes)")
             var chatBuds by remember { mutableStateOf(Prefs.chattinessBuds.toFloat()) }
-            var volGlasses by remember { mutableStateOf(Prefs.volumeGlasses.toFloat()) }
             var volBuds by remember { mutableStateOf(Prefs.volumeBuds.toFloat()) }
-            Text("${Prefs.name} notices which one you put on and behaves differently in each. If both are connected, the one you put on last wins.", color = Muted, fontSize = 13.sp)
-
-            Text("In the glasses (open-ear)", fontWeight = FontWeight.Bold)
-            Text("Speaks up " + often[chat.toInt().coerceIn(0, 2)])
-            Slider(value = chat, onValueChange = { chat = it; Prefs.chattiness = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
-            Text("Volume ${volGlasses.toInt()}%")
-            Slider(value = volGlasses, onValueChange = { volGlasses = it; Prefs.volumeGlasses = it.toInt() }, valueRange = 30f..300f)
-            ToggleRow("Discreet", "People nearby can hear open-ear speakers: short replies, and nothing private said out loud", Prefs.discreetGlasses) { Prefs.discreetGlasses = it }
-            ToggleRow("Notifications: sender only", "Say who it's from, not what it says", Prefs.senderOnlyGlasses) { Prefs.senderOnlyGlasses = it }
-
-            Text("In the earbuds (private)", fontWeight = FontWeight.Bold)
+            Text("Your earbuds are the private channel — only you hear what's said.", color = Muted, fontSize = 13.sp)
             Text("Speaks up " + often[chatBuds.toInt().coerceIn(0, 2)])
             Slider(value = chatBuds, onValueChange = { chatBuds = it; Prefs.chattinessBuds = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Volume ${volBuds.toInt()}%")
@@ -1382,9 +1369,6 @@ fun SettingsScreen() {
             Slider(value = mic, onValueChange = { mic = it; Prefs.micBoost = it.toInt().coerceIn(0, 2) }, valueRange = 0f..2f, steps = 1)
             Text("Higher hears you better when you speak softly; lower if it picks up too much around you. Re-seat the buds after changing.", color = Muted, fontSize = 13.sp)
             ToggleRow("Notifications: sender only", "Off reads the whole message, since only you can hear", Prefs.senderOnlyBuds) { Prefs.senderOnlyBuds = it }
-
-            ToggleRow("Say so when I switch", "A short line when you swap between them", Prefs.announceSwitch) { Prefs.announceSwitch = it }
-            Text("Also different by design: eye-break nudges only happen in the glasses, and in the earbuds you answer hands-free through their own microphone stream.", color = Muted, fontSize = 12.sp)
         }
 
         Section("Voice") {
@@ -1553,65 +1537,6 @@ fun SettingsScreen() {
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
             SoftButton(onClick = { Atlas.micTest(ctx) }) { Text("Test voice and microphone") }
-        }
-
-        Section("Buddie earbuds") {
-            Text("Buddie earbuds stream their always-on microphone to the phone, so ${Prefs.name} can hear you without a gesture. Anything named Buddie is picked up automatically.", color = Muted, fontSize = 13.sp)
-            ToggleRow("Listen through Buddie", "Connect to the earbuds' audio stream when you put them in", Prefs.buddieListen) { Prefs.buddieListen = it }
-            ToggleRow("Wake word", "Say \"${Prefs.name}\" and then what you want. For 30 seconds after it speaks, you can just answer.", Prefs.wakeWord) { Prefs.wakeWord = it }
-            ToggleRow("Ambient context", "Also transcribe other people nearby so ${Prefs.name} knows what's going on. Off means only your own voice is ever transcribed.", Prefs.buddieAmbient) { Prefs.buddieAmbient = it }
-            ToggleRow("Take notes on phone calls", "Off means call audio from the earbuds is never transcribed. Only turn this on where recording calls is allowed and the other person knows.", Prefs.callNotes) { Prefs.callNotes = it }
-            val stats by BuddieStats.summary.collectAsState()
-            Text("Diagnostics: $stats", color = Muted, fontSize = 12.sp)
-            SoftButton(onClick = {
-                try {
-                    val f = java.io.File(ctx.cacheDir, "buddie_last.wav")
-                    if (f.exists()) {
-                        val mp = android.media.MediaPlayer()
-                        mp.setDataSource(f.absolutePath)
-                        mp.setOnCompletionListener { it.release() }
-                        mp.prepare()
-                        mp.start()
-                    }
-                } catch (_: Exception) {
-                }
-            }) { Text("Play what the earbuds last heard") }
-            val model by Whisperer.status.collectAsState()
-            val modelReady = remember(model) { Whisperer.downloaded(ctx) }
-            Text(
-                "Speech model: " + when {
-                    modelReady -> "ready"
-                    model.isBlank() -> "not downloaded yet (300 MB, one time)"
-                    else -> model
-                },
-                color = if (modelReady) Muted else Gold, fontSize = 14.sp
-            )
-            if (!modelReady && !model.startsWith("downloading")) {
-                SoftButton(onClick = { Whisperer.ensure(ctx, force = true) }) { Text("Download speech model now") }
-            }
-            Text("The earbuds send heavily compressed audio. ${Prefs.name} uses its own on-phone speech model to understand it, so nothing you say through them leaves the phone to be transcribed.", color = Muted, fontSize = 12.sp)
-            ToggleRow("Experimental: lighter stream", "Asks the earbuds for one audio channel instead of two, which should use less of their battery. Turn it off again if they start disconnecting. Re-seat the buds after changing.", Prefs.buddieCompressedFirst) { Prefs.buddieCompressedFirst = it }
-            ToggleRow("Experimental: faster link", "May fix choppy audio. Turn it off again if the earbuds start disconnecting. Re-seat the buds after changing.", Prefs.buddieFastLink) { Prefs.buddieFastLink = it }
-            SoftButton(onClick = { BuddieLink.captureAndShare(ctx) }) { Text("Capture 8 seconds of earbud data") }
-            val captureStatus by BuddieLink.captureStatus.collectAsState()
-            if (captureStatus.isBlank()) {
-                Text("Tap it and talk normally for 8 seconds. A zip file is saved to your Downloads folder. It contains raw microphone data from the earbuds for that stretch.", color = Muted, fontSize = 12.sp)
-            } else {
-                Text(captureStatus, color = Gold, fontSize = 14.sp)
-                if (captureStatus.startsWith("Saved")) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { BuddieLink.shareCapture(ctx) }) { Text("Share it") }
-                        SoftButton(onClick = {
-                            try {
-                                ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            } catch (_: Exception) {
-                            }
-                        }) { Text("Open Downloads") }
-                    }
-                }
-            }
-            Text("If the earbuds don't report when you're the one speaking, ${Prefs.name} checks all nearby speech for its name. That happens on the phone and nothing is kept unless Ambient context is on.", color = Muted, fontSize = 12.sp)
-            TextButton(onClick = { BuddieLink.forget() }) { Text("Forget earbuds and search again next time") }
         }
 
         Section("Systems") { SystemsPanel() }
