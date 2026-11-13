@@ -87,6 +87,11 @@
             android:foregroundServiceType="connectedDevice|microphone|location" />
 
         <service
+            android:name=".RecorderService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <service
             android:name=".NotifyListener"
             android:exported="true"
             android:label="Atlas notification whisper"

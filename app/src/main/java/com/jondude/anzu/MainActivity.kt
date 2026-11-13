@@ -797,6 +797,91 @@ private fun timeAgo(t: Long): String {
     return SimpleDateFormat("EEE MMM d, h:mm a", Locale.US).format(Date(t))
 }
 
+/** Session recorder: every line on this card comes from [Recorder.state] or from what is on disk. */
+@Composable
+fun RecorderCard() {
+    val ctx = LocalContext.current
+    val st by Recorder.state.collectAsState()
+    val rec = st as? RecorderState.Recording
+    var label by remember { mutableStateOf("Port Haven — Session 3 — " + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+    var permError by remember { mutableStateOf<String?>(null) }
+    var shareError by remember { mutableStateOf<String?>(null) }
+    var consent by remember { mutableStateOf(false) }
+    var last by remember { mutableStateOf<SessionSummary?>(null) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(st) {
+        last = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Recorder.lastSession(ctx) }
+    }
+    LaunchedEffect(rec != null) {
+        while (rec != null) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) { permError = null; consent = true }
+        else permError = "Microphone permission is off — recording can't start"
+    }
+    Column(Modifier.fillMaxWidth().background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Session Recorder", color = Cream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        if (rec != null) {
+            Text("Recording — ${rec.label}", color = Gold, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(RecorderMath.formatElapsed(now - rec.sinceMs), color = Cream, fontSize = 36.sp, fontWeight = FontWeight.Light)
+            Text("Segment ${rec.segmentCount}", color = Muted, fontSize = 14.sp)
+            rec.warning?.let { Text(it, color = Gold, fontSize = 14.sp) }
+            Button(
+                onClick = { Recorder.stop(ctx) },
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
+            ) { Text("Stop", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
+        } else {
+            OutlinedTextField(
+                value = label, onValueChange = { label = it }, label = { Text("Label") },
+                singleLine = true, shape = Flat, colors = fieldColors(), modifier = Modifier.fillMaxWidth()
+            )
+            (st as? RecorderState.Error)?.let { e ->
+                Text(e.message, color = Gold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                SoftButton(onClick = { Recorder.dismiss(ctx); permError = null }) { Text("Dismiss") }
+            }
+            permError?.let { Text(it, color = Gold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+            Button(
+                onClick = {
+                    permError = null
+                    Recorder.dismiss(ctx)
+                    if (ctx.has(Manifest.permission.RECORD_AUDIO)) consent = true
+                    else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = OnGold)
+            ) { Text("Start", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
+            last?.let { s ->
+                Spacer(Modifier.height(2.dp))
+                Text("Last session", color = Muted, fontSize = 13.sp)
+                Text(s.label, color = Cream, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${RecorderMath.formatElapsed(s.durationMs)} · ${s.segmentCount} segment${if (s.segmentCount == 1) "" else "s"} · " +
+                        RecorderMath.formatSize(s.totalBytes) + if (s.interrupted) " · interrupted" else "",
+                    color = if (s.interrupted) Gold else Muted, fontSize = 14.sp
+                )
+                SoftButton(onClick = { shareError = Recorder.share(ctx, s) }) { Text("Share") }
+                shareError?.let { Text(it, color = Gold, fontSize = 14.sp) }
+            }
+        }
+    }
+    if (consent) {
+        AlertDialog(
+            onDismissRequest = { consent = false },
+            containerColor = Panel, titleContentColor = Cream, textContentColor = Cream,
+            title = { Text("Record the session?", fontFamily = Display, fontWeight = FontWeight.Medium) },
+            text = { Text("Everyone at the table has agreed to be recorded?") },
+            confirmButton = {
+                TextButton(onClick = { consent = false; shareError = null; Recorder.start(ctx, label) }) { Text("Yes — start") }
+            },
+            dismissButton = { TextButton(onClick = { consent = false }) { Text("Not yet") } }
+        )
+    }
+}
+
 @SuppressLint("MissingPermission")
 @Composable
 fun HomeScreen(resumes: Int) {
@@ -888,6 +973,7 @@ fun HomeScreen(resumes: Int) {
         Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(greeting(), fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = Cream)
             Text(knows, fontSize = 18.sp, lineHeight = 26.sp, letterSpacing = 0.18.sp, color = Muted)
+            RecorderCard()
         }
         Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(

@@ -1097,4 +1097,36 @@ class AtlasTest {
         val plain = (1..80).map { "Plain entry $it" }
         assertEquals(plain.takeLast(40), R.select(plain, "zzz", 40))
     }
+
+    // ---------- session recorder ----------
+    @Test
+    fun recorderSegmentNamesAreZeroPaddedAndSequential() {
+        val names = (1..12).map { RecorderMath.segmentName(it) }
+        assertEquals("seg-001.m4a", names[0])
+        assertEquals("seg-010.m4a", names[9])
+        assertEquals("seg-012.m4a", names[11])
+        assertEquals(names, names.sorted())
+        assertEquals(12, names.toSet().size)
+    }
+
+    @Test
+    fun recorderSessionMetadataRoundTrips() {
+        val meta = SessionMeta(
+            "Port Haven — Session 3 — 2026-11-13", 1_700_000_000_000L, 1_700_003_700_000L,
+            listOf(Seg("seg-001.m4a", 1_700_000_000_000L, 600_000L), Seg("seg-002.m4a", 1_700_000_600_000L, 123_456L))
+        )
+        assertEquals(meta, RecorderMath.fromJson(RecorderMath.toJson(meta)))
+        // Mid-session snapshot: no stop time yet, segments so far.
+        val partial = SessionMeta("x", 5L, null, listOf(Seg("seg-001.m4a", 5L, 600_000L)))
+        val back = RecorderMath.fromJson(RecorderMath.toJson(partial))
+        assertNull(back.stopEpochMs)
+        assertEquals(partial, back)
+    }
+
+    @Test
+    fun recorderElapsedFormatting() {
+        assertEquals("00:00", RecorderMath.formatElapsed(0))
+        assertEquals("01:05", RecorderMath.formatElapsed(65_000))
+        assertEquals("1:02:05", RecorderMath.formatElapsed(3_725_000))
+    }
 }
