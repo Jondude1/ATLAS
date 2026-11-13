@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ATLAS talks to Jon's own machines over his Tailscale network at plain-HTTP addresses
+  (the hub, Home Assistant, Ollama, the Helios relay). The app targets API 34, where
+  cleartext is denied by default — without this file every one of those calls is blocked
+  by the OS before it leaves the phone ("can't reach the house" / "Obelisk isn't answering"
+  while the services are up). Cleartext is permitted ONLY to those tailnet hosts;
+  everything else stays HTTPS-only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.65.202.81</domain>
+        <domain includeSubdomains="false">100.68.172.113</domain>
+        <domain includeSubdomains="false">100.67.98.121</domain>
+        <domain includeSubdomains="false">obalisk</domain>
+        <domain includeSubdomains="false">obalisk.tail8dab0b.ts.net</domain>
+        <domain includeSubdomains="false">homeassistant-1</domain>
+        <domain includeSubdomains="false">homeassistant-1.tail8dab0b.ts.net</domain>
+        <domain includeSubdomains="false">athena-2</domain>
+        <domain includeSubdomains="false">athena-2.tail8dab0b.ts.net</domain>
+    </domain-config>
+</network-security-config>
