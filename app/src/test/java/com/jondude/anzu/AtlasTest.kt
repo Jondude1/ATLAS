@@ -306,23 +306,39 @@ class AtlasTest {
 
     @Test
     fun historyKeepsOnlyRecentExchanges() {
-        repeat(12) { Store.addExchange("q$it", "a$it") }
+        repeat(55) { Store.addExchange("q$it", "a$it") }
         val h = Store.recentExchanges()
-        assertEquals(10, h.size)
-        assertEquals("q11", h.last().first)
+        assertEquals(30, h.size) // prompt window caps at the newest 30
+        assertEquals("q25", h.first().first)
+        assertEquals("q54", h.last().first)
+    }
+
+    @Test
+    fun historyStoresFiftyAndPromptWindowIsAWeek() {
+        val now = 1_800_000_000_000L
+        repeat(55) { Store.addExchange("q$it", "a$it", now - (55 - it) * 60_000L) }
+        // storage keeps 50 (q5..q54); the prompt gets the newest 30
+        val h = Store.recentTimed(now)
+        assertEquals(30, h.size)
+        assertEquals("q25", h.first().first)
+        assertEquals("q54", h.last().first)
+        Store.clearHistory()
+        Store.addExchange("six days", "x", now - 6 * 24 * 60 * 60_000L)
+        Store.addExchange("eight days", "x", now - 8 * 24 * 60 * 60_000L)
+        assertEquals(listOf("six days"), Store.recentTimed(now).map { it.first })
     }
 
     @Test
     fun conversationsKnowWhenTheyHappened() {
         val now = 1_800_000_000_000L
+        Store.addExchange("old question", "old answer", now - 30 * 60 * 60_000L) // 30 hours old: still inside the 7-day window
         Store.addExchange("morning question", "morning answer", now - 5 * 60 * 60_000L)
         Store.addExchange("lunch question", "lunch answer", now - 70 * 60_000L)
-        Store.addExchange("old question", "old answer", now - 30 * 60 * 60_000L) // over 12 hours: dropped
         val h = com.jondude.anzu.assist.Brain.timedHistory(now)
-        assertEquals(4, h.size)
-        assertTrue(h[0].second, h[0].second.startsWith("[5 hours ago") || h[0].second.startsWith("[yesterday"))
-        assertTrue(h[2].second, h[2].second.startsWith("[an hour ago"))
-        assertEquals("lunch answer", h[3].second)
+        assertEquals(6, h.size)
+        assertTrue(h[0].second, h[0].second.startsWith("[yesterday"))
+        assertTrue(h[4].second, h[4].second.startsWith("[an hour ago"))
+        assertEquals("lunch answer", h[5].second)
         val stamped = com.jondude.anzu.assist.Brain.stampNow("what's up", now)
         assertTrue(stamped, stamped.contains("new conversation; you last spoke an hour ago"))
         assertTrue(stamped.endsWith("] what's up"))

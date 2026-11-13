@@ -614,16 +614,16 @@ object Store {
     @Synchronized
     fun addExchange(user: String, assistant: String, at: Long = System.currentTimeMillis()) {
         history.add(Triple(user, assistant, at))
-        while (history.size > 10) history.removeAt(0)
+        while (history.size > 50) history.removeAt(0)
         val a = JSONArray()
         history.forEach { a.put(JSONObject().put("u", it.first).put("a", it.second).put("t", it.third)) }
         write("history.json", a)
     }
 
-    /** Exchanges from the last 12 hours, oldest first, with their times. Older ones live in the log. */
+    /** Exchanges from the last 7 days, newest 30 at most, oldest first, with their times. Older ones live in the log. */
     @Synchronized
     fun recentTimed(now: Long = System.currentTimeMillis()): List<Triple<String, String, Long>> =
-        history.filter { now - it.third < 12 * 60 * 60_000L }
+        history.filter { now - it.third < 7 * 24 * 60 * 60_000L }.takeLast(30)
 
     @Synchronized
     fun recentExchanges(): List<Pair<String, String>> = recentTimed().map { it.first to it.second }
