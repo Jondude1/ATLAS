@@ -1,0 +1,122 @@
+# atlas:14b -- Atlas's own local model, built FROM stock qwen3:14b (not
+# inherited from qwen3:14b-ha's "home assistant" tune), per issue #4
+# Amendment 6.
+#
+# Empirically verified before writing this (see issue #4 report): a
+# runtime system message in the chat request REPLACES this Modelfile's
+# SYSTEM entirely -- it is not merged. Every real caller (the hub's
+# _chat(), the app's Brain.kt system()) always sends its own full
+# system message. So the SYSTEM below only ever applies as a fallback
+# for a systemless call (e.g. `ollama run atlas:14b` by hand) -- it is
+# not where Atlas's real behavior lives. That lives in TEMPLATE
+# (structural: tool-call format, /think //no_think handling) and
+# PARAMETER (generation-level: applies regardless of what system
+# message is sent).
+#
+# TEMPLATE is qwen3:14b-ha's, kept verbatim: it is the stock Qwen3
+# template with one real difference from the un-tuned stock -- it
+# actually renders the /think //no_think suffix onto the last user
+# turn when a caller sets the Think field, where stock's copy of the
+# same template has that branch present but empty (a no-op). That's
+# the genuinely useful thing to salvage from -ha; nothing else in its
+# Modelfile is "home assistant"-specific (it has no baked SYSTEM at
+# all, confirmed via `ollama show --modelfile qwen3:14b-ha`).
+#
+# The thinking-budget lesson from B1/B1.1/B1.2: the hub primes
+# /no_think as literal prompt text (not the native `think` API field,
+# which this exact build never got to validate against the OpenAI-
+# compat endpoint). This template does not fight that -- it passes
+# the user's message content through untouched; /no_think only has an
+# effect via this template's own Think-field mechanism when a caller
+# sets it structurally. Either path is left open; neither is forced.
+# Thinking stays ON by default when no signal is given either way,
+# matching stock Qwen3's own default -- not changed here, since
+# forcing it off unconditionally is a behavior change past what this
+# pass (model creation + eval, no fine-tuning) was asked to decide.
+
+FROM qwen3:14b
+
+TEMPLATE """
+{{- $lastUserIdx := -1 -}}
+{{- range $idx, $msg := .Messages -}}
+{{- if eq $msg.Role "user" }}{{ $lastUserIdx = $idx }}{{ end -}}
+{{- end }}
+{{- if or .System .Tools }}<|im_start|>system
+{{ if .System }}
+{{ .System }}
+{{- end }}
+{{- if .Tools }}
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{{- range .Tools }}
+{"type": "function", "function": {{ .Function }}}
+{{- end }}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call>
+{{- end -}}
+<|im_end|>
+{{ end }}
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 -}}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}
+{{- if and $.IsThinkSet (eq $i $lastUserIdx) }}
+   {{- if $.Think -}}
+      {{- " "}}/think
+   {{- else -}}
+      {{- " "}}/no_think
+   {{- end -}}
+{{- end }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ if (and $.IsThinkSet (and .Thinking (or $last (gt $i $lastUserIdx)))) -}}
+<think>{{ .Thinking }}</think>
+{{ end -}}
+{{ if .Content }}{{ .Content }}
+{{- else if .ToolCalls }}<tool_call>
+{{ range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}
+{{ end }}</tool_call>
+{{- end }}{{ if not $last }}<|im_end|>
+{{ end }}
+{{- else if eq .Role "tool" }}<|im_start|>user
+<tool_response>
+{{ .Content }}
+</tool_response><|im_end|>
+{{ end }}
+{{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+{{ if and $.IsThinkSet (not $.Think) -}}
+<think>
+
+</think>
+
+{{ end -}}
+{{ end }}
+{{- end }}"""
+
+# Sampling: preserve -ha's conservative, already-proven values rather
+# than speculatively retune them this pass -- lower temperature/top_p
+# than stock favors valid tool-call JSON and consistent digestion
+# output, which is most of what this model is actually judged on here.
+# num_ctx 16384 covers the app's A4 context plan (30 exchanges in
+# prompt + system + story-so-far) with room to spare.
+PARAMETER repeat_penalty 1
+PARAMETER stop <|im_start|>
+PARAMETER stop <|im_end|>
+PARAMETER temperature 0.3
+PARAMETER top_k 20
+PARAMETER top_p 0.8
+PARAMETER min_p 0
+PARAMETER num_batch 2048
+PARAMETER num_ctx 16384
+
+# Fallback persona only -- see the note at the top of this file. A real
+# caller's own system message always wins.
+SYSTEM """You are Atlas, a calm, friendly voice companion speaking through earbuds or glasses. Speak the way a person actually talks out loud: plain natural sentences, no markdown, bullet lists, emoji, or stage directions, and never narrate your own tool calls. Match your length to the moment -- brief when you're just announcing something, longer only when the conversation actually calls for it. When a tool fits the request, call exactly one of the tools you were given with real arguments; never invent a tool name or guess at an argument you don't have."""
