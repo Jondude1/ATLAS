@@ -1619,7 +1619,7 @@ fun SettingsScreen() {
         Section("Athena") { AthenaPanel() }
 
         Section("Home Assistant") {
-            PrefField("Address (built in)", Prefs.haUrl) { Prefs.haUrl = it.trim().ifBlank { HOME_ASSISTANT } }
+            Text("Address: $HOME_ASSISTANT (built in)", fontSize = 14.sp)
             PrefField("Long-lived access token", Prefs.haToken, secret = true) { Prefs.haToken = it.trim() }
             ToggleRow("House alerts", "Tells you when something is left open or unlocked, and when people come and go", Prefs.homeAlerts) { Prefs.homeAlerts = it }
             PrefField("Alert after open for (minutes)", Prefs.homeOpenMinutes.toString()) { s -> s.toIntOrNull()?.let { Prefs.homeOpenMinutes = it.coerceIn(1, 240) } }
@@ -1645,7 +1645,7 @@ fun SettingsScreen() {
             }
             LaunchedEffect(Unit) { withContext(Dispatchers.IO) { com.jondude.anzu.assist.Mcp.refresh(force = true) } }
             Text(
-                "Anything that speaks MCP can be connected here, and its tools become things ${Prefs.name} can do: your house, your desktop, your servers, your other apps. Home Assistant has it built in.",
+                "Anything that speaks MCP can be connected here, and its tools become things ${Prefs.name} can do: your house, your desktop, your servers, your other apps. Home Assistant and the Atlas hub have it built in.",
                 color = Muted, fontSize = 13.sp
             )
             if (servers.isEmpty()) EmptyHint("Nothing connected yet.")
@@ -1676,6 +1676,7 @@ fun SettingsScreen() {
                 }
             }
             if (Prefs.haToken.isBlank()) Text("Home Assistant connects here by itself once its token is in under Settings → Home Assistant.", color = Muted, fontSize = 13.sp)
+            if (Prefs.hubToken.isBlank()) Text("The Atlas hub connects here by itself once its token is in.", color = Muted, fontSize = 13.sp)
             Text("Add a connection", color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             PrefField("Name (for example Athena files)", "") { newName = it }
             PrefField("Address (for example http://$ATHENA:8000/mcp)", "") { newUrl = it.trim() }
@@ -1720,10 +1721,10 @@ fun SettingsScreen() {
         }
 
         Section("Obelisk and local models") {
-            PrefField("Hub on Obelisk (built in)", Prefs.obeliskUrl) { Prefs.obeliskUrl = it.trim().ifBlank { OBELISK_HUB } }
+            Text("Hub: $OBELISK_HUB (built in)", fontSize = 14.sp)
             PrefField("Hub token, if you set one", Prefs.hubToken, secret = true) { Prefs.hubToken = it.trim() }
             Text("Your apps report to the hub, its local model digests everything for free, and ${Prefs.name} only reads a short brief. It also logs every exchange to your vault. The server is in the repo under obelisk/.", color = Muted, fontSize = 12.sp)
-            PrefField("Ollama URL (optional)", Prefs.ollamaUrl) { Prefs.ollamaUrl = it.trim() }
+            Text("Ollama: $OLLAMA (built in)", fontSize = 14.sp)
             PrefField("Ollama model", Prefs.ollamaModel) { Prefs.ollamaModel = it.trim() }
             ToggleRow("Use the local model for small talk", "Unprompted remarks cost nothing; falls back to Claude if the node is unreachable", Prefs.localSmallTalk) { Prefs.localSmallTalk = it }
         }
