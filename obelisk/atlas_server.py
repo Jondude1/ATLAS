@@ -13,7 +13,7 @@ Run:
 
 Hub env vars:
     ATLAS_LLM_URL    OpenAI-style chat endpoint (default http://localhost:11434/v1, Ollama)
-    ATLAS_LLM_MODEL  model name for that endpoint (default qwen3:14b-ha)
+    ATLAS_LLM_MODEL  model name for that endpoint (default atlas:14b)
     ATLAS_TOKEN      if set, every /atlas/* request needs Authorization: Bearer <token>
 
 Optional, for transcribing the Buddie earbud stream with Whisper on the node
@@ -46,7 +46,7 @@ DAILY = VAULT / "Atlas" / "Daily"
 
 HUB_DB = Path(os.environ.get("ATLAS_HUB_DB", str(Path.home() / ".local/share/atlas/hub.db"))).expanduser()
 LLM_URL = os.environ.get("ATLAS_LLM_URL", "http://localhost:11434/v1")
-LLM_MODEL = os.environ.get("ATLAS_LLM_MODEL", "qwen3:14b-ha")
+LLM_MODEL = os.environ.get("ATLAS_LLM_MODEL", "atlas:14b")
 TOKEN = os.environ.get("ATLAS_TOKEN")
 REPORT_TTL_DAYS = 30
 BRIEF_DEBOUNCE_S = 30
@@ -587,7 +587,8 @@ def _prune_old_reports(conn: sqlite3.Connection):
 async def _chat(messages: list[dict], max_tokens: int = 300, timeout_s: float = 30) -> Optional[str]:
     """Calls the OpenAI-style endpoint. Returns None (never raises) if it's down.
 
-    Qwen3 models (qwen3:14b-ha included) are "thinking" models by default:
+    Qwen3 models (the hub's original qwen3:14b-ha, and atlas:14b which
+    replaced it, both included) are "thinking" models by default:
     without a cue to skip the reasoning preamble, they can spend the whole
     max_tokens budget on chain-of-thought and return empty content, which
     _rebuild_brief/ask then treat as "model's down" and silently use the

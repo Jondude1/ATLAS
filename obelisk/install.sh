@@ -9,7 +9,7 @@ VENV="$HERE/.venv"
 VAULT="${ATLAS_VAULT:-$HOME/Documents/Hermes}"
 PORT="${ATLAS_PORT:-8765}"
 LLM_URL="${ATLAS_LLM_URL:-http://localhost:11434/v1}"
-LLM_MODEL="${ATLAS_LLM_MODEL:-qwen3:14b-ha}"
+LLM_MODEL="${ATLAS_LLM_MODEL:-atlas:14b}"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="$UNIT_DIR/atlas-server.service"
 
