@@ -241,6 +241,7 @@ object Prefs {
     var haUrl by StrPref("haUrl", HOME_ASSISTANT)
     /** Whether Home Assistant's own MCP tools are offered under Connections. */
     var haMcp by BoolPref("haMcp", true)
+    var hubMcp by BoolPref("hubMcp", true)
     var haToken by StrPref("haToken", "")
     var deviceAddress by StrPref("deviceAddress", "")
     var deviceName by StrPref("deviceName", "")

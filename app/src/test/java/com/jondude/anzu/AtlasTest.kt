@@ -668,6 +668,17 @@ class AtlasTest {
         com.jondude.anzu.assist.Mcp.setEnabled("Home Assistant", false)
         assertFalse(com.jondude.anzu.assist.Mcp.servers().first { it.name == "Home Assistant" }.enabled)
         Prefs.haToken = ""
+        // the Atlas hub is a built-in connection too, once its token is set
+        assertTrue(com.jondude.anzu.assist.Mcp.servers().none { it.name == "Atlas Hub" })
+        Prefs.hubToken = "ht"
+        val hubMcp = com.jondude.anzu.assist.Mcp.servers().first { it.name == "Atlas Hub" }
+        assertEquals(OBELISK_HUB + "/mcp", hubMcp.url)
+        assertEquals("ht", hubMcp.token)
+        com.jondude.anzu.assist.Mcp.setEnabled("Atlas Hub", false)
+        assertFalse(com.jondude.anzu.assist.Mcp.servers().first { it.name == "Atlas Hub" }.enabled)
+        Prefs.hubMcp = true
+        Prefs.hubToken = ""
+        assertTrue(com.jondude.anzu.assist.Mcp.servers().none { it.name == "Atlas Hub" })
         // the hub address is built in, and comes back if the setting is ever cleared
         assertEquals(OBELISK_HUB, Prefs.obeliskUrl)
         assertTrue(com.jondude.anzu.assist.Hub.configured())

@@ -36,27 +36,30 @@ object Mcp {
     // ---------- the server list ----------
 
     const val HOME_ASSISTANT = "Home Assistant"
+    const val ATLAS_HUB = "Atlas Hub"
 
-    /** Home Assistant's built-in MCP server, set up automatically once its token is in Settings. */
-    private fun builtIn(): McpServer? {
-        if (Prefs.haUrl.isBlank() || Prefs.haToken.isBlank()) return null
-        return McpServer(HOME_ASSISTANT, Prefs.haUrl.trim().trimEnd('/') + "/api/mcp", Prefs.haToken.trim(), Prefs.haMcp)
+    /** The built-in MCP servers, each set up automatically once its token is in Settings: Home Assistant and the Atlas hub. */
+    private fun builtIns(): List<McpServer> = buildList {
+        if (Prefs.haUrl.isNotBlank() && Prefs.haToken.isNotBlank())
+            add(McpServer(HOME_ASSISTANT, Prefs.haUrl.trim().trimEnd('/') + "/api/mcp", Prefs.haToken.trim(), Prefs.haMcp))
+        if (Prefs.hubToken.isNotBlank())
+            add(McpServer(ATLAS_HUB, Prefs.obeliskUrl.trim().trimEnd('/') + "/mcp", Prefs.hubToken.trim(), Prefs.hubMcp))
     }
 
     private fun stored(): List<McpServer> = try {
         val a = JSONArray(Prefs.sp.getString("mcpServers", "[]") ?: "[]")
         (0 until a.length()).map { a.getJSONObject(it) }.map {
             McpServer(it.optString("name"), it.optString("url"), it.optString("token"), it.optBoolean("enabled", true))
-        }.filter { it.name.isNotBlank() && it.url.isNotBlank() && it.name != HOME_ASSISTANT }
+        }.filter { it.name.isNotBlank() && it.url.isNotBlank() && it.name != HOME_ASSISTANT && it.name != ATLAS_HUB }
     } catch (e: Exception) {
         emptyList()
     }
 
-    fun servers(): List<McpServer> = listOfNotNull(builtIn()) + stored()
+    fun servers(): List<McpServer> = builtIns() + stored()
 
     private fun save(list: List<McpServer>) {
         val a = JSONArray()
-        list.filter { it.name != HOME_ASSISTANT }.forEach { a.put(JSONObject().put("name", it.name).put("url", it.url).put("token", it.token).put("enabled", it.enabled)) }
+        list.filter { it.name != HOME_ASSISTANT && it.name != ATLAS_HUB }.forEach { a.put(JSONObject().put("name", it.name).put("url", it.url).put("token", it.token).put("enabled", it.enabled)) }
         Prefs.sp.edit().putString("mcpServers", a.toString()).apply()
         loadedAt = 0
     }
@@ -70,6 +73,7 @@ object Mcp {
 
     fun remove(name: String) {
         if (name == HOME_ASSISTANT) Prefs.haMcp = false
+        if (name == ATLAS_HUB) Prefs.hubMcp = false
         save(stored().filter { !it.name.equals(name, true) })
         tools.remove(name)
         sessions.remove(name)
@@ -78,6 +82,7 @@ object Mcp {
 
     fun setEnabled(name: String, on: Boolean) {
         if (name == HOME_ASSISTANT) Prefs.haMcp = on
+        if (name == ATLAS_HUB) Prefs.hubMcp = on
         save(stored().map { if (it.name.equals(name, true)) it.copy(enabled = on) else it })
         if (!on) tools.remove(name)
     }
