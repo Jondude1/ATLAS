@@ -30,12 +30,12 @@ object Net {
     /** Blocking request. Returns (status, body). */
     fun request(
         method: String, url: String, headers: Map<String, String>,
-        body: String? = null, timeoutMs: Int = 30_000
+        body: String? = null, timeoutMs: Int = 30_000, connectTimeoutMs: Int = 8_000
     ): Pair<Int, String> {
         val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
-            conn.connectTimeout = 8_000
+            conn.connectTimeout = connectTimeoutMs
             conn.readTimeout = timeoutMs
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             if (body != null) {
@@ -93,8 +93,8 @@ object Net {
         }
     }
 
-    fun postJson(url: String, headers: Map<String, String>, body: String, timeoutMs: Int = 30_000) =
-        request("POST", url, headers, body, timeoutMs)
+    fun postJson(url: String, headers: Map<String, String>, body: String, timeoutMs: Int = 30_000, connectTimeoutMs: Int = 8_000) =
+        request("POST", url, headers, body, timeoutMs, connectTimeoutMs)
 
     fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 10_000) =
         request("GET", url, headers, null, timeoutMs)
@@ -106,12 +106,12 @@ object HomeAssistant {
     private fun auth() = mapOf("Authorization" to "Bearer ${Prefs.haToken.trim()}")
 
     /** Sends a plain-language command to Home Assistant's conversation agent. Blocking. */
-    fun command(text: String): String {
+    fun command(text: String, timeoutMs: Int = 15_000, connectTimeoutMs: Int = 8_000): String {
         if (!configured()) return "Home Assistant isn't set up in settings."
         return try {
             val (code, body) = Net.postJson(
                 base() + "/api/conversation/process", auth(),
-                JSONObject().put("text", text).put("language", "en").toString(), 15_000
+                JSONObject().put("text", text).put("language", "en").toString(), timeoutMs, connectTimeoutMs
             )
             if (code !in 200..299) return "Home Assistant returned error $code."
             JSONObject(body).optJSONObject("response")
@@ -383,13 +383,13 @@ object Local {
     fun configured(): Boolean = Prefs.ollamaUrl.isNotBlank()
 
     /** Blocking chat with plain-string messages. Throws on failure. */
-    fun chat(system: String, messages: List<Pair<String, String>>): String {
+    fun chat(system: String, messages: List<Pair<String, String>>, timeoutMs: Int = 45_000, connectTimeoutMs: Int = 8_000): String {
         val arr = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         messages.forEach { (role, content) -> arr.put(JSONObject().put("role", role).put("content", content)) }
         val (code, body) = Net.postJson(
             Prefs.ollamaUrl.trim().trimEnd('/') + "/api/chat", emptyMap(),
             JSONObject().put("model", Prefs.ollamaModel.trim()).put("messages", arr).put("stream", false).put("keep_alive", "30m").toString(),
-            45_000
+            timeoutMs, connectTimeoutMs
         )
         if (code !in 200..299) throw RuntimeException("Ollama $code")
         return JSONObject(body).optJSONObject("message")?.optString("content")?.trim().orEmpty()
@@ -1263,13 +1263,13 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         // Fallback tier: local model (no tools), then Home Assistant, then an honest shrug.
         if (Local.configured()) {
             try {
-                val answer = Local.chat(sys, historyPairs() + ("user" to stampNow(userText))).ifBlank { "Hm. I've got nothing." }
+                val answer = Local.chat(sys, historyPairs() + ("user" to stampNow(userText)), timeoutMs = 20_000, connectTimeoutMs = 2_500).ifBlank { "Hm. I've got nothing." }
                 record(userText, answer)
                 return@withContext answer
             } catch (_: Exception) {
             }
         }
-        if (HomeAssistant.configured() && zone(userText) == 0) return@withContext HomeAssistant.command(userText)
+        if (HomeAssistant.configured() && zone(userText) == 0) return@withContext HomeAssistant.command(userText, timeoutMs = 10_000, connectTimeoutMs = 2_500)
         "I can hear you, but I can't reach a model right now. Check the API key or the local model in settings."
     }
 
@@ -1324,7 +1324,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         var text: String? = null
         if (Local.configured() && (Prefs.localSmallTalk || !hasKey())) {
             text = try {
-                Local.chat(sys, historyPairs() + ("user" to prompt)).takeIf { it.isNotBlank() }
+                Local.chat(sys, historyPairs() + ("user" to prompt), timeoutMs = 20_000, connectTimeoutMs = 2_500).takeIf { it.isNotBlank() }
             } catch (e: Exception) {
                 null
             }
