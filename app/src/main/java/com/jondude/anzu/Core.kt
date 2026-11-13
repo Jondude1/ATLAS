@@ -153,6 +153,17 @@ object Prefs {
             }
             e.apply()
         }
+        if (!sp.getBoolean("atlasModelV1", false)) {
+            // Amendment 6: atlas:14b passed its eval gate against qwen3:14b-ha. Move blank/old-default values onto it;
+            // keep a custom model Jon typed himself.
+            val e = sp.edit().putBoolean("atlasModelV1", true)
+            val m = sp.getString("ollamaModel", "")?.trim().orEmpty()
+            if (m.isEmpty() || m == "qwen3:14b-ha") {
+                e.putString("ollamaModel", "atlas:14b")
+                Log.i("Prefs", "atlasModelV1: moved local model '$m' -> atlas:14b")
+            }
+            e.apply()
+        }
         if (!sp.getBoolean("renamedToAtlas", false)) {
             val e = sp.edit().putBoolean("renamedToAtlas", true)
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
@@ -186,7 +197,7 @@ object Prefs {
     var obeliskUrl by StrPref("obeliskUrl", OBELISK_HUB)
     var hubToken by StrPref("hubToken", "")
     var ollamaUrl by StrPref("ollamaUrl", OLLAMA)
-    var ollamaModel by StrPref("ollamaModel", "qwen3:14b-ha")
+    var ollamaModel by StrPref("ollamaModel", "atlas:14b")
     var localSmallTalk by BoolPref("localSmallTalk", false)
     var amberWords by StrPref("amberWords", "unlock, garage, open the door, alarm, thermostat, oven, heater")
     var redWords by StrPref("redWords", "disarm")

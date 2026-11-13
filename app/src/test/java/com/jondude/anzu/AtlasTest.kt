@@ -662,6 +662,25 @@ class AtlasTest {
         assertNull(com.jondude.anzu.assist.Hub.brief())
     }
 
+    @Test
+    fun localModelDefaultsToAtlasAndMigratesOnce() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        assertEquals("atlas:14b", Prefs.ollamaModel)
+        // the old default moves over, once
+        Prefs.sp.edit().clear().putString("ollamaModel", "qwen3:14b-ha").commit()
+        Prefs.init(ctx)
+        assertEquals("atlas:14b", Prefs.ollamaModel)
+        assertTrue(Prefs.sp.getBoolean("atlasModelV1", false))
+        // typed back in by hand afterwards, it stays
+        Prefs.ollamaModel = "qwen3:14b-ha"
+        Prefs.init(ctx)
+        assertEquals("qwen3:14b-ha", Prefs.ollamaModel)
+        // a custom model is never touched
+        Prefs.sp.edit().clear().putString("ollamaModel", "llama3:8b").commit()
+        Prefs.init(ctx)
+        assertEquals("llama3:8b", Prefs.ollamaModel)
+    }
+
     // ---------- updater / usage ----------
     @Test
     fun updaterReadsBuildNumbers() {
