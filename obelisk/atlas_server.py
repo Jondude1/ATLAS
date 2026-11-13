@@ -13,7 +13,7 @@ Run:
 
 Hub env vars:
     ATLAS_LLM_URL    OpenAI-style chat endpoint (default http://localhost:11434/v1, Ollama)
-    ATLAS_LLM_MODEL  model name for that endpoint (default mistral-nemo)
+    ATLAS_LLM_MODEL  model name for that endpoint (default qwen3:14b-ha)
     ATLAS_TOKEN      if set, every /atlas/* request needs Authorization: Bearer <token>
 
 Optional, for transcribing the Buddie earbud stream with Whisper on the node
@@ -46,7 +46,7 @@ DAILY = VAULT / "Atlas" / "Daily"
 
 HUB_DB = Path(os.environ.get("ATLAS_HUB_DB", str(Path.home() / ".local/share/atlas/hub.db"))).expanduser()
 LLM_URL = os.environ.get("ATLAS_LLM_URL", "http://localhost:11434/v1")
-LLM_MODEL = os.environ.get("ATLAS_LLM_MODEL", "mistral-nemo")
+LLM_MODEL = os.environ.get("ATLAS_LLM_MODEL", "qwen3:14b-ha")
 TOKEN = os.environ.get("ATLAS_TOKEN")
 REPORT_TTL_DAYS = 30
 BRIEF_DEBOUNCE_S = 30
