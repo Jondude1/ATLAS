@@ -114,6 +114,12 @@ object Prefs {
             if (sp.getInt("volumeGlasses", 85) <= 100) e.putInt("volumeGlasses", 120)
             e.apply()
         }
+        if (!sp.getBoolean("loudnessFixV1", false)) {
+            // 160 was forced by louderV1, not chosen; the boost and the stream lift no longer stack, so 100 is the sane start.
+            val e = sp.edit().putBoolean("loudnessFixV1", true)
+            if (sp.getInt("volumeBuds", 100) == 160) e.putInt("volumeBuds", 100)
+            e.apply()
+        }
         if (!sp.getBoolean("networkByIpV2", false)) {
             // Older builds saved the MagicDNS names; move them to the IPs.
             val e = sp.edit().putBoolean("networkByIpV2", true)
@@ -260,7 +266,7 @@ object Prefs {
     var cutoffs by StrPref("cutoffs", "")
     /** Extra microphone sensitivity for the earbud stream: 0 normal, 1 high, 2 max. */
     var micBoost by IntPref("micBoost", 1)
-    var volumeBuds by IntPref("volumeBuds", 160)
+    var volumeBuds by IntPref("volumeBuds", 100)
     var discreetGlasses by BoolPref("discreetGlasses", true)
     var announceSwitch by BoolPref("announceSwitch", true)
     var eyeBreaks by BoolPref("eyeBreaks", false)

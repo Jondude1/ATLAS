@@ -83,7 +83,7 @@ object Atlas {
                         r != null && yes.containsMatchIn(r.text)
                     }
                     Glasses.atlasState.value = "speaking"
-                    Speaker.say(answer, volume)
+                    Speaker.say(answer, volume, conversation = true)
                     windowUntil = System.currentTimeMillis() + 30_000
                 }
             } finally {
@@ -127,7 +127,7 @@ object Atlas {
                             }
                         }
                         Glasses.atlasState.value = "speaking"
-                        Speaker.say(answer)
+                        Speaker.say(answer, conversation = true)
                     }
                     windowUntil = System.currentTimeMillis() + 30_000
                 } finally {
@@ -150,7 +150,7 @@ object Atlas {
                     Glasses.lastSaid.value = answer
                     if (Glasses.connected.value) {
                         Glasses.atlasState.value = "speaking"
-                        Speaker.say(answer, 0.6f)
+                        Speaker.say(answer, 0.6f, conversation = true)
                     }
                 } finally {
                     Glasses.atlasState.value = "idle"

@@ -445,7 +445,7 @@ class AtlasTest {
         Glasses.active.value = "buddie"
         assertEquals(2, Wear.chattiness())
         assertFalse(Wear.senderOnly())                     // private: read the whole message
-        assertEquals(1.6f, Wear.volume(), 0.001f)
+        assertEquals(1.0f, Wear.volume(), 0.001f)       // volumeBuds default is 100 (loudnessFixV1)
         assertFalse(Wear.eyeBreaks())
         assertTrue(Wear.promptLine().contains("Only he can hear you"))
         assertFalse(Wear.repliesViaStream())               // stream not running yet

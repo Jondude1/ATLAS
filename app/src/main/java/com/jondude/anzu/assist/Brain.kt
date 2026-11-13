@@ -545,7 +545,7 @@ object Brain {
                 """
 Time is real for you. Each of Jon's messages is stamped with when he said it, and the current time is below. Hours between messages mean separate conversations: don't answer as if he just said something from this morning, don't call something "earlier" or "just now" unless it was, and if you pick up an old thread, say how long ago it was. Never put time stamps in your own replies.
 
-Everything you write is spoken aloud. One to three short sentences unless he clearly wants more. Plain conversational speech: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
+Everything you write is spoken aloud. Announcements and lines you start on your own stay to one or two short sentences. In an actual conversation, answer at whatever length the thought needs: a quick question gets a quick answer, a bigger one gets room to think out loud, but never ramble or pad. Plain conversational speech in natural sentences: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
@@ -1226,7 +1226,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val messages = historyMessages()
                 messages.put(JSONObject().put("role", "user").put("content", stampNow(userText)))
                 val tools = tools()
-                var resp = call(sys, messages, tools, 400)
+                var resp = call(sys, messages, tools, 1200)
                 var rounds = 0
                 while (resp.optString("stop_reason") == "tool_use" && rounds < 4) {
                     rounds++
@@ -1244,7 +1244,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     messages.put(JSONObject().put("role", "user").put("content", results))
-                    resp = call(sys, messages, tools, 400)
+                    resp = call(sys, messages, tools, 1200)
                 }
                 val answer = textOf(resp).ifBlank { "Done." }
                 record(userText, answer)
@@ -1328,7 +1328,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             text = try {
                 val messages = historyMessages()
                 messages.put(JSONObject().put("role", "user").put("content", prompt))
-                textOf(call(sys, messages, null, 160)).takeIf { it.isNotBlank() }
+                textOf(call(sys, messages, null, 300)).takeIf { it.isNotBlank() }
             } catch (e: Exception) {
                 null
             }
@@ -1499,10 +1499,10 @@ object Spoken {
     var lastFull = ""
 
     /**
-     * What actually goes into the ear: no markdown, no raw links, and at most ~80 words, with the rest left on the phone.
+     * What actually goes into the ear: no markdown, no raw links, and at most ~80 words (250 for a conversational reply, ~40 when driving), with the rest left on the phone.
      * The screen always shows the full text.
      */
-    fun forEar(text: String, words: Int = if (CoPilot.active) 40 else 80): String {
+    fun forEar(text: String, conversation: Boolean = false, words: Int = if (CoPilot.active) 40 else if (conversation) 250 else 80): String {
         var t = text
             .replace(Regex("https?://\\S*[^\\s.,;:!?)]"), "the link")
             .replace(Regex("(?m)^\\s*([-*•]|\\d+[.)])\\s+"), "")

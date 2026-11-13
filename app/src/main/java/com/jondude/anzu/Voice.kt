@@ -161,7 +161,8 @@ object Speaker : TextToSpeech.OnInitListener {
             withContext(Dispatchers.IO) { mp.prepare() }
             mp.setVolume(volume.coerceAtMost(1f), volume.coerceAtMost(1f))
             val boost = if (volume > 1f) Loud.enhancer(mp.audioSessionId, volume) else null
-            val restore = Loud.liftStream(am)
+            // The loudness boost and the stream lift don't stack: lift the stream only when no enhancer is on this line.
+            val restore = if (boost == null) Loud.liftStream(am) else ({})
             cloudCleanup = { try { boost?.release() } catch (_: Exception) {}; restore() }
             try {
                 mp.playbackParams = mp.playbackParams.setSpeed((Prefs.speechRate / 100f).coerceIn(0.7f, 1.6f))
@@ -188,12 +189,13 @@ object Speaker : TextToSpeech.OnInitListener {
         }
     }
 
-    suspend fun say(text: String, requested: Float = 1f) {
+    /** [conversation] marks a reply to something Jon said (longer ear cap); announcements and proactive lines keep the short one. */
+    suspend fun say(text: String, requested: Float = 1f, conversation: Boolean = false) {
         if (text.isBlank()) return
         val volume = requested * Wear.volume()
         Glasses.lastSaid.value = text // shown on screen in full, even if the speech engine is unavailable
         com.jondude.anzu.assist.Spoken.lastFull = text
-        @Suppress("NAME_SHADOWING") val text = com.jondude.anzu.assist.Spoken.forEar(text)
+        @Suppress("NAME_SHADOWING") val text = com.jondude.anzu.assist.Spoken.forEar(text, conversation)
         if (Prefs.voiceProvider != 0 && sayCloud(text, volume)) return
         val t = tts ?: return
         var waited = 0
@@ -207,7 +209,6 @@ object Speaker : TextToSpeech.OnInitListener {
         waiters[id] = done
         try {
             am.requestAudioFocus(focus)
-            val restore = Loud.liftStream(am)
             t.setSpeechRate(Prefs.speechRate / 100f)
             val params = Bundle()
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceAtMost(1f))
@@ -215,6 +216,8 @@ object Speaker : TextToSpeech.OnInitListener {
             val session = if (volume > 1f) am.generateAudioSessionId() else 0
             val boost = if (session > 0) Loud.enhancer(session, volume) else null
             if (session > 0) params.putInt(TextToSpeech.Engine.KEY_PARAM_SESSION_ID, session)
+            // Either the enhancer or the stream lift, never both (they stack and distort small drivers).
+            val restore = if (boost == null) Loud.liftStream(am) else ({})
             try {
                 t.speak(text, TextToSpeech.QUEUE_ADD, params, id)
                 withTimeoutOrNull(90_000) { done.await() }
