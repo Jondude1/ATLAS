@@ -57,6 +57,10 @@ const val ATHENA = "100.67.98.121"
 const val OBELISK = "100.65.202.81"
 /** Ollama on Obelisk (hardwired, spec A6). */
 const val OLLAMA = "http://100.65.202.81:11434"
+/** Kokoro TTS on Obelisk (OpenAI-speech-shaped, hardwired). */
+const val KOKORO_TTS = "http://100.65.202.81:8880/v1"
+/** Chatterbox Turbo TTS on Obelisk (OpenAI-speech-shaped, hardwired). */
+const val CHATTERBOX_TTS = "http://100.65.202.81:8881/v1"
 /** Helios relay MCP on Athena (hardwired, spec A6). */
 const val HELIOS_RELAY = "http://100.67.98.121:8095/mcp"
 
@@ -183,7 +187,7 @@ object Prefs {
     var story by StrPref("story", "")
     var lastDriftDay by StrPref("lastDriftDay", "")
     var voiceName by StrPref("voiceName", "")
-    /** 0 = the phone's speech engine, 1 = ElevenLabs, 2 = any OpenAI-style speech server */
+    /** 0 = the phone's speech engine, 1 = ElevenLabs, 2 = any OpenAI-style speech server, 3 = Kokoro (home), 4 = Chatterbox (home) */
     var voiceProvider by IntPref("voiceProvider", 0)
     var ttsEngine by StrPref("ttsEngine", "")
     var elevenKey by StrPref("elevenKey", "")
@@ -194,6 +198,8 @@ object Prefs {
     var speechKey by StrPref("speechKey", "")
     var speechModel by StrPref("speechModel", "gpt-4o-mini-tts")
     var speechVoice by StrPref("speechVoice", "alloy")
+    var kokoroVoice by StrPref("kokoroVoice", "af_heart")
+    var chatterboxVoice by StrPref("chatterboxVoice", "default")
     var obeliskUrl by StrPref("obeliskUrl", OBELISK_HUB)
     var hubToken by StrPref("hubToken", "")
     var ollamaUrl by StrPref("ollamaUrl", OLLAMA)

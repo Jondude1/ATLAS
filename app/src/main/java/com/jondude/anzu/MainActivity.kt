@@ -1395,7 +1395,7 @@ fun SettingsScreen() {
             var eleven by remember { mutableStateOf(Prefs.elevenVoiceName) }
             var voiceNote by remember { mutableStateOf("") }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("Phone", "ElevenLabs", "Custom").forEachIndexed { i, label ->
+                listOf("Phone" to 0, "ElevenLabs" to 1, "Kokoro" to 3, "Chatterbox" to 4, "Custom" to 2).forEach { (label, i) ->
                     if (provider == i) Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Cream, contentColor = Ground), elevation = null) { Text(label) }
                     else SoftButton(onClick = { provider = i; Prefs.voiceProvider = i }) { Text(label) }
                 }
@@ -1432,6 +1432,16 @@ fun SettingsScreen() {
                         }
                     }) { Text("Load my voices") }
                     PrefField("Model", Prefs.elevenModel) { Prefs.elevenModel = it.trim() }
+                }
+                3 -> {
+                    Text("Kokoro on Obelisk — fast, light, 54 built-in voices. Runs at home, no credits, no internet needed beyond the tailnet.", color = Muted, fontSize = 13.sp)
+                    PrefField("Voice", Prefs.kokoroVoice) { Prefs.kokoroVoice = it.trim() }
+                    Text("Try af_heart, af_bella, am_michael, bf_emma — a = American, b = British, f/m = female/male.", color = Muted, fontSize = 12.sp)
+                }
+                4 -> {
+                    Text("Chatterbox Turbo on Obelisk — the expressive one, closest to ElevenLabs. Built-in voice for now; cloning from a short clip comes later.", color = Muted, fontSize = 13.sp)
+                    PrefField("Voice", Prefs.chatterboxVoice) { Prefs.chatterboxVoice = it.trim() }
+                    Text("Leave blank (or \"default\") for the built-in voice.", color = Muted, fontSize = 12.sp)
                 }
                 else -> {
                     Text("Any server with an OpenAI-style speech endpoint: OpenAI itself, or a Kokoro or Piper server on Obelisk.", color = Muted, fontSize = 13.sp)

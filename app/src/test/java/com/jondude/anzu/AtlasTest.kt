@@ -506,6 +506,20 @@ class AtlasTest {
         assertEquals("http://obelisk:8880/v1/audio/speech", c.first)
         assertTrue(c.second.isEmpty())                       // no key for a local server
         assertEquals("hello there", JSONObject(c.third).getString("input"))
+
+        Prefs.voiceProvider = 3
+        val k = CloudVoice.request("hi")!!
+        assertEquals(KOKORO_TTS + "/audio/speech", k.first)
+        assertTrue(k.second.isEmpty())                       // no auth header for the home server
+        assertEquals(Prefs.kokoroVoice, JSONObject(k.third).getString("voice"))
+        assertEquals("mp3", JSONObject(k.third).getString("response_format"))
+
+        Prefs.voiceProvider = 4
+        Prefs.chatterboxVoice = "  "
+        val ch = CloudVoice.request("hi")!!
+        assertEquals(CHATTERBOX_TTS + "/audio/speech", ch.first)
+        assertTrue(ch.second.isEmpty())
+        assertEquals("default", JSONObject(ch.third).getString("voice"))
     }
 
     // ---------- reach: phone, calendar, Hermes ----------

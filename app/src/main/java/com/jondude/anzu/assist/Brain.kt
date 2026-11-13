@@ -54,12 +54,13 @@ object Net {
 
     /** Blocking request that returns the raw response bytes (for audio). */
     fun requestBytes(
-        method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int = 30_000
+        method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int = 30_000,
+        connectTimeoutMs: Int = 8_000
     ): Pair<Int, ByteArray> {
         val conn = URL(com.jondude.anzu.tailnet(url)).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
-            conn.connectTimeout = 8_000
+            conn.connectTimeout = connectTimeoutMs
             conn.readTimeout = timeoutMs
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             if (body != null) {

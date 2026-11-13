@@ -537,6 +537,16 @@ object CloudVoice {
             org.json.JSONObject().put("model", Prefs.speechModel.trim()).put("voice", Prefs.speechVoice.trim())
                 .put("input", text).put("response_format", "mp3").toString()
         )
+        3 -> Triple(
+            KOKORO_TTS + "/audio/speech", emptyMap(),
+            org.json.JSONObject().put("model", "kokoro").put("voice", Prefs.kokoroVoice.trim().ifBlank { "af_heart" })
+                .put("input", text).put("response_format", "mp3").toString()
+        )
+        4 -> Triple(
+            CHATTERBOX_TTS + "/audio/speech", emptyMap(),
+            org.json.JSONObject().put("model", "chatterbox-turbo").put("voice", Prefs.chatterboxVoice.trim().ifBlank { "default" })
+                .put("input", text).put("response_format", "mp3").toString()
+        )
         else -> null
     }
 
@@ -547,7 +557,11 @@ object CloudVoice {
             return null
         }
         return try {
-            val (code, bytes) = com.jondude.anzu.assist.Net.requestBytes("POST", url, headers, body, 30_000)
+            val (code, bytes) = com.jondude.anzu.assist.Net.requestBytes(
+                "POST", url, headers, body, 30_000,
+                // a dead Obelisk should hand over to the phone voice fast
+                connectTimeoutMs = if (Prefs.voiceProvider == 3 || Prefs.voiceProvider == 4) 2_500 else 8_000
+            )
             if (code in 200..299 && bytes.size > 200) {
                 Speaker.lastCloudError = ""
                 bytes
