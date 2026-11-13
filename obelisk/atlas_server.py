@@ -706,7 +706,7 @@ async def _rebuild_brief():
                     ),
                 },
             ],
-            max_tokens=220,
+            max_tokens=800,
             timeout_s=90,  # Fix #4: a cold local model needs longer than 20s.
         )
         brief = reply if reply else _fallback_brief(rows, loop_rows)
@@ -878,7 +878,7 @@ async def _classify_capture(text: str) -> str:
             },
             {"role": "user", "content": text},
         ],
-        max_tokens=5,
+        max_tokens=300,
         timeout_s=20,
     )
     if reply:
@@ -1086,7 +1086,7 @@ async def _compose_catch_me_up(peek: bool = False) -> dict:
                 "content": reports_text or "(nothing happened while they were away)",
             },
         ],
-        max_tokens=220,
+        max_tokens=800,
         timeout_s=60,
     )
     summary = reply if reply else _fallback_brief(rows)
@@ -1148,7 +1148,7 @@ async def _compose_sunday_brief() -> dict:
                 + (f"\n\n{care_line}" if care_line else ""),
             },
         ],
-        max_tokens=220,
+        max_tokens=800,
         timeout_s=90,
     )
     summary = reply if reply else (_fallback_brief(rows) + (f" {care_line}" if care_line else ""))
@@ -1247,10 +1247,10 @@ async def _compose_where_was_i() -> dict:
             },
             {"role": "user", "content": context_text or "(nothing recent)"},
         ],
-        max_tokens=100,
+        max_tokens=400,
         timeout_s=30,
     )
-    if reply is None:
+    if not reply:
         if log_lines:
             reply = f"Last logged: {log_lines[-1]}"
         elif recent_reports:
@@ -1574,10 +1574,10 @@ async def _compose_leave_home_check() -> dict:
                 "content": "Checklist:\n" + "\n".join(checklist) + "\n\nFlagged:\n" + "\n".join(exceptions),
             },
         ],
-        max_tokens=80,
+        max_tokens=400,
         timeout_s=30,
     )
-    if reply is None:
+    if not reply:
         reply = "House is set, except: " + "; ".join(exceptions)
     return {"summary": reply, "checklist": checklist, "exceptions": exceptions}
 
@@ -1710,10 +1710,10 @@ async def _compose_departure_check() -> dict:
                 "content": "Checklist:\n" + "\n".join(checklist) + "\n\nFlagged:\n" + "\n".join(exceptions),
             },
         ],
-        max_tokens=80,
+        max_tokens=400,
         timeout_s=30,
     )
-    if reply is None:
+    if not reply:
         reply = (
             "Clear to go."
             if not urgent_rows and print_state.get("ok", True)
@@ -1870,7 +1870,7 @@ async def _compose_chronicle_recap(session_id: str) -> dict:
             },
             {"role": "user", "content": notes_text},
         ],
-        max_tokens=260,
+        max_tokens=800,
         timeout_s=60,
     )
     recap = reply if reply else "; ".join(f"[{r['kind']}] {r['text']}" for r in rows[:10])
@@ -1913,7 +1913,7 @@ async def _compose_chronicle_opener(exclude_session_id: Optional[str] = None) ->
             },
             {"role": "user", "content": row["recap"]},
         ],
-        max_tokens=100,
+        max_tokens=400,
         timeout_s=30,
     )
     opener = reply if reply else f"Last time on {row['session_id']}: {row['recap']}"
@@ -2088,7 +2088,7 @@ async def _ask_camera(camera: str, question: str) -> dict:
     if image is None:
         return {"answer": f"Couldn't get a snapshot from '{camera}' right now.", "camera": camera}
     reply = await _vision_chat(image, question)
-    if reply is None:
+    if not reply:
         return {"answer": "The vision model isn't answering right now.", "camera": camera}
     return {"answer": " ".join(reply.split()[:ASK_MAX_WORDS]), "camera": camera}
 
@@ -2397,7 +2397,7 @@ async def _tune_slicer(symptom: str) -> dict:
             },
             {"role": "user", "content": f"Current settings:\n{settings_text}\n\nSymptom: {symptom}"},
         ],
-        max_tokens=100,
+        max_tokens=400,
         timeout_s=30,
     )
     setting = value = reason = None
@@ -2468,10 +2468,10 @@ async def ask(a: Ask):
                 "content": f"Question: {a.question}\n\nReports:\n{reports_text}\n\nNotes:\n{vault_text}",
             },
         ],
-        max_tokens=160,
+        max_tokens=800,
         timeout_s=25,
     )
-    if reply is None:
+    if not reply:
         matches = [r for r in rows if a.question.lower() in (r["title"] + " " + r["body"]).lower()]
         pool = matches or rows
         reply = _fallback_brief(pool[:5]) if pool else "I don't have anything on that."
@@ -2502,10 +2502,10 @@ async def ask_vault(a: Ask):
                 "content": f"Question: {a.question}\n\nVault excerpts:\n{vault_text or '(no matching notes)'}",
             },
         ],
-        max_tokens=160,
+        max_tokens=800,
         timeout_s=25,
     )
-    if reply is None:
+    if not reply:
         reply = (
             "; ".join(f"from {h['note']}: {h['line']}" for h in hits[:3])
             if hits
