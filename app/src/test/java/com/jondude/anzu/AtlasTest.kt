@@ -289,7 +289,7 @@ class AtlasTest {
         Store.init(ApplicationProvider.getApplicationContext())
         assertEquals("charger", Store.lists.value["packing"]!![0].text)
         assertEquals("call the vet", Store.notes.value[0].text)
-        assertEquals(1, Store.memory.value.size)
+        assertEquals(1, Store.memory.value.count { it.equals("Likes dry humor", true) })
     }
 
     // ---------- log + recall ----------
@@ -1128,5 +1128,38 @@ class AtlasTest {
         assertEquals("00:00", RecorderMath.formatElapsed(0))
         assertEquals("01:05", RecorderMath.formatElapsed(65_000))
         assertEquals("1:02:05", RecorderMath.formatElapsed(3_725_000))
+    }
+
+    // ---------- memory seed pack ----------
+    @Test
+    fun mergeSeedAddsMissingDedupsAndKeepsOrder() {
+        val r = Store.mergeSeed(listOf("A", "b"), listOf("B", "c", "D"))
+        assertEquals(listOf("A", "b", "c", "D"), r)
+    }
+
+    @Test
+    fun mergeSeedNeverEvictsExistingWhenCapBites() {
+        val existing = (1..78).map { "e$it" }
+        val r = Store.mergeSeed(existing, listOf("s1", "s2", "s3"), 80)
+        assertEquals(existing + listOf("s1", "s2"), r)
+        val full = (1..80).map { "e$it" }
+        assertEquals(full, Store.mergeSeed(full, listOf("s1")))
+    }
+
+    @Test
+    fun bundledSeedAssetAppliesOnceAndKeepsStory() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val o = JSONObject(ctx.assets.open("atlas_seed_v1.json").bufferedReader().use { it.readText() })
+        assertTrue(o.getJSONArray("facts").length() > 20)
+        assertTrue(o.getString("story").isNotBlank())
+        assertTrue(Prefs.seedV1)
+        assertTrue(Store.memory.value.any { it.startsWith("Jon's full name") })
+        assertTrue(Prefs.story.startsWith("Early Oct 2026"))
+        // a second init with a custom story and the flag set changes nothing
+        Prefs.story = "mine"
+        val n = Store.memory.value.size
+        Store.init(ctx)
+        assertEquals("mine", Prefs.story)
+        assertEquals(n, Store.memory.value.size)
     }
 }

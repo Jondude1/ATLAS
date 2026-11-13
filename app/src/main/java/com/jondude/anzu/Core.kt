@@ -185,6 +185,8 @@ object Prefs {
     /** How the personality has shifted lately. Rewritten slowly over time. */
     var drift by StrPref("drift", "")
     var story by StrPref("story", "")
+    /** One-shot: the bundled memory seed pack (assets/atlas_seed_v1.json) has been merged in. */
+    var seedV1 by BoolPref("seedV1", false)
     var lastDriftDay by StrPref("lastDriftDay", "")
     var voiceName by StrPref("voiceName", "")
     /** 0 = the phone's speech engine, 1 = ElevenLabs, 2 = any OpenAI-style speech server, 3 = Kokoro (home), 4 = Chatterbox (home) */
@@ -434,6 +436,7 @@ object Store {
             (0 until a.length()).map { a.getJSONObject(it) }.map { Note(it.optString("text"), it.optLong("time")) }
         }
         memory.value = readArray("memory.json").let { a -> (0 until a.length()).map { a.getString(it) } }
+        applySeed(c)
         notes.value = readArray("notes.json").let { a ->
             (0 until a.length()).map { a.getJSONObject(it) }.map { Note(it.optString("text"), it.optLong("time")) }
         }
@@ -443,6 +446,36 @@ object Store {
             // entries from before timestamps were kept have no time; they're too old to matter
             val t = o.optLong("t", 0L)
             if (t > 0) history.add(Triple(o.optString("u"), o.optString("a"), t))
+        }
+    }
+
+    /** Existing facts first, then seed facts not already present (case-insensitive), appended only while under [cap]. */
+    fun mergeSeed(existing: List<String>, seedFacts: List<String>, cap: Int = 80): List<String> {
+        val out = ArrayList(existing)
+        for (f in seedFacts) {
+            if (out.size >= cap) break
+            val t = f.trim()
+            if (t.isEmpty() || out.any { it.equals(t, true) }) continue
+            out.add(t)
+        }
+        return out
+    }
+
+    /** Merge the bundled seed pack once. Any failure leaves the flag false so the next launch retries. */
+    private fun applySeed(c: Context) {
+        if (Prefs.seedV1) return
+        try {
+            val o = JSONObject(c.assets.open("atlas_seed_v1.json").bufferedReader().use { it.readText() })
+            val a = o.getJSONArray("facts")
+            val facts = (0 until a.length()).map { a.getString(it) }
+            val story = o.optString("story")
+            val merged = mergeSeed(memory.value, facts)
+            File(dir, "memory.json").writeText(JSONArray(merged).toString())
+            memory.value = merged
+            if (Prefs.story.isBlank() && story.isNotBlank()) Prefs.story = story
+            Prefs.seedV1 = true
+        } catch (e: Exception) {
+            Log.w("Store", "seed v1 not applied: ${e.message}")
         }
     }
 
