@@ -2469,7 +2469,7 @@ async def ask(a: Ask):
             },
         ],
         max_tokens=800,
-        timeout_s=25,
+        timeout_s=60,
     )
     if not reply:
         matches = [r for r in rows if a.question.lower() in (r["title"] + " " + r["body"]).lower()]
@@ -2503,7 +2503,7 @@ async def ask_vault(a: Ask):
             },
         ],
         max_tokens=800,
-        timeout_s=25,
+        timeout_s=60,
     )
     if not reply:
         reply = (
