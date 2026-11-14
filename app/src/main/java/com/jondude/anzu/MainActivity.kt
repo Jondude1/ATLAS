@@ -293,6 +293,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.jondude.anzu.overlay.OverlayService.ensureRunning(this)
         setContent {
             isDark = isSystemInDarkTheme()
             MaterialTheme(colorScheme = if (isDark) DarkColors else LightColors, typography = ConsoleType, shapes = ConsoleShapes) {
@@ -1435,6 +1436,18 @@ fun SettingsScreen() {
             ToggleRow("20-20-20 eye breaks", "Every 20 minutes of wear", Prefs.eyeBreaks) { Prefs.eyeBreaks = it }
             ToggleRow("Calendar heads-ups", "Ten minutes before events", Prefs.calendarHeadsUp) { Prefs.calendarHeadsUp = it }
             ToggleRow("Leave-now alerts", "For calendar events with a location, based on the current drive time", Prefs.commuteAlerts) { Prefs.commuteAlerts = it }
+        }
+
+        Section("Companion overlay") {
+            val octx = LocalContext.current
+            var on by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.isRunning) }
+            Text("A floating Atlas orb over other apps. Tap to talk, long-press for status.", color = Muted, fontSize = 13.sp)
+            SoftButton(onClick = {
+                if (on) {
+                    com.jondude.anzu.overlay.OverlayService.stop(octx)
+                    on = false
+                } else octx.startActivity(Intent(octx, com.jondude.anzu.overlay.OverlaySetupActivity::class.java))
+            }) { Text(if (on) "Companion overlay: on — tap to hide" else "Companion overlay: off — tap to enable") }
         }
 
         Section("Earbuds") {

@@ -718,6 +718,7 @@ class GlassesService : Service() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         GlassesService.start(context, false)
+        com.jondude.anzu.overlay.OverlayService.ensureRunning(context)
     }
 }
 
