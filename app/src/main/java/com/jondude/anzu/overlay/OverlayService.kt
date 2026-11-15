@@ -94,21 +94,37 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Atlas companion", NotificationManager.IMPORTANCE_LOW))
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         if (!Settings.canDrawOverlays(this)) {
             stopSelf()
             return
         }
-        isRunning = true
-        val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
-        edgeRight = sp.getBoolean(KEY_RIGHT, true)
-        yFrac = sp.getFloat(KEY_Y, 0.4f).coerceIn(0f, 1f)
-        addOrb()
-        observe()
-        scheduleRoam()
+        wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Atlas companion", NotificationManager.IMPORTANCE_LOW))
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } catch (t: Throwable) {
+            recordError(this, "startForeground", t)
+            stopSelf()
+            return
+        }
+        try {
+            val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
+            edgeRight = sp.getBoolean(KEY_RIGHT, true)
+            yFrac = sp.getFloat(KEY_Y, 0.4f).coerceIn(0f, 1f)
+            addOrb()
+            isRunning = true
+            observe()
+            scheduleRoam()
+        } catch (t: Throwable) {
+            isRunning = false
+            recordError(this, "setup", t)
+            orb?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+            orb = null
+            stopSelf()
+            return
+        }
+        clearError(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -466,6 +482,8 @@ class OverlayService : Service() {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_RIGHT = "edgeRight"
         private const val KEY_Y = "yFrac"
+        private const val KEY_ERROR = "lastError"
+        private const val MAX_TRACE = 3000
         private const val ORB_DP = 64
         private const val HUD_ORB_DP = 140
         private const val LONG_PRESS_MS = 500L
@@ -487,8 +505,25 @@ class OverlayService : Service() {
             setEnabled(ctx, true)
             try {
                 androidx.core.content.ContextCompat.startForegroundService(ctx, Intent(ctx, OverlayService::class.java))
-            } catch (_: Exception) {
+            } catch (t: Throwable) {
+                recordError(ctx, "start", t)
             }
+        }
+
+        /** Stores the failure (class, message, truncated stack trace, timestamp) so Settings can show it. Never throws. */
+        fun recordError(ctx: Context, where: String, t: Throwable) {
+            try {
+                val trace = android.util.Log.getStackTraceString(t).take(MAX_TRACE)
+                val text = "$where: ${t.javaClass.name}: ${t.message}\n$trace\nat ${java.util.Date()}"
+                ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ERROR, text).apply()
+            } catch (_: Throwable) {
+            }
+        }
+
+        fun lastError(ctx: Context): String = ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ERROR, "") ?: ""
+
+        fun clearError(ctx: Context) {
+            ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ERROR, "").apply()
         }
 
         fun stop(ctx: Context) {

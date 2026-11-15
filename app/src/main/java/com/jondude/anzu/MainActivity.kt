@@ -1442,6 +1442,14 @@ fun SettingsScreen() {
             val octx = LocalContext.current
             var on by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.isRunning) }
             Text("A floating Atlas orb over other apps. Tap to talk, long-press for status.", color = Muted, fontSize = 13.sp)
+            var overlayErr by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.lastError(octx)) }
+            if (overlayErr.isNotBlank()) {
+                Text(overlayErr, color = Gold, fontSize = 12.sp)
+                TextButton(onClick = {
+                    com.jondude.anzu.overlay.OverlayService.clearError(octx)
+                    overlayErr = ""
+                }) { Text("Clear", color = Gold) }
+            }
             SoftButton(onClick = {
                 if (on) {
                     com.jondude.anzu.overlay.OverlayService.stop(octx)
