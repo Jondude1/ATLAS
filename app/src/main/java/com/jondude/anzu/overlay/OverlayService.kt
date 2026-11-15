@@ -8,8 +8,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -67,6 +71,8 @@ class OverlayService : Service() {
     private var glide: ValueAnimator? = null
     private var lastSaid = ""
     private var state = "idle"
+    private var highlight: View? = null
+    private var pointing = false
 
     private val orbPx get() = dp(ORB_DP)
     private val screenW get() = resources.displayMetrics.widthPixels
@@ -127,6 +133,7 @@ class OverlayService : Service() {
             return
         }
         isRunning = true
+        instance = this
         clearError(this)
         crumb(this, "running")
     }
@@ -144,8 +151,10 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        if (instance === this) instance = null
         main.removeCallbacksAndMessages(null)
         glide?.cancel()
+        removeHighlight()
         collapse(save = false)
         orb?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         orb = null
@@ -302,7 +311,7 @@ class OverlayService : Service() {
     private fun roamStep() {
         val screenOn = (getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive
         val quiet = System.currentTimeMillis() - lastTouchAt < 30_000
-        if (!screenOn || quiet || dragging || expanded || state != "idle") {
+        if (!screenOn || quiet || dragging || expanded || pointing || state != "idle") {
             scheduleRoam()
             return
         }
@@ -310,6 +319,88 @@ class OverlayService : Service() {
         persist()
         glideTo(xFor(edgeRight), yFor(yFrac), Random.nextLong(2_000, 4_000), android.view.animation.AccelerateDecelerateInterpolator())
         scheduleRoam()
+    }
+
+    // ---------------------------------------------------------------- show & point
+
+    private val finishPoint = Runnable { endPoint() }
+
+    private fun startPoint(rect: Rect) {
+        try {
+            if (orb == null || rect.isEmpty) return
+            endPoint()
+            pointing = true
+            val lp = orbLp
+            if (lp != null && !expanded) {
+                val gap = dp(8)
+                val tx = (rect.centerX() - orbPx / 2).coerceIn(0, (screenW - orbPx).coerceAtLeast(0))
+                var ty = rect.top - orbPx - gap
+                if (ty < minY()) ty = rect.bottom + gap
+                glideTo(tx, ty.coerceIn(minY(), maxY()), 600L, DecelerateInterpolator())
+            }
+            val v = HighlightView(this, rect, dp(RING_PAD_DP).toFloat(), dp(RING_STROKE_DP).toFloat())
+            val lpH = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.TOP or Gravity.START }
+            wm.addView(v, lpH)
+            highlight = v
+            main.removeCallbacks(finishPoint)
+            main.postDelayed(finishPoint, POINT_MS)
+        } catch (t: Throwable) {
+            crumb(this, "pointAt failed: ${t.javaClass.simpleName}")
+            endPoint()
+        }
+    }
+
+    private fun removeHighlight() {
+        (highlight as? HighlightView)?.stop()
+        highlight?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        highlight = null
+    }
+
+    private fun endPoint() {
+        main.removeCallbacks(finishPoint)
+        removeHighlight()
+        if (!pointing) return
+        pointing = false
+        try {
+            if (!dragging && !expanded) glideTo(xFor(edgeRight), yFor(yFrac), 500L, OvershootInterpolator(1.1f))
+        } catch (_: Throwable) {}
+    }
+
+    /** One orange rounded-rect ring around [target] with a soft pulse. Touch-transparent. */
+    private class HighlightView(ctx: Context, private val target: Rect, private val pad: Float, stroke: Float) : View(ctx) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = stroke
+            color = Color.parseColor("#FF5C00")
+        }
+        private val box = RectF()
+        private val pulse = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 900L
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { invalidate() }
+        }
+
+        init { pulse.start() }
+
+        fun stop() { pulse.cancel() }
+
+        override fun onDraw(c: Canvas) {
+            val f = pulse.animatedValue as Float
+            val grow = pad + f * pad * 0.5f
+            box.set(
+                target.left - grow, target.top - grow, target.right + grow, target.bottom + grow
+            )
+            paint.alpha = (255 * (1f - 0.45f * f)).toInt()
+            val r = (minOf(box.width(), box.height()) / 4f).coerceIn(pad, pad * 3f)
+            c.drawRoundRect(box, r, r, paint)
+        }
     }
 
     // ---------------------------------------------------------------- state
@@ -498,10 +589,23 @@ class OverlayService : Service() {
         private const val HUD_ORB_DP = 140
         private const val LONG_PRESS_MS = 500L
         private const val TAP_MS = 300L
+        private const val POINT_MS = 3_000L
+        private const val RING_PAD_DP = 6
+        private const val RING_STROKE_DP = 3
 
         @Volatile
         var isRunning = false
             private set
+
+        @Volatile
+        private var instance: OverlayService? = null
+
+        /** Show & Point: glide the orb to the target, ring it for ~3s, then send the orb home. No-op if the service isn't running. */
+        fun pointAt(ctx: Context, rect: Rect) {
+            val svc = instance ?: return
+            val r = Rect(rect)
+            svc.main.post { svc.startPoint(r) }
+        }
 
         fun isEnabled(ctx: Context) = ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
 

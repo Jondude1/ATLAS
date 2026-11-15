@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="widget_description">Atlas at a glance: anything urgent, the latest from your brief, and one tap to talk.</string>
+    <string name="a11y_description">Lets Atlas see which things are on your screen so it can circle them for you. Atlas only points; it never taps, types or scrolls, and nothing on your screen leaves the phone.</string>
 </resources>

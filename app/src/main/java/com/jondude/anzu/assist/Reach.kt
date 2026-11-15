@@ -125,6 +125,37 @@ object Phone {
         return if (launch(ctx, intent)) "Opened ${hit.loadLabel(pm)}." else "Couldn't open it."
     }
 
+    private val DOMAIN = Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\\d+)?([/?#]\\S*)?$", RegexOption.IGNORE_CASE)
+
+    /** Opens a URL/domain, a named Settings screen, or an installed app, in that order. No searching, no downloads. */
+    fun openScreen(ctx: Context, target: String): String {
+        val t = target.trim()
+        if (t.isEmpty()) return "Open what? I need a website, a settings screen or an app name."
+        if (!canLaunch(ctx)) return NEED_LAUNCH
+        if (t.startsWith("http://", true) || t.startsWith("https://", true) || DOMAIN.matches(t)) {
+            val url = if (t.contains("://")) t else "https://$t"
+            return if (launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)))) "Opened $url in the browser." else "Couldn't open $url."
+        }
+        val screen = when (t.lowercase().removeSuffix(" settings").trim()) {
+            "wifi", "wi-fi" -> Settings.ACTION_WIFI_SETTINGS to "Wi-Fi settings"
+            "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS to "Bluetooth settings"
+            "battery" -> Intent.ACTION_POWER_USAGE_SUMMARY to "battery settings"
+            "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS to "accessibility settings"
+            "apps" -> Settings.ACTION_APPLICATION_SETTINGS to "apps settings"
+            else -> null
+        }
+        if (screen != null) {
+            return if (launch(ctx, Intent(screen.first))) "Opened ${screen.second}." else "Couldn't open ${screen.second}."
+        }
+        val pm = ctx.packageManager
+        val q = t.lowercase()
+        val hit = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+            .firstOrNull { it.loadLabel(pm).toString().lowercase().contains(q) }
+            ?: return "I couldn't find a website, settings screen or app called $t."
+        val intent = pm.getLaunchIntentForPackage(hit.activityInfo.packageName) ?: return "That app can't be opened."
+        return if (launch(ctx, intent)) "Opened ${hit.loadLabel(pm)}." else "Couldn't open it."
+    }
+
     fun navigate(ctx: Context, destination: String): String {
         if (!canLaunch(ctx)) return NEED_LAUNCH
         val uri = Uri.parse("google.navigation:q=" + URLEncoder.encode(destination, "UTF-8"))

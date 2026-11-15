@@ -1460,6 +1460,13 @@ fun SettingsScreen() {
                     on = false
                 } else octx.startActivity(Intent(octx, com.jondude.anzu.overlay.OverlaySetupActivity::class.java))
             }) { Text(if (on) "Companion overlay: on — tap to hide" else "Companion overlay: off — tap to enable") }
+
+            val pointOn = remember { com.jondude.anzu.overlay.AtlasA11yService.isConnected() }
+            Text("Show & Point: " + if (pointOn) "accessibility service connected" else "accessibility service not enabled", fontSize = 14.sp)
+            Text("Lets Atlas circle things on your screen when you ask where they are. It only points; it never taps or types, and screen content stays on the phone.", color = Muted, fontSize = 13.sp)
+            SoftButton(onClick = {
+                octx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }) { Text("Open accessibility settings") }
         }
 
         Section("Earbuds") {

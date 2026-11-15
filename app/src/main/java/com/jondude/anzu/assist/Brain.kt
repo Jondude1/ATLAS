@@ -610,6 +610,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         a.put(tool("call", "Place a phone call to a contact or number. Jon is asked to confirm out loud.",
             JSONObject().put("to", str("Contact name or phone number.")), listOf("to")))
         a.put(tool("open_app", "Open an app on the phone by name.", JSONObject().put("name", str("App name.")), listOf("name")))
+        a.put(tool("point_at", "Show Jon where something is on his CURRENT screen by circling it with a highlight ring; only works for things currently visible.",
+            JSONObject().put("query", str("The visible text or label to find, e.g. 'Settings' or 'Send'.")), listOf("query")))
+        a.put(tool("open_screen", "Open a website (URL or domain), a phone settings screen (wifi, bluetooth, battery, accessibility, apps) or an installed app by name.",
+            JSONObject().put("target", str("URL, domain, settings screen name, or app name.")), listOf("target")))
         a.put(tool("navigate", "Start driving directions in Maps.", JSONObject().put("destination", str("Place or address.")), listOf("destination")))
         a.put(tool("set_alarm", "Set a clock alarm.",
             JSONObject().put("hour", num("0 to 23")).put("minute", num("0 to 59")).put("label", str("What it's for.")), listOf("hour", "minute")))
@@ -833,6 +837,22 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 }
             }
             "open_app" -> Phone.openApp(ctx, input.optString("name"))
+            "point_at" -> {
+                val q = input.optString("query").trim()
+                if (!com.jondude.anzu.overlay.AtlasA11yService.isConnected())
+                    "Show & Point isn't enabled yet — it needs the accessibility switch in Settings."
+                else if (!com.jondude.anzu.overlay.OverlayService.isRunning)
+                    "The companion overlay isn't running, so I can't point. It needs to be on in Settings."
+                else {
+                    val hit = com.jondude.anzu.overlay.AtlasA11yService.find(q)
+                    if (hit == null) "I can't see '$q' on this screen."
+                    else {
+                        com.jondude.anzu.overlay.OverlayService.pointAt(ctx, hit.bounds)
+                        "Pointing at '${hit.label.ifBlank { q }.take(60)}' on screen."
+                    }
+                }
+            }
+            "open_screen" -> Phone.openScreen(ctx, input.optString("target"))
             "navigate" -> Phone.navigate(ctx, input.optString("destination"))
             "set_alarm" -> Phone.setAlarm(ctx, input.optInt("hour", 7), input.optInt("minute", 0), input.optString("label", "Alarm"))
             "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0))

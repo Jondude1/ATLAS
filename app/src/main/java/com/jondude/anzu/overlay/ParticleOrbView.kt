@@ -107,7 +107,7 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
         if (!running) return
         val now = SystemClock.uptimeMillis()
         val idleCap = mode == OrbMode.IDLE && !attentionActive(now) && bounceStart < 0 && shakeStart < 0
-        if (idleCap && lastFrame != 0L && now - lastFrame < 50) { // ~20 fps when idle
+        if (idleCap && lastFrame != 0L && now - lastFrame < 33) { // ~30 fps when idle (smoother float, still battery-kind)
             postInvalidateOnAnimation()
             return
         }
@@ -150,11 +150,14 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
             ringAngle[i] += ringSpeed[i] * flip * rs * dt
         }
         ripplePhase += dt * 0.9f
+        // Idle calm (Jon, 2026-11-14): the Brownian kicks are what read as flicker at rest —
+        // damped to a quarter when idle so the points drift and float instead of twitching.
+        val jitter = if (m == OrbMode.IDLE && !attn) 0.3f else 1.2f
         for (p in pts) {
             val r = sqrt(p.x * p.x + p.y * p.y)
             // Brownian jitter + tangential swirl + weak pull to core (stronger when gathering).
-            p.vx += (rnd.nextFloat() - 0.5f) * 1.2f * dt
-            p.vy += (rnd.nextFloat() - 0.5f) * 1.2f * dt
+            p.vx += (rnd.nextFloat() - 0.5f) * jitter * dt
+            p.vy += (rnd.nextFloat() - 0.5f) * jitter * dt
             val sw = swirl * 0.35f
             p.vx += -p.y * sw * dt
             p.vy += p.x * sw * dt
@@ -234,9 +237,11 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
         c.scale(sx * breath * (1f + 0.04f * pl), sy * breath * (1f + 0.04f * pl))
         val R = base * 0.74f // sphere radius leaves room for rings and ripples
 
-        // core glow / flicker
+        // core glow. THINKING keeps its deliberate shimmer; IDLE gets Jon's breathing wave —
+        // two slow sines layered so the swell never loops obviously, small amplitude.
         val flick = if (mode == OrbMode.THINKING) 0.5f + 0.5f * sin(time * 17f) * sin(time * 5.3f) else 0f
-        val coreA = ((0.24f + 0.22f * pl + 0.12f * flick + gather * 0.15f) * alphaMul).coerceIn(0f, 1f)
+        val wave = if (idle) 0.05f * (0.6f * sin(time * 0.9f) + 0.4f * sin(time * 0.37f + 1.7f)) else 0f
+        val coreA = ((0.24f + 0.22f * pl + 0.12f * flick + gather * 0.15f + wave) * alphaMul).coerceIn(0f, 1f)
         val coreCol = if (mode == OrbMode.LISTENING || attn) orange else Color.WHITE
         paint.style = Paint.Style.FILL
         paint.shader = RadialGradient(0f, 0f, R, withAlpha(coreCol, coreA), withAlpha(coreCol, 0f), Shader.TileMode.CLAMP)
