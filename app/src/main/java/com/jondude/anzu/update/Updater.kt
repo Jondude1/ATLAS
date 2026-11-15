@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.jondude.anzu.BuildConfig
+import com.jondude.anzu.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -16,9 +17,9 @@ import java.net.URL
 
 /** Self-updater: checks the public repo's latest GitHub Release and installs its APK. */
 object Updater {
-    private const val REPO = "Jondude1/Anzu-1"
+    private const val REPO = "Jondude1/ATLAS"
 
-    data class Release(val code: Int, val tag: String, val url: String)
+    data class Release(val tag: String, val url: String)
 
     val available = MutableStateFlow<Release?>(null)
     /** -1 idle, 0..1 downloading */
@@ -26,8 +27,31 @@ object Updater {
     val status = MutableStateFlow("")
     private var lastCheck = 0L
 
-    /** "v1.0.42" -> 42. The trailing number is the build number. */
-    fun versionOf(tag: String): Int = Regex("(\\d+)$").find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    private const val DISMISSED = "updateDismissedTag"
+
+    /** "v1.2.1" -> [1, 2, 1]; non-numeric parts count as 0. */
+    fun parseVersion(tag: String): List<Int> =
+        tag.trim().removePrefix("v").split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+
+    /** Pure numeric comparison of a release tag against the installed versionName. */
+    fun isNewer(remoteTag: String, currentVersionName: String): Boolean {
+        val a = parseVersion(remoteTag)
+        val b = parseVersion(currentVersionName)
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
+    }
+
+    /** A dismissed version never banners again; a still-newer one will. */
+    fun dismiss(tag: String) {
+        available.value = null
+        try { Prefs.sp.edit().putString(DISMISSED, tag).apply() } catch (_: Throwable) {}
+    }
+
+    private fun dismissedTag(): String = try { Prefs.sp.getString(DISMISSED, "") ?: "" } catch (_: Throwable) { "" }
 
     suspend fun check(force: Boolean = false): Release? = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -44,7 +68,6 @@ object Updater {
             }
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             val tag = json.optString("tag_name")
-            val code = versionOf(tag)
             val assets = json.optJSONArray("assets")
             var apk: String? = null
             if (assets != null) {
@@ -56,9 +79,10 @@ object Updater {
                     }
                 }
             }
-            val rel = if (apk != null && code > BuildConfig.VERSION_CODE) Release(code, tag, apk) else null
+            val newer = apk != null && isNewer(tag, BuildConfig.VERSION_NAME)
+            val rel = if (newer && (force || tag != dismissedTag())) Release(tag, apk!!) else null
             available.value = rel
-            status.value = if (rel == null) "Up to date" else "Update $tag available"
+            status.value = if (!newer) "Up to date" else "Update $tag available"
             rel
         } catch (e: Exception) {
             status.value = "Update check failed"
@@ -98,7 +122,7 @@ object Updater {
                 progress.value = 0f
                 val dir = File(ctx.cacheDir, "updates").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
-                val out = File(dir, "update-${rel.code}.apk")
+                val out = File(dir, "update-${rel.tag}.apk")
                 val conn = open(rel.url)
                 val total = conn.contentLengthLong
                 conn.inputStream.use { input ->

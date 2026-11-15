@@ -317,7 +317,6 @@ fun AppRoot(resumes: Int) {
     var tab by remember { mutableIntStateOf(0) }
     val update by Updater.available.collectAsState()
     val progress by Updater.progress.collectAsState()
-    var dismissed by remember { mutableStateOf(false) }
 
     LaunchedEffect(resumes) { Updater.check() }
 
@@ -371,20 +370,20 @@ fun AppRoot(resumes: Int) {
                 }
             }
             val rel = update
-            if (rel != null && !dismissed) {
+            if (rel != null) {
                 Card(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = Flat,
                     colors = CardDefaults.cardColors(containerColor = Panel)
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        Text("Update available: ${rel.tag}", fontWeight = FontWeight.SemiBold)
+                        Text("Atlas ${rel.tag} is available", fontWeight = FontWeight.SemiBold)
                         if (progress >= 0f) {
                             LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                         } else {
                             Row {
                                 TextButton(onClick = { scope.launch { Updater.downloadAndInstall(ctx, rel) } }) { Text("Update") }
-                                TextButton(onClick = { dismissed = true }) { Text("Later") }
+                                TextButton(onClick = { Updater.dismiss(rel.tag) }) { Text("Later") }
                             }
                         }
                     }

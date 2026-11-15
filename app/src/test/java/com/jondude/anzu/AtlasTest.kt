@@ -708,9 +708,23 @@ class AtlasTest {
 
     // ---------- updater / usage ----------
     @Test
-    fun updaterReadsBuildNumbers() {
-        assertEquals(42, Updater.versionOf("v1.0.42"))
-        assertEquals(0, Updater.versionOf("nightly"))
+    fun updaterParsesVersions() {
+        assertEquals(listOf(1, 2, 1), Updater.parseVersion("v1.2.1"))
+        assertEquals(listOf(1, 2, 1), Updater.parseVersion("1.2.1"))
+        assertEquals(listOf(1, 0, 0), Updater.parseVersion("1.x.junk"))
+    }
+
+    @Test
+    fun updaterComparesVersions() {
+        assertFalse(Updater.isNewer("v1.2.0", "1.2.0"))
+        assertFalse(Updater.isNewer("v1.1.9", "1.2.0"))
+        assertTrue(Updater.isNewer("v1.2.1", "1.2.0"))
+        assertTrue(Updater.isNewer("v1.3.0", "1.2.9"))
+        assertTrue(Updater.isNewer("v2.0.0", "1.9.9"))
+        assertTrue(Updater.isNewer("1.2.1", "v1.2.0"))
+        assertTrue(Updater.isNewer("v1.10.0", "1.9.0"))
+        assertFalse(Updater.isNewer("v1.2", "1.2.0"))
+        assertFalse(Updater.isNewer("nightly", "1.2.0"))
     }
 
     @Test
