@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -31,7 +30,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Atlas
@@ -94,37 +92,43 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        crumb(this, "onCreate entered")
         if (!Settings.canDrawOverlays(this)) {
+            crumb(this, "no overlay permission")
             stopSelf()
             return
         }
-        wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         try {
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Atlas companion", NotificationManager.IMPORTANCE_LOW))
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            nm.notify(NOTIFICATION_ID, notification())
+            crumb(this, "notify ok")
         } catch (t: Throwable) {
-            recordError(this, "startForeground", t)
-            stopSelf()
-            return
+            recordError(this, "notify", t)
         }
         try {
+            wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
             edgeRight = sp.getBoolean(KEY_RIGHT, true)
             yFrac = sp.getFloat(KEY_Y, 0.4f).coerceIn(0f, 1f)
             addOrb()
-            isRunning = true
+            crumb(this, "addOrb ok")
             observe()
+            crumb(this, "observe ok")
             scheduleRoam()
         } catch (t: Throwable) {
             isRunning = false
             recordError(this, "setup", t)
+            crumb(this, "setup failed")
+            setEnabled(this, false)
             orb?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
             orb = null
             stopSelf()
             return
         }
+        isRunning = true
         clearError(this)
+        crumb(this, "running")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -146,6 +150,8 @@ class OverlayService : Service() {
         orb?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         orb = null
         scope.cancel()
+        try { getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID) } catch (_: Throwable) {}
+        crumb(this, "onDestroy")
         super.onDestroy()
     }
 
@@ -483,7 +489,9 @@ class OverlayService : Service() {
         private const val KEY_RIGHT = "edgeRight"
         private const val KEY_Y = "yFrac"
         private const val KEY_ERROR = "lastError"
+        private const val KEY_CRUMBS = "crumbs"
         private const val MAX_TRACE = 3000
+        private const val MAX_CRUMBS = 1200
         private const val ORB_DP = 64
         private const val HUD_ORB_DP = 140
         private const val LONG_PRESS_MS = 500L
@@ -503,8 +511,9 @@ class OverlayService : Service() {
         fun start(ctx: Context) {
             if (!Settings.canDrawOverlays(ctx)) return
             setEnabled(ctx, true)
+            crumb(ctx, "start() called")
             try {
-                androidx.core.content.ContextCompat.startForegroundService(ctx, Intent(ctx, OverlayService::class.java))
+                ctx.startService(Intent(ctx, OverlayService::class.java))
             } catch (t: Throwable) {
                 recordError(ctx, "start", t)
             }
@@ -515,9 +524,30 @@ class OverlayService : Service() {
             try {
                 val trace = android.util.Log.getStackTraceString(t).take(MAX_TRACE)
                 val text = "$where: ${t.javaClass.name}: ${t.message}\n$trace\nat ${java.util.Date()}"
-                ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ERROR, text).apply()
+                ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ERROR, text).commit()
             } catch (_: Throwable) {
             }
+        }
+
+        /** Appends a timestamped line to a ring log (last ~1200 chars), committed synchronously so it survives process death. Never throws. */
+        fun crumb(ctx: Context, msg: String) {
+            try {
+                val sp = ctx.getSharedPreferences(PREFS, MODE_PRIVATE)
+                val line = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())} $msg"
+                val joined = ((sp.getString(KEY_CRUMBS, "") ?: "") + "\n" + line).trim()
+                sp.edit().putString(KEY_CRUMBS, joined.takeLast(MAX_CRUMBS)).commit()
+            } catch (_: Throwable) {
+            }
+        }
+
+        fun crumbs(ctx: Context): String = try {
+            ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_CRUMBS, "") ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
+
+        fun clearCrumbs(ctx: Context) {
+            try { ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_CRUMBS, "").commit() } catch (_: Throwable) {}
         }
 
         fun lastError(ctx: Context): String = ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ERROR, "") ?: ""

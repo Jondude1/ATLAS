@@ -1443,11 +1443,15 @@ fun SettingsScreen() {
             var on by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.isRunning) }
             Text("A floating Atlas orb over other apps. Tap to talk, long-press for status.", color = Muted, fontSize = 13.sp)
             var overlayErr by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.lastError(octx)) }
-            if (overlayErr.isNotBlank()) {
-                Text(overlayErr, color = Gold, fontSize = 12.sp)
+            var overlayCrumbs by remember { mutableStateOf(com.jondude.anzu.overlay.OverlayService.crumbs(octx)) }
+            if (overlayErr.isNotBlank()) Text(overlayErr, color = Gold, fontSize = 12.sp)
+            if (overlayCrumbs.isNotBlank()) Text(overlayCrumbs, color = Muted, fontSize = 11.sp)
+            if (overlayErr.isNotBlank() || overlayCrumbs.isNotBlank()) {
                 TextButton(onClick = {
                     com.jondude.anzu.overlay.OverlayService.clearError(octx)
+                    com.jondude.anzu.overlay.OverlayService.clearCrumbs(octx)
                     overlayErr = ""
+                    overlayCrumbs = ""
                 }) { Text("Clear", color = Gold) }
             }
             SoftButton(onClick = {

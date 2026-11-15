@@ -4,6 +4,12 @@ plugins {
 }
 
 val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+val versionMap = rootProject.file("version.properties").takeIf { it.exists() }
+    ?.readLines()?.mapNotNull { l ->
+        val p = l.split("=", limit = 2)
+        if (p.size == 2) p[0].trim() to p[1].trim() else null
+    }?.toMap() ?: emptyMap()
+val appVersion = "${versionMap["major"] ?: "1"}.${versionMap["minor"] ?: "0"}.${versionMap["patch"] ?: "0"}"
 
 android {
     namespace = "com.jondude.anzu"
@@ -14,7 +20,7 @@ android {
         minSdk = 31
         targetSdk = 34
         versionCode = runNumber
-        versionName = "1.0.$runNumber"
+        versionName = appVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }

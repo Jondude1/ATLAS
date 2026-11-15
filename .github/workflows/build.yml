@@ -10,6 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(grep -E '^(major|minor|patch)=' version.properties | cut -d= -f2 | paste -sd.)
+          tag="v$ver"
+          if gh release view "$tag" >/dev/null 2>&1; then tag="v$ver-${{ github.run_number }}"; fi
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "apk=AnzuOne-v$ver.apk" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -39,16 +50,16 @@ jobs:
       - name: Build
         run: gradle assembleRelease --no-daemon --stacktrace
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk AnzuOne-v1.0.${{ github.run_number }}.apk
+        run: cp app/build/outputs/apk/release/app-release.apk ${{ steps.ver.outputs.apk }}
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: AnzuOne-v1.0.${{ github.run_number }}.apk
+          path: ${{ steps.ver.outputs.apk }}
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Anzu One v1.0.${{ github.run_number }}
-          files: AnzuOne-v1.0.${{ github.run_number }}.apk
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Anzu One v${{ steps.ver.outputs.ver }}
+          files: ${{ steps.ver.outputs.apk }}
           make_latest: true
 
   smoke:
