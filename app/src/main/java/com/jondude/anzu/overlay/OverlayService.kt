@@ -202,7 +202,9 @@ class OverlayService : Service() {
         private var downAt = 0L
         private var moved = false
         private var longFired = false
-        private val slop = dp(10)
+        // Lazy: this object is created during the service constructor, before Android attaches
+        // the base context — reading resources (dp) there kills instantiation before onCreate.
+        private val slop: Int by lazy { dp(10) }
         private val longPress = Runnable {
             if (!moved && !dragging) {
                 longFired = true
