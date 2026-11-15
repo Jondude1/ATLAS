@@ -387,7 +387,7 @@ class OverlayService : Service() {
             background = bg
             setPadding(dp(16), dp(12), dp(16), dp(14))
         }
-        val big = ParticleOrbView(ctx, 90)
+        val big = ParticleOrbView(ctx, 130)
         hudOrb = big
         big.mode = orb?.mode ?: OrbMode.IDLE
         col.addView(big, LinearLayout.LayoutParams(dp(HUD_ORB_DP), dp(HUD_ORB_DP)))
@@ -494,7 +494,7 @@ class OverlayService : Service() {
         private const val KEY_CRUMBS = "crumbs"
         private const val MAX_TRACE = 3000
         private const val MAX_CRUMBS = 1200
-        private const val ORB_DP = 64
+        private const val ORB_DP = 84
         private const val HUD_ORB_DP = 140
         private const val LONG_PRESS_MS = 500L
         private const val TAP_MS = 300L

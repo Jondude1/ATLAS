@@ -21,7 +21,7 @@ import kotlin.random.Random
 enum class OrbMode { IDLE, LISTENING, THINKING, SPEAKING, ATTENTION }
 
 /** Atlas's companion orb: soft points drifting inside a sphere, wrapped by thin rings. Plain Canvas, no Compose. */
-class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx) {
+class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ctx) {
     var mode: OrbMode = OrbMode.IDLE
         set(v) {
             if (field == v) return
@@ -37,9 +37,9 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx
 
     private val rnd = Random(7)
     private val pts = Array(pointCount) {
-        val r = sqrt(rnd.nextFloat()).let { it * it } // denser toward the core
+        val r = sqrt(rnd.nextFloat()) // uniform over the disc area
         val a = rnd.nextFloat() * 2 * PI.toFloat()
-        P(r * cos(a), r * sin(a), rnd.nextFloat() < 0.15f, 0.025f + rnd.nextFloat() * 0.03f, rnd.nextFloat() * 6.28f)
+        P(r * cos(a), r * sin(a), rnd.nextFloat() < 0.15f, 0.032f + rnd.nextFloat() * 0.042f, rnd.nextFloat() * 6.28f)
     }
     private val ringAngle = floatArrayOf(0f, 1.7f, 3.4f)
     private val ringSpeed = floatArrayOf(0.35f, -0.25f, 0.18f) // rad/s at full speed
@@ -208,7 +208,7 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx
         val pl = pulse(now, attn)
         val idle = mode == OrbMode.IDLE && !attn
         val breath = if (idle) 1f + 0.03f * sin(time * 1.3f) else 1f
-        val alphaMul = if (idle) 0.7f else 1f
+        val alphaMul = if (idle) 0.8f else 1f
 
         c.save()
         // reaction transforms
@@ -232,11 +232,11 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx
         }
         c.translate(cx + tx, cy + ty)
         c.scale(sx * breath * (1f + 0.04f * pl), sy * breath * (1f + 0.04f * pl))
-        val R = base * 0.66f // sphere radius leaves room for rings and ripples
+        val R = base * 0.74f // sphere radius leaves room for rings and ripples
 
         // core glow / flicker
         val flick = if (mode == OrbMode.THINKING) 0.5f + 0.5f * sin(time * 17f) * sin(time * 5.3f) else 0f
-        val coreA = ((0.16f + 0.22f * pl + 0.12f * flick + gather * 0.15f) * alphaMul).coerceIn(0f, 1f)
+        val coreA = ((0.24f + 0.22f * pl + 0.12f * flick + gather * 0.15f) * alphaMul).coerceIn(0f, 1f)
         val coreCol = if (mode == OrbMode.LISTENING || attn) orange else Color.WHITE
         paint.style = Paint.Style.FILL
         paint.shader = RadialGradient(0f, 0f, R, withAlpha(coreCol, coreA), withAlpha(coreCol, 0f), Shader.TileMode.CLAMP)
@@ -251,17 +251,17 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx
             val col = if (p.orange) orange else Color.WHITE
             val rad = R * p.size * (1f + 0.5f * pl) * (if (p.orange && attn) 1.6f else 1f)
             paint.color = withAlpha(col, a * 0.35f)
-            c.drawCircle(p.x * R, p.y * R, rad * 2.2f, paint) // soft halo
+            c.drawCircle(p.x * R, p.y * R, rad * 2.6f, paint) // soft halo
             paint.color = withAlpha(col, a)
             c.drawCircle(p.x * R, p.y * R, rad, paint)
         }
 
         // rings
         paint.style = Paint.Style.STROKE
-        val radii = floatArrayOf(R * 1.12f, R * 1.28f, R * 1.44f)
+        val radii = floatArrayOf(R * 1.08f, R * 1.20f, R * 1.32f)
         for (i in radii.indices) {
             val rr = radii[i] * (1f + 0.02f * pl)
-            val ra = (if (i == 0) 0.55f else 0.35f) * alphaMul
+            val ra = (if (i == 0) 0.38f else 0.24f) * alphaMul
             val col = lerpColor(Color.WHITE, orange, if (i == 0) ringGlow else ringGlow * 0.6f)
             paint.strokeWidth = max(1f, base * 0.025f)
             paint.color = withAlpha(col, (ra + 0.3f * ringGlow + 0.2f * pl).coerceIn(0f, 1f))
@@ -271,7 +271,7 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 76) : View(ctx
             for (s in 0 until 3) c.drawArc(arc, rot + s * 120f, 95f - i * 12f, false, paint)
             // subtle tick arcs
             paint.strokeWidth = max(1f, base * 0.012f)
-            paint.color = withAlpha(Color.WHITE, 0.28f * alphaMul)
+            paint.color = withAlpha(Color.WHITE, 0.18f * alphaMul)
             for (t in 0 until 6) c.drawArc(arc, -rot * 0.7f + t * 60f + 20f, 3f, false, paint)
         }
 
