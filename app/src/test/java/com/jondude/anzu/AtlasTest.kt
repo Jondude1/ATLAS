@@ -1183,4 +1183,11 @@ class AtlasTest {
         assertTrue(Brain.GROUNDING_RULE.contains("Never invent"))
         assertTrue(Brain.GROUNDING_RULE.contains("memory notes"))
     }
+
+    @Test
+    fun brainHealthReportsFallbackHonestly() {
+        com.jondude.anzu.assist.BrainHealth.noteFallback("HTTP 529\n overloaded", now = 1_000_000L)
+        val s = com.jondude.anzu.assist.BrainHealth.describe(now = 1_000_000L + 5 * 60_000)
+        assertTrue(s, s.contains("5 minutes ago") && s.contains("HTTP 529 overloaded") && s.contains("local model"))
+    }
 }

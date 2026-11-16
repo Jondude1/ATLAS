@@ -458,6 +458,28 @@ object Timers {
     }
 }
 
+/** Remembers when the main brain last failed and a fallback answered, so a switch is never silent. */
+object BrainHealth {
+    @Volatile var lastFallbackAt = 0L
+        private set
+    @Volatile var lastFallbackWhy = ""
+        private set
+
+    fun noteFallback(why: String, now: Long = System.currentTimeMillis()) {
+        lastFallbackAt = now
+        lastFallbackWhy = why.replace(Regex("\\s+"), " ").trim().take(120)
+    }
+
+    /** One status sentence: empty when the main brain has never failed this run. */
+    fun describe(now: Long = System.currentTimeMillis()): String {
+        if (lastFallbackAt == 0L) return ""
+        val mins = ((now - lastFallbackAt) / 60_000).coerceAtLeast(0)
+        val ago = if (mins < 1) "just now" else if (mins < 60) "$mins minutes ago" else "${mins / 60} hours ago"
+        val why = if (lastFallbackWhy.isBlank()) "" else " ($lastFallbackWhy)"
+        return "The main model last failed $ago$why and the local model answered instead. "
+    }
+}
+
 object Brain {
     private const val API = "https://api.anthropic.com/v1/messages"
 
@@ -724,6 +746,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             append(if (ms >= 0) "Home Assistant reachable, $ms milliseconds. " else "Home Assistant unreachable. ")
         }
         if (Local.configured()) append("Local model tier configured. ")
+        append(BrainHealth.describe())
         append(
             when {
                 !Hub.configured() -> "The Obelisk hub isn't set up. "
@@ -1247,6 +1270,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         } catch (_: Exception) {
         }
         val sys = system(ctx) + People.context(ctx, userText)
+        var brainFailure: String? = null
         if (hasKey()) {
             try {
                 val messages = historyMessages()
@@ -1272,10 +1296,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     messages.put(JSONObject().put("role", "user").put("content", results))
                     resp = call(sys, messages, tools, 1200)
                 }
-                val answer = textOf(resp).ifBlank { "Done." }
+                val answer = if (resp.optString("stop_reason") == "tool_use")
+                    // Out of tool rounds mid-task: say so rather than claiming it's finished.
+                    textOf(resp).ifBlank { "I ran out of steps before I finished that. Check what I did under Done on its own." }
+                else textOf(resp).ifBlank { "Done." }
                 record(userText, answer)
                 return@withContext answer
             } catch (e: Exception) {
+                brainFailure = e.message ?: e.javaClass.simpleName
                 if (!Local.configured()) {
                     return@withContext "I couldn't reach my brain. ${e.message ?: ""}".trim()
                 }
@@ -1285,6 +1313,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         if (Local.configured()) {
             try {
                 val answer = Local.chat(sys, historyPairs() + ("user" to stampNow(userText)), timeoutMs = 20_000, connectTimeoutMs = 2_500).ifBlank { "Hm. I've got nothing." }
+                brainFailure?.let {
+                    BrainHealth.noteFallback(it)
+                    Store.logAction("Main model failed ($it); answered with the local model")
+                }
                 record(userText, answer)
                 return@withContext answer
             } catch (_: Exception) {
