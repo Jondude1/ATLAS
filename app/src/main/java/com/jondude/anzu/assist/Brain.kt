@@ -575,7 +575,7 @@ Time is real for you. Each of Jon's messages is stamped with when he said it, an
 
 Everything you write is spoken aloud. Announcements and lines you start on your own stay to one or two short sentences. In an actual conversation, answer at whatever length the thought needs: a quick question gets a quick answer, a bigger one gets room to think out loud, but never ramble or pad. Plain conversational speech in natural sentences: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             Hub.brief()?.let { b ->
@@ -603,7 +603,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         "home_state" to "Home", "home_assistant" to "Home", "recall" to "Memory", "vault_search" to "Vault",
         "checklist" to "Checklist", "held_notifications" to "Held", "open_loops" to "Open loops",
         "actions_today" to "Done today", "athena_status" to "Athena", "service_status" to "Services",
-        "ask_hub" to "Hub", "helios_status" to "Helios", "last_time_on" to "History", "guests" to "Guests"
+        "ask_hub" to "Hub", "helios_status" to "Helios", "last_time_on" to "History", "guests" to "Guests",
+        "second_opinion" to "Counterpoint", "what_if" to "Projection", "handoff" to "Handoff"
     )
 
     /** Whatever Jon just asked for shows up beside the overlay as a holographic card the moment the tool answers. */
@@ -674,6 +675,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("ask_hub", "Ask the hub on Obelisk about anything Jon's apps and systems have reported (deliveries, builds, house events, ideas, messages). Its local model reads the raw reports and answers briefly, for free.",
                 JSONObject().put("question", str("The question, with names and time frame.")), listOf("question")))
         }
+        a.put(tool("second_opinion", "Argue the other side. Use when Jon asks for a second opinion, wants to be challenged, or is about to decide something and asks 'am I wrong?'. Gives the strongest honest case against his plan.",
+            JSONObject().put("decision", str("The decision, plan or claim, with the reasoning Jon gave.")), listOf("decision")))
+        a.put(tool("what_if", "Project what could change if Jon takes some action or something happens: likely outcomes over a month, six months and a year, with assumptions and how sure you are. Use for 'what if I…' and 'what happens if…'.",
+            JSONObject().put("scenario", str("The what-if, in full, with any numbers or dates Jon gave.")), listOf("scenario")))
+        a.put(tool("handoff", "Hand a job to another agent and track it. agent 'hermes' runs it in the background and you report when it answers; agent 'helios' passes it through the hub and you report when Helios replies.",
+            JSONObject().put("agent", str("hermes or helios.")).put("task", str("The full task or message, with every detail.")), listOf("agent", "task")))
+        a.put(tool("learn_correction", "Keep a lasting lesson when Jon corrects you: a misheard name, a wrong fact, a preference about how he wants things done. Not for one-off slips.",
+            JSONObject().put("wrong", str("What you had wrong or assumed.")).put("right", str("What is actually right, in Jon's words.")), listOf("wrong", "right")))
         a.put(tool("helios_status", "Helios's latest status update (Helios is Jon's coordinator agent overseeing the builders). Use for 'what's Helios saying', 'status update from Helios', 'how's the build going'. Summarize it in two or three spoken sentences."))
         if (Hub.configured()) {
             a.put(tool("ask_helios", "Pass a message or question to Helios. It's delivered through the hub and Helios answers on its next check, not instantly; tell Jon that.",
@@ -939,6 +948,59 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     msg
+                }
+            }
+            "second_opinion" -> {
+                val d = input.optString("decision").trim()
+                if (d.isBlank()) "Tell me what you're deciding." else ask(
+                    "You are ${Prefs.name}, Jon's blunt, fair-minded counsel. Give the strongest honest case AGAINST what he is leaning towards: the two or three best reasons it could be a mistake, then what would have to be true for him to be right anyway. Three to five short spoken sentences, no markdown, no flattery, don't invent facts about his life.",
+                    d, 400
+                )
+            }
+            "what_if" -> {
+                val sc = input.optString("scenario").trim()
+                val known = Store.memory.value.takeLast(25).joinToString("; ")
+                if (sc.isBlank()) "Tell me the what-if." else ask(
+                    "You are ${Prefs.name}, projecting a what-if for Jon. Give the likely picture at one month, six months and a year in short spoken sentences, state your key assumptions, and end with how confident you are and what would change it. This is an estimate, not a fact: say so. Use only what he told you plus this background, and say when you are guessing. Background: $known. No markdown.",
+                    sc, 500
+                )
+            }
+            "handoff" -> {
+                val agent = input.optString("agent").trim().lowercase()
+                val task = input.optString("task").trim()
+                if (task.isBlank()) "No task given."
+                else if (agent.startsWith("hermes")) runTool(ctx, "ask_hermes", JSONObject().put("task", task), confirm)
+                else if (agent.startsWith("helios")) {
+                    val sent = runTool(ctx, "ask_helios", JSONObject().put("message", task), confirm)
+                    val before = Helios.latest()
+                    Atlas.scope.launch(Dispatchers.IO) {
+                        // Watch for Helios's next update for up to an hour, then report it.
+                        repeat(12) {
+                            kotlinx.coroutines.delay(300_000)
+                            val now = try { Helios.latest() } catch (e: Exception) { null }
+                            if (now != null && now != before) {
+                                val spoken = try { ask("You are ${Prefs.name}. Put Helios's reply to Jon's message into two spoken sentences, most useful part first. No markdown.", now.take(5000), 200) } catch (e: Exception) { now.take(300) }
+                                Atlas.polite("Helios has replied. $spoken", source = "helios")
+                                return@launch
+                            }
+                        }
+                    }
+                    "$sent I'll tell you when Helios replies."
+                } else "I can hand off to Hermes or Helios. Which one?"
+            }
+            "learn_correction" -> {
+                val wrong = input.optString("wrong").trim().take(120)
+                val right = input.optString("right").trim().take(160)
+                if (wrong.isBlank() || right.isBlank()) "I need both what was wrong and what's right."
+                else {
+                    val fact = "Correction: not \"$wrong\", it's \"$right\"."
+                    Store.addMemory(fact)
+                    lastUndo = {
+                        val i = Store.memory.value.indexOf(fact)
+                        if (i >= 0) Store.removeMemory(i)
+                        "Forgot that correction."
+                    }
+                    "Got it. I'll remember that."
                 }
             }
             "helios_status" -> Helios.latest() ?: "I couldn't get Helios's latest update right now."
@@ -1341,7 +1403,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Mcp.refresh()
         } catch (_: Exception) {
         }
-        val sys = system(ctx) + People.context(ctx, userText)
+        val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText)
         var brainFailure: String? = null
         if (hasKey()) {
             try {

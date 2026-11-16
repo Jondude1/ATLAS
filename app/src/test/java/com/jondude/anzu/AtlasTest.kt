@@ -1327,3 +1327,17 @@ class MotesTest {
         org.junit.Assert.assertNotEquals(y0, m.y[0])
     }
 }
+
+class CorrectionsTest {
+    @org.junit.Test
+    fun spotsCorrectionsAndIgnoresNormalSpeech() {
+        val c = com.jondude.anzu.assist.Corrections
+        org.junit.Assert.assertTrue(c.detect("No, I meant Helios"))
+        org.junit.Assert.assertTrue(c.detect("that's not what I asked"))
+        org.junit.Assert.assertTrue(c.detect("no it's Athena, not Athena's"))
+        org.junit.Assert.assertFalse(c.detect("what's the weather today"))
+        org.junit.Assert.assertFalse(c.detect("I know that already"))
+        org.junit.Assert.assertEquals("", c.hint("turn on the lights"))
+        org.junit.Assert.assertTrue(c.hint("I meant the garage").contains("learn_correction"))
+    }
+}
