@@ -1235,7 +1235,9 @@ class AtlasTest {
         assertEquals(3, l.size)
         assertEquals("Sunny, 72.5 degrees", l[0])
         assertEquals("Rain later", l[1])
-        assertTrue(l[2].length <= 46 && l[2].endsWith("…"))
+        assertEquals("bring a coat", l[2])
+        val long = com.jondude.anzu.overlay.HoloCards.lines("x".repeat(80)).single()
+        assertTrue(long.length <= 46 && long.endsWith("…"))
         assertTrue(com.jondude.anzu.overlay.HoloCards.lines("  .  ;  ").isEmpty())
     }
 
