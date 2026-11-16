@@ -1498,3 +1498,17 @@ class IdleThinkTest {
         org.junit.Assert.assertFalse(t.allowed(now, now - 30 * 60_000L, 0L, 0, 23))  // night
     }
 }
+
+class OnDeviceTest {
+    @org.junit.Test
+    fun requestAndReplyShapes() {
+        val od = com.jondude.anzu.assist.OnDevice
+        val body = org.json.JSONObject(od.requestBody("sys", listOf("user" to "hi", "assistant" to "hello")))
+        org.junit.Assert.assertEquals(3, body.getJSONArray("messages").length())
+        org.junit.Assert.assertEquals("system", body.getJSONArray("messages").getJSONObject(0).getString("role"))
+        org.junit.Assert.assertFalse(body.getBoolean("stream"))
+        val reply = """{"choices":[{"message":{"role":"assistant","content":"<think>hm</think> It is noon."}}]}"""
+        org.junit.Assert.assertEquals("It is noon.", od.parse(reply))
+        org.junit.Assert.assertEquals("", od.parse("{}"))
+    }
+}

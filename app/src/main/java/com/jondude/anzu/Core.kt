@@ -210,6 +210,8 @@ object Prefs {
     var ollamaUrl by StrPref("ollamaUrl", OLLAMA)
     var ollamaModel by StrPref("ollamaModel", "atlas:14b")
     var localSmallTalk by BoolPref("localSmallTalk", false)
+    /** Use Jon's Android LM app as the on-phone brain when offline or when the other tiers fail. */
+    var offlineBrain by BoolPref("offlineBrain", true)
     var amberWords by StrPref("amberWords", "unlock, garage, open the door, alarm, thermostat, oven, heater")
     var redWords by StrPref("redWords", "disarm")
     /** 0 = never listen, 1 = tap to talk, 2 = conversation window after Atlas speaks */

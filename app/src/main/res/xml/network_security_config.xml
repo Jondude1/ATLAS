@@ -13,6 +13,7 @@
         <domain includeSubdomains="false">100.65.202.81</domain>
         <domain includeSubdomains="false">100.68.172.113</domain>
         <domain includeSubdomains="false">100.67.98.121</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">obalisk</domain>
         <domain includeSubdomains="false">obalisk.tail8dab0b.ts.net</domain>
         <domain includeSubdomains="false">homeassistant-1</domain>

@@ -1560,7 +1560,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText) + SelfRepair.hint(userText) +
             Mood.hint(userText) + Shorthand.hint(userText, Store.memory.value)
         var brainFailure: String? = null
-        if (hasKey()) {
+        if (hasKey() && !OnDevice.preferred(ctx)) {
             try {
                 val messages = historyMessages()
                 messages.put(JSONObject().put("role", "user").put("content", stampNow(userText)))
@@ -1609,7 +1609,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 return@withContext answer
             } catch (e: Exception) {
                 brainFailure = e.message ?: e.javaClass.simpleName
-                if (!Local.configured()) {
+                if (!Local.configured() && !OnDevice.usable(ctx)) {
                     return@withContext "I couldn't reach my brain. ${e.message ?: ""}".trim()
                 }
             }
@@ -1622,6 +1622,16 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     BrainHealth.noteFallback(it)
                     Store.logAction("Main model failed ($it); answered with the local model")
                 }
+                record(userText, answer)
+                return@withContext answer
+            } catch (_: Exception) {
+            }
+        }
+        // Offline tier: the model on this phone (Android LM). Conversation only, no tools.
+        if (OnDevice.usable(ctx)) {
+            try {
+                val answer = OnDevice.chat(ctx, historyPairs() + ("user" to stampNow(userText))).ifBlank { "Hm. I've got nothing." }
+                Store.logAction("Answered offline with the on-phone model")
                 record(userText, answer)
                 return@withContext answer
             } catch (_: Exception) {
