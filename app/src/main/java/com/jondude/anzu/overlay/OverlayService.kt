@@ -36,6 +36,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.jondude.anzu.Glasses
+import com.jondude.anzu.GlassesService
+import com.jondude.anzu.Prefs
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Atlas
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +70,9 @@ class OverlayService : Service() {
     private var clockLine: TextView? = null
     private var powerBar: SegmentBar? = null
     private var powerText: TextView? = null
+    private var quietChip: TextView? = null
+    private var input: android.widget.EditText? = null
+    private var typing = false
 
     private var edgeRight = true
     private var yFrac = 0.4f
@@ -664,6 +669,50 @@ class OverlayService : Service() {
         col.addView(row2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         col.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) armAutoCollapse(); false }
 
+        // Controls, so the app never has to be opened: talk, speak up, quiet, and a typed message line.
+        val act = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        act.addView(chip("TALK") { collapse(); tap() }.apply {
+            setTextColor(Color.parseColor("#031A24"))
+            (background as GradientDrawable).setColor(Color.parseColor(Holo.CYAN))
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
+        act.addView(chip("SPEAK UP") {
+            GlassesService.start(ctx, true, GlassesService.ACTION_SPEAK_NOW)
+            collapse()
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
+        quietChip = chip().also {
+            it.setOnClickListener { toggleQuiet() }
+            act.addView(it, LinearLayout.LayoutParams(-2, -2))
+        }
+        col.addView(act, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
+        val box = android.widget.EditText(ctx).apply {
+            hint = "MESSAGE ATLAS ▸"
+            setHintTextColor(Color.parseColor(Holo.CYAN_DIM))
+            setTextColor(Color.parseColor("#E6FBFF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(Typeface.MONOSPACE)
+            isSingleLine = true
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1400E5FF"))
+                cornerRadius = dp(2).toFloat()
+                setStroke(dp(1), Color.parseColor(Holo.CYAN_DIM))
+            }
+            // A not-focusable overlay can't take a keyboard, so it becomes focusable only while typing.
+            setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_DOWN) beginTyping(); false }
+            setOnEditorActionListener { v, _, _ ->
+                val t = v.text.toString().trim()
+                if (t.isNotEmpty()) {
+                    Atlas.typed(ctx, t)
+                    v.text = ""
+                }
+                endTyping()
+                armAutoCollapse(15_000)
+                true
+            }
+        }
+        input = box
+        col.addView(box, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         // Power readout: segmented bar for the phone battery.
         val pwr = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         pwr.addView(mono(9f, Holo.CYAN_DIM).apply { text = "PWR" }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
@@ -674,7 +723,7 @@ class OverlayService : Service() {
         val lp = overlayParams(w, WindowManager.LayoutParams.WRAP_CONTENT)
         val ol = orbLp
         lp.x = if (edgeRight) screenW - w - dp(8) else dp(8)
-        lp.y = ((ol?.y ?: yFor(yFrac)) - dp(HUD_ORB_DP) / 2).coerceIn(minY(), (screenH - navBarH() - dp(300)).coerceAtLeast(minY()))
+        lp.y = ((ol?.y ?: yFor(yFrac)) - dp(HUD_ORB_DP) / 2).coerceIn(minY(), (screenH - navBarH() - dp(440)).coerceAtLeast(minY()))
         panel = FrameLayout(ctx).apply { addView(col) }
         wm.addView(panel, lp)
         // Materialise like a hologram: a thin horizontal slit that unfolds to full height.
@@ -688,9 +737,49 @@ class OverlayService : Service() {
     }
 
     private val autoCollapse = Runnable { collapse() }
-    private fun armAutoCollapse() {
+    private fun armAutoCollapse(ms: Long = 6_000) {
         main.removeCallbacks(autoCollapse)
-        main.postDelayed(autoCollapse, 6_000)
+        if (!typing) main.postDelayed(autoCollapse, ms)
+    }
+
+    private fun setFocusable(on: Boolean) {
+        val pv = panel ?: return
+        val lp = pv.layoutParams as? WindowManager.LayoutParams ?: return
+        if (on) {
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+        } else {
+            lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        }
+        try { wm.updateViewLayout(pv, lp) } catch (_: Throwable) {}
+    }
+
+    private fun beginTyping() {
+        if (typing) return
+        typing = true
+        main.removeCallbacks(autoCollapse)
+        setFocusable(true)
+        input?.post {
+            input?.requestFocus()
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(input, 0)
+        }
+    }
+
+    private fun endTyping() {
+        if (!typing) return
+        typing = false
+        try {
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                .hideSoftInputFromWindow(input?.windowToken, 0)
+        } catch (_: Throwable) {}
+        setFocusable(false)
+    }
+
+    private fun toggleQuiet() {
+        Prefs.quietUntil = if (Prefs.quietUntil > System.currentTimeMillis()) 0L else System.currentTimeMillis() + 60 * 60_000
+        haptic(HapticFeedbackConstants.CLOCK_TICK)
+        refreshHud()
+        armAutoCollapse()
     }
 
     private fun collapse(save: Boolean = true) {
@@ -706,7 +795,7 @@ class OverlayService : Service() {
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
-        clockLine = null; powerBar = null; powerText = null
+        clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false
         if (save) {
             orb?.visibility = View.VISIBLE
             lastTouchAt = System.currentTimeMillis()
@@ -740,6 +829,7 @@ class OverlayService : Service() {
         musicChip?.text = if (Atlas.musicPlaying()) "♪ AUDIO ON" else "♪ AUDIO IDLE"
         glassesChip?.text = if (Glasses.connected.value) "◉ LINK UP" else "○ LINK DOWN"
         sizeChip?.text = "SIZE ${Holo.tag(OrbSize.label(sizeKey))}"
+        quietChip?.text = if (Prefs.quietUntil > System.currentTimeMillis()) "RESUME" else "QUIET 1H"
         clockLine?.text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
         try {
             val pct = (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
