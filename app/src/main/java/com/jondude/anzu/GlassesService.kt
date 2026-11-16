@@ -473,6 +473,7 @@ class GlassesService : Service() {
         updateWakeLock()
         Atlas.flushPolite()
         com.jondude.anzu.assist.SocialGrace.tick(this)
+        com.jondude.anzu.assist.Agency.tick(this)
         // #28: after 90 minutes without walking during waking hours, tell the hub; it decides (opt-in, cooldown) whether to nudge.
         if (ticks % 10 == 0) {
             val now2 = System.currentTimeMillis()

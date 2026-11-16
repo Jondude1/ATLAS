@@ -213,6 +213,7 @@ object Atlas {
      * then moves to the held digest he hears in the next brief instead.
      */
     fun polite(text: String, maxWaitMs: Long = 10 * 60_000L, source: String = "") {
+        StandingOrders.onEvent(text, source)
         // A kind of line Jon keeps cutting off gets a soft bell and a place in the brief instead of speech.
         // On the road only what matters for driving is spoken; the rest waits for when he parks.
         if (CoPilot.active && source !in CoPilot.roadworthy) {

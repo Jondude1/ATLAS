@@ -67,6 +67,14 @@ class OverlayService : Service() {
     private var hudOrb: WaveformView? = null
     private var hudCol: View? = null
     private var globe: WireGlobeView? = null
+    private var jobsLine: TextView? = null
+    private val jobTick = object : Runnable {
+        override fun run() {
+            if (!expanded) return
+            jobsLine?.text = com.jondude.anzu.assist.Jobs.strip(com.jondude.anzu.assist.Jobs.running.value)
+            main.postDelayed(this, 1_000)
+        }
+    }
     private var edge: EdgeGlowView? = null
     private var alertLevel = AlertLevel.NORMAL
     private val alertReset = Runnable { applyAlert(AlertLevel.NORMAL) }
@@ -992,6 +1000,17 @@ class OverlayService : Service() {
             name to t
         }.toMap()
         col.addView(tileRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        // Live status of anything handed to Hermes, Helios or research; empty when nothing is running.
+        val jl = TextView(ctx).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f)
+            setTextColor(Color.parseColor(Holo.ACCENT))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            letterSpacing = 0.08f
+            maxLines = 2
+        }
+        jobsLine = jl
+        col.addView(jl, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        main.post(jobTick)
         loadTiles(ctx, tiles)
 
         fun text(sizeSp: Float, color: String, bold: Boolean = false) = TextView(ctx).apply {
@@ -1201,7 +1220,7 @@ class OverlayService : Service() {
             }.start()
         }
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
-        panel = null; catcher = null; hudOrb = null; globe = null
+        panel = null; catcher = null; hudOrb = null; globe = null; jobsLine = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
         clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false; idLine = null; hudCol = null; convo = false
         if (save) {

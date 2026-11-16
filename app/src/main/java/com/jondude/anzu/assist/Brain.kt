@@ -575,7 +575,7 @@ Time is real for you. Each of Jon's messages is stamped with when he said it, an
 
 Everything you write is spoken aloud. Announcements and lines you start on your own stay to one or two short sentences. In an actual conversation, answer at whatever length the thought needs: a quick question gets a quick answer, a bigger one gets room to think out loud, but never ramble or pad. Plain conversational speech in natural sentences: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. standing_order saves 'whenever X, do Y'. set_authority changes how freely you may use a tool. protocol switches modes. prep_day readies a day. sweep is the 'what am I missing' scan. keep_moment and learn_shorthand keep jokes, decisions and his shorthand. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             if (Prefs.jarvisManner) append(Manner.prompt(Prefs.honorific))
@@ -605,7 +605,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         "checklist" to "Checklist", "held_notifications" to "Held", "open_loops" to "Open loops",
         "actions_today" to "Done today", "athena_status" to "Athena", "service_status" to "Services",
         "ask_hub" to "Hub", "helios_status" to "Helios", "last_time_on" to "History", "guests" to "Guests",
-        "second_opinion" to "Counterpoint", "what_if" to "Projection", "handoff" to "Handoff"
+        "second_opinion" to "Counterpoint", "what_if" to "Projection", "handoff" to "Handoff",
+        "protocol" to "Protocol", "prep_day" to "Tomorrow", "sweep" to "Sweep", "standing_order" to "Orders"
     )
 
     /** Whatever Jon just asked for shows up beside the overlay as a holographic card the moment the tool answers. */
@@ -682,6 +683,15 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             JSONObject().put("scenario", str("The what-if, in full, with any numbers or dates Jon gave.")), listOf("scenario")))
         a.put(tool("handoff", "Hand a job to another agent and track it. agent 'hermes' runs it in the background and you report when it answers; agent 'helios' passes it through the hub and you report when Helios replies.",
             JSONObject().put("agent", str("hermes or helios.")).put("task", str("The full task or message, with every detail.")), listOf("agent", "task")))
+        a.put(tool("standing_order", "Manage standing orders: 'whenever X happens, do Y'. Actions: add (trigger and action), list, remove (which). Orders only run tools that need no spoken okay.",
+            JSONObject().put("action", str("add, list or remove.")).put("trigger", str("What to watch for, in plain words.")).put("do", str("What to do when it happens.")).put("which", str("For remove: words from the order.")), listOf("action")))
+        a.put(tool("set_authority", "Set how freely you may use one of your tools: free, ask (needs his spoken okay each time) or never. Use when Jon says things like 'always ask before you send texts' or 'never touch the lights'.",
+            JSONObject().put("tool", str("The tool name, e.g. send_text, home_assistant.")).put("level", str("free, ask or never.")), listOf("tool", "level")))
+        a.put(tool("protocol", "Switch into a named mode: 'heads down', 'house party', 'road trip', or 'all clear' to stand everything down. Other names run Jon's own routines.",
+            JSONObject().put("name", str("The mode or routine name.")), listOf("name")))
+        a.put(tool("prep_day", "Get Jon ready for a day: that day's calendar, the weather, and what's still open. Use for 'get me ready for tomorrow' or 'what does my day look like'.",
+            JSONObject().put("day_offset", num("0 for today, 1 for tomorrow.")), emptyList()))
+        a.put(tool("sweep", "A quick situational sweep of everything: next calendar items, open loops, the house, your own systems and any jobs running. Use for 'what am I missing?' or 'sitrep'."))
         a.put(tool("keep_moment", "Keep something worth bringing back later: a running joke, a firm preference, or a decision with its reasons. Use sparingly.",
             JSONObject().put("kind", str("joke, preference or decision.")).put("text", str("What to keep, in a sentence, with the reason if it is a decision.")), listOf("kind", "text")))
         a.put(tool("learn_shorthand", "Remember a phrase Jon uses as shorthand ('the usual', 'that thing', 'lights') and what it means, so he never has to spell it out again.",
@@ -797,6 +807,19 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     }
 
     private suspend fun runTool(
+        ctx: Context, name: String, input: JSONObject, confirm: suspend (String) -> Boolean
+    ): String {
+        if (name !in Authority.exempt) {
+            when (Authority.level(name)) {
+                Authority.NEVER -> return "Jon has put $name off limits."
+                Authority.ASK -> if (!confirm("Okay to use $name?")) return "Not run: Jon didn't approve."
+            }
+        }
+        Habits.note(name, input)
+        return runToolInner(ctx, name, input, confirm)
+    }
+
+    private suspend fun runToolInner(
         ctx: Context, name: String, input: JSONObject, confirm: suspend (String) -> Boolean
     ): String = try {
         when (name) {
@@ -980,7 +1003,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     val before = Helios.latest()
                     Atlas.scope.launch(Dispatchers.IO) {
                         // Watch for Helios's next update for up to an hour, then report it.
-                        repeat(12) {
+                        val job = Jobs.start("Helios")
+                        try { repeat(12) {
                             kotlinx.coroutines.delay(300_000)
                             val now = try { Helios.latest() } catch (e: Exception) { null }
                             if (now != null && now != before) {
@@ -988,10 +1012,54 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                                 Atlas.polite("Helios has replied. $spoken", source = "helios")
                                 return@launch
                             }
-                        }
+                        } } finally { Jobs.finish(job) }
                     }
                     "$sent I'll tell you when Helios replies."
                 } else "I can hand off to Hermes or Helios. Which one?"
+            }
+            "standing_order" -> when (input.optString("action").trim().lowercase()) {
+                "add" -> {
+                    val tr = input.optString("trigger").trim(); val dd = input.optString("do").trim()
+                    if (tr.isBlank() || dd.isBlank()) "I need what to watch for and what to do."
+                    else { StandingOrders.add(tr, dd); "Standing order set: whenever $tr, $dd." }
+                }
+                "remove" -> if (StandingOrders.remove(input.optString("which"))) "Order cancelled." else "I couldn't find that order."
+                else -> StandingOrders.load().let { l ->
+                    if (l.isEmpty()) "No standing orders." else l.joinToString("; ") { "whenever ${it.trigger}, ${it.action}" }
+                }
+            }
+            "set_authority" -> {
+                val t = input.optString("tool").trim(); val l = input.optString("level").trim().lowercase()
+                if (t in Authority.exempt) "I can't lock that one."
+                else if (Authority.set(t, l)) "Understood: $t is now \"$l\"." else "Authority is free, ask or never."
+            }
+            "protocol" -> {
+                val nm = input.optString("name").trim()
+                val st = Protocols.steps(nm)
+                if (st == null) runTool(ctx, "run_routine", JSONObject().put("name", nm), confirm)
+                else {
+                    st.forEach { runTool(ctx, it.tool, it.args, confirm) }
+                    Store.logAction("Protocol: $nm")
+                    if (nm.lowercase() in listOf("all clear", "stand down", "normal")) "Standing down. Back to normal." else "${nm.replaceFirstChar { it.uppercase() }} protocol is on."
+                }
+            }
+            "prep_day" -> {
+                val off = input.optInt("day_offset", 1)
+                val ag = try { Phone.agenda(ctx, off) } catch (e: Exception) { "" }
+                val wx = try { Weather.brief() } catch (e: Exception) { "" }
+                val loops = try { Hub.openLoops()?.take(3)?.joinToString("; ") { it.text }.orEmpty() } catch (e: Exception) { "" }
+                listOf(ag, if (wx.isNotBlank()) "Weather: $wx" else "", if (loops.isNotBlank()) "Still open: $loops" else "").filter { it.isNotBlank() }.joinToString(" ")
+            }
+            "sweep" -> {
+                fun safe(f: () -> String): String = try { f() } catch (e: Exception) { "" }
+                val parts = listOf(
+                    safe { "Calendar: " + Phone.agenda(ctx, 0).take(240) },
+                    safe { Hub.openLoops()?.let { l -> if (l.isEmpty()) "No open loops." else "${l.size} open loops." }.orEmpty() },
+                    safe { if (HomeAssistant.configured()) "House: " + HomeAssistant.summary().take(260) else "" },
+                    safe { "Jobs: " + Jobs.strip(Jobs.running.value).ifBlank { "none running" } },
+                    safe { if (Hub.configured()) { val ms = Obelisk.pingMs(); if (ms >= 0) "Obelisk up, ${ms} ms." else "Obelisk is not answering." } else "" }
+                )
+                parts.filter { it.isNotBlank() }.joinToString(" ")
             }
             "keep_moment" -> {
                 val kind = input.optString("kind").trim().lowercase().ifBlank { "moment" }.take(12)
@@ -1071,6 +1139,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val task = input.optString("task")
                 Store.logAction("Asked Hermes: ${task.take(80)}")
                 Atlas.scope.launch(Dispatchers.IO) {
+                    val job = Jobs.start("Hermes")
                     try {
                         // Through the hub on Obelisk when it's set up; a direct Hermes link is the fallback.
                         val answer = Hub.delegate(task) ?: if (Hermes.configured()) Hermes.ask(task)
@@ -1085,6 +1154,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         Atlas.polite("Hermes is back. $spoken The full answer is in your notes.", source = "hermes")
                     } catch (e: Exception) {
                         Atlas.polite("Hermes didn't come through on that. ${e.message ?: ""}")
+                    } finally {
+                        Jobs.finish(job)
                     }
                 }
                 "Handed to Hermes; you'll report back when it answers."
@@ -1103,7 +1174,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val topic = input.optString("topic")
                 if (!hasKey()) "Research needs the Anthropic API key." else {
                     Store.logAction("Started research: ${topic.take(80)}")
-                    Atlas.scope.launch(Dispatchers.IO) { research(topic) }
+                    Atlas.scope.launch(Dispatchers.IO) { val job = Jobs.start("Research"); try { research(topic) } finally { Jobs.finish(job) } }
                     "Research started in the background; you'll report back when it finishes."
                 }
             }
@@ -1428,7 +1499,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     suspend fun reply(
         ctx: Context, said: String, pipe: SpeechPipe? = null, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
-        val userText = Terse.expand(said, Store.recentExchanges().lastOrNull()?.first)
+        val userText = Habits.accept(said) ?: Terse.expand(said, Store.recentExchanges().lastOrNull()?.first)
         if (Terse.isUndo(said)) {
             val out = runTool(ctx, "undo", JSONObject(), confirm)
             record(said, out)
