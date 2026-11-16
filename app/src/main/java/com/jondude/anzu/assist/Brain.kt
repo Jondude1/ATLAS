@@ -1296,13 +1296,16 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
 
     private val directives = listOf(
         "Check in on how his day is going, casually, the way a friend would.",
-        "Share a brief thought or question connected to something you know he's into or building.",
+        "Share a brief thought or question connected to something in your memory notes about what he's into or building. If your notes have nothing, ask him what he's into lately instead.",
         "Offer one small, actually interesting fact or idea, the kind a curious friend brings up out of nowhere.",
-        "Say something light or wry about the time of day or what's going on around him.",
+        "Say something light or wry about the time of day or the weather. You can't see his surroundings, so don't describe them.",
         "Ask him something you're curious about, something that helps you know him better.",
         "Nudge him to stretch, drink water, or rest his eyes, in your own voice and not like a reminder app.",
         "Pick up a thread from your recent conversation and follow up on it."
     )
+
+    /** Unprompted speech must be grounded: no invented gear, events or plans (the "closet gear" failure). */
+    internal const val GROUNDING_RULE = "Grounding: only state specific facts about Jon's life, belongings, plans or surroundings that appear in your memory notes, the recent conversation, or this message. If you lack one, say something general or ask him. Never invent details to sound familiar."
 
     private val canned = listOf(
         "Still here. How's the day going?",
@@ -1318,6 +1321,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
      */
     suspend fun speakUp(ctx: Context, kind: String = "random"): String? = withContext(Dispatchers.IO) {
         val options = ArrayList(directives)
+        // A follow-up on "recent conversation" is only honest if there is one.
+        if (Store.recentTimed().isEmpty()) options.removeAll { it.startsWith("Pick up a thread") }
         if (com.jondude.anzu.Wear.onBuds()) {
             // Private and mobile: drop the desk nudge, lean into real conversation.
             options.removeAll { it.startsWith("Nudge him to stretch") }
@@ -1339,7 +1344,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
         val recentSaid = Store.recentTimed().takeLast(4).joinToString(" | ") { "(${When.ago(it.third)}) " + it.second.take(100) }
         val prompt = "[It's ${When.stamp(System.currentTimeMillis())}. Jon hasn't said anything. You're choosing to speak up on your own. $directive " +
-            "One or two sentences. Sometimes end with something he can answer, but not every time. " +
+            "One or two sentences. Sometimes end with something he can answer, but not every time. $GROUNDING_RULE " +
             "Don't repeat yourself; recently you said: $recentSaid]"
         val sys = system(ctx)
         var text: String? = null

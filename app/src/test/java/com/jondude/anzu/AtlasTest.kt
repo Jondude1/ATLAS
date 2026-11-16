@@ -1176,4 +1176,11 @@ class AtlasTest {
         assertEquals("mine", Prefs.story)
         assertEquals(n, Store.memory.value.size)
     }
+
+    @Test
+    fun unpromptedSpeechCarriesTheGroundingRule() {
+        // Guards the "closet gear" failure: proactive lines must never be invited to invent details.
+        assertTrue(Brain.GROUNDING_RULE.contains("Never invent"))
+        assertTrue(Brain.GROUNDING_RULE.contains("memory notes"))
+    }
 }
