@@ -24,6 +24,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -200,6 +201,9 @@ class OverlayService : Service() {
         orbLp = lp
         orb = v
         wm.addView(v, lp)
+        // Power on: the orb spools up from a small bright point.
+        v.alpha = 0f; v.scaleX = 0.2f; v.scaleY = 0.2f
+        v.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(OvershootInterpolator(1.4f)).start()
     }
 
     private fun updateOrb() {
@@ -271,6 +275,7 @@ class OverlayService : Service() {
     }
 
     private fun tap() {
+        haptic(HapticFeedbackConstants.VIRTUAL_KEY)
         startActivity(Intent(this, AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
@@ -328,7 +333,20 @@ class OverlayService : Service() {
 
     // ---------------------------------------------------------------- speech bubble
 
-    private val hideBubble = Runnable { removeBubble() }
+    private val hideBubble = Runnable { fadeBubble() }
+
+    /** Timer path: fade out, then remove. Everything else removes immediately via [removeBubble]. */
+    private fun fadeBubble() {
+        val v = bubble ?: return
+        bubble = null
+        v.animate().alpha(0f).translationYBy(-dp(4).toFloat()).setDuration(220).withEndAction {
+            try { wm.removeView(v) } catch (_: Throwable) {}
+        }.start()
+    }
+
+    private fun haptic(kind: Int) {
+        try { (orb ?: panel)?.performHapticFeedback(kind) } catch (_: Throwable) {}
+    }
 
     private fun removeBubble() {
         main.removeCallbacks(hideBubble)
@@ -378,7 +396,8 @@ class OverlayService : Service() {
             wm.addView(panel, lp)
             bubble = panel
             panel.alpha = 0f
-            panel.animate().alpha(1f).setDuration(160).start()
+            panel.translationY = dp(4).toFloat()
+            panel.animate().alpha(1f).translationY(0f).setDuration(200).setInterpolator(DecelerateInterpolator()).start()
             main.postDelayed(hideBubble, HoloBubble.holdMs(shown))
         } catch (t: Throwable) {
             crumb(this, "bubble failed: ${t.javaClass.simpleName}")
@@ -593,6 +612,13 @@ class OverlayService : Service() {
             }
             if (label != null) text = label
             if (onClick != null) setOnClickListener { onClick() }
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> v.alpha = 0.55f
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.alpha = 1f
+                }
+                false
+            }
         }
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         musicChip = chip().also { row.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
@@ -620,10 +646,12 @@ class OverlayService : Service() {
         lp.y = ((ol?.y ?: yFor(yFrac)) - dp(HUD_ORB_DP) / 2).coerceIn(minY(), (screenH - navBarH() - dp(300)).coerceAtLeast(minY()))
         panel = FrameLayout(ctx).apply { addView(col) }
         wm.addView(panel, lp)
+        // Materialise like a hologram: a thin horizontal slit that unfolds to full height.
         panel?.apply {
-            alpha = 0f; scaleX = 0.85f; scaleY = 0.85f
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).setInterpolator(DecelerateInterpolator()).start()
+            alpha = 0f; scaleX = 0.92f; scaleY = 0.04f
+            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(DecelerateInterpolator(1.6f)).start()
         }
+        haptic(HapticFeedbackConstants.LONG_PRESS)
         refreshHud()
         armAutoCollapse()
     }
@@ -638,7 +666,12 @@ class OverlayService : Service() {
         main.removeCallbacks(autoCollapse)
         if (!expanded) return
         expanded = false
-        panel?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        // Fold back to a slit, then remove; state is cleared immediately so a quick re-open is safe.
+        panel?.let { pv ->
+            pv.animate().alpha(0f).scaleY(0.04f).scaleX(0.92f).setDuration(160).withEndAction {
+                try { wm.removeView(pv) } catch (_: Throwable) {}
+            }.start()
+        }
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
@@ -654,6 +687,7 @@ class OverlayService : Service() {
     /** Default -> Small -> Mini -> Default. The orb resizes in place and keeps its edge and height. */
     private fun cycleSize() {
         sizeKey = OrbSize.next(sizeKey)
+        haptic(HapticFeedbackConstants.CLOCK_TICK)
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_SIZE, sizeKey).apply()
         orbLp?.let { it.width = orbPx; it.height = orbPx; it.x = xFor(edgeRight); it.y = yFor(yFrac) }
         updateOrb()
