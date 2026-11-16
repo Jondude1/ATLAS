@@ -1298,3 +1298,18 @@ class GlobeMathTest {
         org.junit.Assert.assertEquals(4, com.jondude.anzu.Earcons.notes("critical").size)
     }
 }
+
+class ParseBoxesTest {
+    @org.junit.Test
+    fun parsesAndClampsBoxes() {
+        val r = com.jondude.anzu.assist.Brain.parseBoxes("Sure: [{\"label\":\"Mug\",\"box\":[0.1,0.2,0.3,2.0],\"note\":\"ceramic\"},{\"label\":\"bad\"}]")
+        org.junit.Assert.assertEquals(1, r.size)
+        org.junit.Assert.assertEquals("Mug", r[0].first)
+        org.junit.Assert.assertTrue(r[0].second[1] + r[0].second[3] <= 1.0001f)
+    }
+
+    @org.junit.Test
+    fun garbageGivesNothing() {
+        org.junit.Assert.assertTrue(com.jondude.anzu.assist.Brain.parseBoxes("no json here").isEmpty())
+    }
+}

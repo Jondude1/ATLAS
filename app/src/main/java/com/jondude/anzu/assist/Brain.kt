@@ -1177,6 +1177,35 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         "Tool error: ${e.message}"
     }
 
+    /** Parses a vision reply into labelled boxes (normalised 0..1). Pure, so it can be tested. */
+    fun parseBoxes(text: String): List<Triple<String, FloatArray, String>> {
+        val start = text.indexOf('['); val end = text.lastIndexOf(']')
+        if (start < 0 || end <= start) return emptyList()
+        return try {
+            val arr = JSONArray(text.substring(start, end + 1))
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val b = o.optJSONArray("box") ?: return@mapNotNull null
+                if (b.length() < 4) return@mapNotNull null
+                val x = b.optDouble(0).toFloat().coerceIn(0f, 1f); val y = b.optDouble(1).toFloat().coerceIn(0f, 1f)
+                val w = b.optDouble(2).toFloat().coerceIn(0.02f, 1f - x); val h = b.optDouble(3).toFloat().coerceIn(0.02f, 1f - y)
+                Triple(o.optString("label").take(28), floatArrayOf(x, y, w, h), o.optString("note").take(60))
+            }.take(8)
+        } catch (e: Exception) { emptyList() }
+    }
+
+    /** Blocking. Asks Claude to label what the camera sees; returns labelled boxes. */
+    fun labelScene(jpegBase64: String): List<Triple<String, FloatArray, String>> {
+        if (!hasKey()) throw RuntimeException("Needs the Anthropic API key")
+        val content = JSONArray()
+            .put(JSONObject().put("type", "image").put("source", JSONObject()
+                .put("type", "base64").put("media_type", "image/jpeg").put("data", jpegBase64)))
+            .put(JSONObject().put("type", "text").put("text", "Identify up to 6 distinct, useful objects in this image."))
+        val msgs = JSONArray().put(JSONObject().put("role", "user").put("content", content))
+        val resp = call("You label what a phone camera sees for a heads-up display. Reply with ONLY a JSON array, no prose: [{\"label\":\"short name\",\"box\":[x,y,width,height],\"note\":\"a few words of useful info\"}]. Box values are fractions 0..1 of the image from the top-left. Labels are 1-3 words.", msgs, null, 600, 45_000)
+        return parseBoxes(textOf(resp))
+    }
+
     private fun call(
         system: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, timeoutMs: Int = 30_000
     ): JSONObject {
