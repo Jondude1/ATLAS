@@ -1793,7 +1793,12 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
     }
 
     /** Background research errand using Claude's web search; announces when done. */
-    private fun research(topic: String) {
+    /** Idle-time work on one of Jon's open items; reports back with a lead-in so he knows it was unprompted. */
+    fun idleResearch(loopText: String) {
+        research("this open item you've been carrying: $loopText. Find what would actually move it forward", "While you were out I looked into one of your open items.")
+    }
+
+    private fun research(topic: String, lead: String? = null) {
         try {
             val tools = JSONArray().put(
                 JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 4)
@@ -1811,7 +1816,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Store.addNote("Research: $topic\n$text")
             Store.logAction("Finished research: ${topic.take(80)}")
             record("[research errand finished: $topic]", text, "")
-            Atlas.polite("I finished looking into $topic. $text I saved it to your notes.", source = "research")
+            Atlas.polite("${lead ?: "I finished looking into $topic."} $text I saved it to your notes.", source = "research")
         } catch (e: Exception) {
             Atlas.polite("The research on $topic failed. ${e.message ?: ""}")
         }

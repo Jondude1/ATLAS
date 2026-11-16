@@ -1475,3 +1475,26 @@ class PresenceVisualsTest {
         }
     }
 }
+
+class IdleThinkTest {
+    private fun loop(id: Long, text: String, acked: Long = 0L) = com.jondude.anzu.assist.Hub.Loop(id, text, "x", 0L, acked, 0)
+
+    @org.junit.Test
+    fun picksOnlyResearchableOpenLoopsNotDoneBefore() {
+        val t = com.jondude.anzu.assist.IdleThink
+        val loops = listOf(loop(1, "call the vet"), loop(2, "figure out which label printer to buy"), loop(3, "compare solar inverters", acked = 5L))
+        org.junit.Assert.assertEquals(2L, t.pick(loops, emptySet())?.id)
+        org.junit.Assert.assertNull(t.pick(loops, setOf(2L)))
+    }
+
+    @org.junit.Test
+    fun limitsKeepItPolite() {
+        val t = com.jondude.anzu.assist.IdleThink
+        val now = 100L * 3_600_000L
+        org.junit.Assert.assertTrue(t.allowed(now, now - 30 * 60_000L, 0L, 0, 10))
+        org.junit.Assert.assertFalse(t.allowed(now, now - 5 * 60_000L, 0L, 0, 10))   // just spoke
+        org.junit.Assert.assertFalse(t.allowed(now, now - 30 * 60_000L, now - 3_600_000L, 0, 10)) // ran an hour ago
+        org.junit.Assert.assertFalse(t.allowed(now, now - 30 * 60_000L, 0L, 3, 10))  // three today
+        org.junit.Assert.assertFalse(t.allowed(now, now - 30 * 60_000L, 0L, 0, 23))  // night
+    }
+}

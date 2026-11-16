@@ -200,12 +200,59 @@ object SelfFix {
     }
 }
 
+/**
+ * While Jon is away and quiet, works one researchable open loop in the background and brings back a single finding.
+ * Limits: waking hours, 20+ minutes since he last spoke, one run per 3 hours, three a day, never the same loop twice.
+ */
+object IdleThink {
+    private const val KEY_DONE = "idleDone"
+    private const val KEY_LAST = "idleLast"
+    private const val KEY_DAY = "idleDay"
+    private const val KEY_COUNT = "idleCount"
+    private var lastCheck = 0L
+    private val researchable = Regex("(?i)\\b(look into|look up|find out|find|research|compare|figure out|how (do|to|can)|which|price|cost|options|recommend|worth|review)\\b")
+
+    fun isResearchable(text: String) = researchable.containsMatchIn(text)
+
+    fun pick(loops: List<Hub.Loop>, done: Set<Long>): Hub.Loop? =
+        loops.firstOrNull { it.ackedAt == 0L && it.id !in done && isResearchable(it.text) }
+
+    fun allowed(now: Long, lastUserMs: Long, lastRunMs: Long, countToday: Int, hour: Int): Boolean =
+        hour in 8..20 && now - lastUserMs > 20 * 60_000L && now - lastRunMs > 3 * 3_600_000L && countToday < 3
+
+    fun tick(ctx: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastCheck < 300_000L) return
+        lastCheck = now
+        if (!Brain.hasKey() || !Hub.configured() || Atlas.busy || Discretion.current() != null || Prefs.quietUntil > now) return
+        val sp = Prefs.sp
+        val cal = Calendar.getInstance()
+        val day = Habits.dayOf(cal)
+        val count = if (sp.getInt(KEY_DAY, 0) == day) sp.getInt(KEY_COUNT, 0) else 0
+        val lastUser = Store.recentTimed(now).lastOrNull()?.third ?: 0L
+        if (!allowed(now, lastUser, sp.getLong(KEY_LAST, 0L), count, cal.get(Calendar.HOUR_OF_DAY))) return
+        val done = try {
+            val a = JSONArray(sp.getString(KEY_DONE, "[]")); (0 until a.length()).map { a.getLong(it) }.toSet()
+        } catch (e: Exception) { emptySet() }
+        Atlas.scope.launch(Dispatchers.IO) {
+            val loop = pick(Hub.openLoops() ?: return@launch, done) ?: return@launch
+            val ids = JSONArray(); (done + loop.id).toList().takeLast(60).forEach { ids.put(it) }
+            sp.edit().putString(KEY_DONE, ids.toString()).putLong(KEY_LAST, System.currentTimeMillis())
+                .putInt(KEY_DAY, day).putInt(KEY_COUNT, count + 1).apply()
+            Store.logAction("Idle-time look into: ${loop.text.take(60)}")
+            val job = Jobs.start("Idle")
+            try { Brain.idleResearch(loop.text) } finally { Jobs.finish(job) }
+        }
+    }
+}
+
 /** Called from the service tick. */
 object Agency {
     private var lastHabit = 0L
 
     fun tick(ctx: Context) {
         SelfFix.tick(ctx)
+        IdleThink.tick(ctx)
         val now = System.currentTimeMillis()
         if (now - lastHabit < 60_000L) return
         lastHabit = now
