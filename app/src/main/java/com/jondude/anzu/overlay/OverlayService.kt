@@ -1033,6 +1033,15 @@ class OverlayService : Service() {
         val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         sizeChip = chip().also { row2.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
         sizeChip?.setOnClickListener { cycleSize() }
+        row2.addView(chip("HOLO BG") {
+            try {
+                startActivity(Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                    putExtra(android.app.WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, android.content.ComponentName(ctx, HoloWallpaperService::class.java))
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                collapse()
+            } catch (_: Throwable) {}
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
         row2.addView(hide)
         col.addView(row2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         col.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) armAutoCollapse(); false }
