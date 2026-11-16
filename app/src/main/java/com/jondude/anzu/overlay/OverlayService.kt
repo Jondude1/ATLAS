@@ -38,6 +38,7 @@ import androidx.core.app.NotificationCompat
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.GlassesService
 import com.jondude.anzu.Prefs
+import com.jondude.anzu.Speaker
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Atlas
 import kotlinx.coroutines.CoroutineScope
@@ -269,7 +270,7 @@ class OverlayService : Service() {
                     val wasDrag = moved
                     dragging = false
                     if (wasDrag) snapToEdge()
-                    else if (!longFired && e.eventTime - downAt < TAP_MS) tap()
+                    else if (!longFired && e.eventTime - downAt < TAP_MS) talk()
                     scheduleRoam()
                 }
                 MotionEvent.ACTION_CANCEL -> {
@@ -279,6 +280,28 @@ class OverlayService : Service() {
                 }
             }
             return true
+        }
+    }
+
+    /**
+     * Talk to Atlas without leaving whatever you're doing. When the service's microphone is armed
+     * (it has been opened once since boot) the conversation runs right here; otherwise it falls back to
+     * the small sheet, which is the one path that always has mic access.
+     */
+    private fun talk() {
+        if (Glasses.micArmed.value) {
+            crumb(this, "talk: hands-free")
+            scope.launch {
+                try {
+                    if (Atlas.busy) Speaker.stop()
+                    Atlas.converse(applicationContext, null, true, 8)
+                } catch (t: Throwable) {
+                    recordError(this@OverlayService, "talk", t)
+                }
+            }
+        } else {
+            crumb(this, "talk: mic not armed, sheet fallback")
+            tap()
         }
     }
 
@@ -671,7 +694,7 @@ class OverlayService : Service() {
 
         // Controls, so the app never has to be opened: talk, speak up, quiet, and a typed message line.
         val act = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        act.addView(chip("TALK") { collapse(); tap() }.apply {
+        act.addView(chip("TALK") { collapse(); talk() }.apply {
             setTextColor(Color.parseColor("#031A24"))
             (background as GradientDrawable).setColor(Color.parseColor(Holo.CYAN))
         }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
