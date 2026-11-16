@@ -45,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -133,6 +134,7 @@ class OverlayService : Service() {
             sizeKey = OrbSize.normalize(sp.getString(KEY_SIZE, SIZE_DEFAULT))
             addOrb()
             crumb(this, "addOrb ok")
+            armMic("overlay start")
             observe()
             crumb(this, "observe ok")
             scheduleRoam()
@@ -288,7 +290,30 @@ class OverlayService : Service() {
      * (it has been opened once since boot) the conversation runs right here; otherwise it falls back to
      * the small sheet, which is the one path that always has mic access.
      */
+    /**
+     * Ask the glasses service to attach its microphone while this overlay window is visible, so the
+     * mic works after a reboot without opening the app. Android may refuse; the service then stays
+     * un-armed and Talk falls back to the sheet. Never disarms a mic that is already armed.
+     */
+    private fun armMic(why: String) {
+        if (Glasses.micArmed.value) return
+        try {
+            GlassesService.start(this, true)
+            crumb(this, "armMic requested ($why)")
+        } catch (t: Throwable) {
+            crumb(this, "armMic failed: ${t.javaClass.simpleName}")
+        }
+    }
+
     private fun talk() {
+        if (!Glasses.micArmed.value) {
+            armMic("talk")
+            // The service attaches the mic type asynchronously; give it a moment before choosing a path.
+            scope.launch { delay(600); talkNow() }
+        } else talkNow()
+    }
+
+    private fun talkNow() {
         if (Glasses.micArmed.value) {
             crumb(this, "talk: hands-free")
             scope.launch {
