@@ -598,6 +598,12 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
     }
 
+    /** Mirror a tool's answer as a floating holographic card near the orb (no-op when the overlay is off). */
+    private fun holoCard(title: String, text: String, max: Int = 5) {
+        val lines = com.jondude.anzu.overlay.HoloCards.lines(text, max)
+        if (lines.isNotEmpty()) com.jondude.anzu.overlay.OverlayService.card(title, lines)
+    }
+
     private fun tool(name: String, desc: String, props: JSONObject = JSONObject(), required: List<String> = emptyList()): JSONObject =
         JSONObject().put("name", name).put("description", desc).put(
             "input_schema",
@@ -634,6 +640,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         a.put(tool("open_app", "Open an app on the phone by name.", JSONObject().put("name", str("App name.")), listOf("name")))
         a.put(tool("point_at", "Show Jon where something is on his CURRENT screen by circling it with a highlight ring; only works for things currently visible.",
             JSONObject().put("query", str("The visible text or label to find, e.g. 'Settings' or 'Send'.")), listOf("query")))
+        a.put(tool("look_at_screen", "Look at Jon's CURRENT screen (a screenshot) and answer a question about what is on it: identify, explain, read or summarise. Use ONLY when Jon asks what he is looking at or wants something on screen explained; never on your own. You can then call point_at to circle what you mention.",
+            JSONObject().put("question", str("What Jon wants to know about the screen.")), listOf("question")))
         a.put(tool("open_screen", "Open a website (URL or domain), a phone settings screen (wifi, bluetooth, battery, accessibility, apps) or an installed app by name.",
             JSONObject().put("target", str("URL, domain, settings screen name, or app name.")), listOf("target")))
         a.put(tool("navigate", "Start driving directions in Maps.", JSONObject().put("destination", str("Place or address.")), listOf("destination")))
@@ -875,10 +883,31 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     }
                 }
             }
+            "look_at_screen" -> {
+                if (!hasKey()) "Looking at the screen needs the Anthropic API key."
+                else if (!com.jondude.anzu.overlay.AtlasA11yService.isConnected())
+                    "I can't look at the screen yet; it needs the Atlas accessibility switch on in Settings."
+                else {
+                    com.jondude.anzu.overlay.OverlayService.scan()
+                    val shot = com.jondude.anzu.overlay.AtlasA11yService.screenshotJpegBase64()
+                    if (shot == null) "I couldn't capture the screen. It needs Android 11 or newer and the accessibility service on."
+                    else try {
+                        val content = JSONArray()
+                            .put(JSONObject().put("type", "image").put("source", JSONObject()
+                                .put("type", "base64").put("media_type", "image/jpeg").put("data", shot)))
+                            .put(JSONObject().put("type", "text").put("text", input.optString("question").ifBlank { "What is on this screen?" }))
+                        val msgs = JSONArray().put(JSONObject().put("role", "user").put("content", content))
+                        val resp = call("You are Atlas looking at a screenshot of Jon's phone. Answer his question about it in a few plain spoken sentences. Name visible things by their on-screen labels so they can be pointed at.", msgs, null, 500, 45_000)
+                        textOf(resp).ifBlank { "I looked but couldn't make anything out." }
+                    } catch (e: Exception) {
+                        "I couldn't get an answer about the screen: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                }
+            }
             "open_screen" -> Phone.openScreen(ctx, input.optString("target"))
             "navigate" -> Phone.navigate(ctx, input.optString("destination"))
             "set_alarm" -> Phone.setAlarm(ctx, input.optInt("hour", 7), input.optInt("minute", 0), input.optString("label", "Alarm"))
-            "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0))
+            "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0)).also { holoCard("Agenda", it) }
             "create_event" -> {
                 val start = Phone.parseWhen(input.optString("start"))
                 if (start == null) "I need the start time as YYYY-MM-DD HH:MM."
@@ -970,6 +999,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             }
             "meeting_stop" -> com.jondude.anzu.Meeting.finish(ctx)
             "weather" -> Weather.brief().ifBlank { "Couldn't get the weather; no location or no connection." }
+                .also { holoCard("Weather", it) }
             "research" -> {
                 val topic = input.optString("topic")
                 if (!hasKey()) "Research needs the Anthropic API key." else {
@@ -1092,7 +1122,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     "Okay. I'll keep things to cards while they're here."
                 }
             }
-            "status" -> statusReport()
+            "status" -> statusReport().also { holoCard("Systems", it, 6) }
             "home_state" -> HomeAssistant.summary()
             "home_assistant" -> {
                 val cmd = input.optString("command")

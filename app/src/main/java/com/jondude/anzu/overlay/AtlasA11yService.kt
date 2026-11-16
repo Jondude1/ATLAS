@@ -1,7 +1,13 @@
 package com.jondude.anzu.overlay
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Build
+import android.util.Base64
+import android.view.Display
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -81,6 +87,38 @@ class AtlasA11yService : AccessibilityService() {
         private var instance: AtlasA11yService? = null
 
         fun isConnected(): Boolean = instance != null
+
+        /**
+         * One screenshot of whatever is on screen right now, scaled to at most [maxSide] px on the long edge
+         * and returned as base64 JPEG for a vision call. Null if the service is off, the phone is below
+         * Android 11, or the system refuses. Only ever called when Jon asks Atlas to look.
+         */
+        suspend fun screenshotJpegBase64(maxSide: Int = 1280): String? {
+            val svc = instance ?: return null
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+            val bmp = suspendCancellableCoroutine<Bitmap?> { cont ->
+                try {
+                    svc.takeScreenshot(Display.DEFAULT_DISPLAY, svc.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                            val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                            val soft = hw?.copy(Bitmap.Config.ARGB_8888, false)
+                            result.hardwareBuffer.close()
+                            if (cont.isActive) cont.resume(soft)
+                        }
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    })
+                } catch (_: Throwable) {
+                    if (cont.isActive) cont.resume(null)
+                }
+            } ?: return null
+            val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
+            val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+            val bos = java.io.ByteArrayOutputStream()
+            out.compress(Bitmap.CompressFormat.JPEG, 72, bos)
+            return Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+        }
 
         fun snapshot(): List<A11yNode> = try { instance?.walk() ?: emptyList() } catch (_: Throwable) { emptyList() }
 

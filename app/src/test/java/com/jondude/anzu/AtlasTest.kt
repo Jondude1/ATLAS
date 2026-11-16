@@ -1228,4 +1228,24 @@ class AtlasTest {
         assertEquals(5, b.cells(50))
         assertEquals(9, b.cells(87))
     }
+
+    @Test
+    fun holoCardLinesAreShortAndKeepDecimals() {
+        val l = com.jondude.anzu.overlay.HoloCards.lines("Sunny, 72.5 degrees. Rain later; bring a coat.\n" + "x".repeat(80), max = 3)
+        assertEquals(3, l.size)
+        assertEquals("Sunny, 72.5 degrees", l[0])
+        assertEquals("Rain later", l[1])
+        assertTrue(l[2].length <= 46 && l[2].endsWith("…"))
+        assertTrue(com.jondude.anzu.overlay.HoloCards.lines("  .  ;  ").isEmpty())
+    }
+
+    @Test
+    fun starkEarconsExistAndAreGentle() {
+        for (k in listOf("boot", "lock", "scan")) {
+            val n = com.jondude.anzu.Earcons.notes(k)
+            assertTrue(k, n.isNotEmpty())
+            assertTrue(k, n.sumOf { it.second + it.third } < 700)
+            assertTrue(k, com.jondude.anzu.Earcons.render(k).isNotEmpty())
+        }
+    }
 }

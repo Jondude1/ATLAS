@@ -10,7 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -73,6 +75,10 @@ class OverlayService : Service() {
     private var powerBar: SegmentBar? = null
     private var powerText: TextView? = null
     private var quietChip: TextView? = null
+    private var card: View? = null
+    private var ambient = false
+    private var sensors: android.hardware.SensorManager? = null
+    private var idLine: TextView? = null
     private var input: android.widget.EditText? = null
     private var typing = false
 
@@ -135,6 +141,9 @@ class OverlayService : Service() {
             addOrb()
             crumb(this, "addOrb ok")
             armMic("overlay start")
+            com.jondude.anzu.Ears.earcon("boot")
+            main.postDelayed({ showBubble("ATLAS ONLINE") }, 700)
+            armAmbient()
             observe()
             crumb(this, "observe ok")
             scheduleRoam()
@@ -172,6 +181,7 @@ class OverlayService : Service() {
         glide?.cancel()
         removeHighlight()
         removeBubble()
+        removeCard()
         collapse(save = false)
         orb?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         orb = null
@@ -244,6 +254,7 @@ class OverlayService : Service() {
         override fun onTouch(v: View, e: MotionEvent): Boolean {
             val lp = orbLp ?: return false
             lastTouchAt = System.currentTimeMillis()
+            wake()
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY
@@ -389,6 +400,166 @@ class OverlayService : Service() {
 
     // ---------------------------------------------------------------- speech bubble
 
+    /** Parallax: the HUD orb shifts a few dp with phone tilt, the title line the other way, so the panel reads as layered depth. */
+    private val tilt = object : android.hardware.SensorEventListener {
+        private var tx = 0f
+        private var ty = 0f
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            tx += (-(e.values[0] / 9.8f).coerceIn(-1f, 1f) - tx) * 0.12f
+            ty += ((e.values[2] / 9.8f).coerceIn(-1f, 1f) - ty) * 0.12f
+            hudOrb?.translationX = tx * dp(6); hudOrb?.translationY = ty * dp(6)
+            stateLine?.translationX = -tx * dp(2); stateLine?.translationY = -ty * dp(2)
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+    }
+
+    // ---------------------------------------------------------------- ambient mode
+
+    private val goAmbient = Runnable {
+        if (!expanded && !dragging && !pointing && state == "idle" && bubble == null && card == null) {
+            ambient = true
+            orb?.animate()?.alpha(0.35f)?.scaleX(0.72f)?.scaleY(0.72f)?.setDuration(700)?.start()
+        } else armAmbient()
+    }
+
+    private fun armAmbient() {
+        main.removeCallbacks(goAmbient)
+        main.postDelayed(goAmbient, 45_000)
+    }
+
+    /** Anything that matters brings the orb back to full presence. */
+    private fun wake() {
+        armAmbient()
+        if (!ambient) return
+        ambient = false
+        orb?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(250)?.start()
+    }
+
+    // ---------------------------------------------------------------- floating info cards
+
+    private val hideCard = Runnable { fadeCard() }
+
+    private fun removeCard() {
+        main.removeCallbacks(hideCard)
+        card?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        card = null
+    }
+
+    private fun fadeCard() {
+        val v = card ?: return
+        card = null
+        v.animate().alpha(0f).translationYBy(-dp(6).toFloat()).setDuration(260).withEndAction {
+            try { wm.removeView(v) } catch (_: Throwable) {}
+        }.start()
+    }
+
+    /** A translucent readout that hovers above the orb: weather, agenda, timers, systems. Touch-transparent. */
+    private fun showCard(title: String, lines: List<String>) {
+        if (expanded || orb == null || lines.isEmpty()) return
+        try {
+            removeCard()
+            wake()
+            val ctx = this
+            val panel = HoloPanel(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(10), dp(14), dp(12))
+            }
+            panel.addView(TextView(ctx).apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+                setTextColor(Color.parseColor(Holo.CYAN))
+                setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                letterSpacing = 0.15f
+                text = "◢ " + Holo.tag(title)
+            })
+            lines.forEachIndexed { i, l ->
+                panel.addView(TextView(ctx).apply {
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                    setTextColor(Color.parseColor("#E6FBFF"))
+                    setTypeface(Typeface.MONOSPACE)
+                    setPadding(0, dp(if (i == 0) 6 else 2), 0, 0)
+                    text = l
+                }, LinearLayout.LayoutParams(-2, -2))
+            }
+            val maxW = minOf((screenW * 0.8f).toInt(), dp(260))
+            panel.measure(
+                View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val w = panel.measuredWidth
+            val h = panel.measuredHeight
+            val ol = orbLp ?: return
+            val bubbleTop = (bubble?.layoutParams as? WindowManager.LayoutParams)?.y ?: ol.y
+            val lp = WindowManager.LayoutParams(
+                w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = if (edgeRight) (screenW - w - dp(8)).coerceAtLeast(0) else dp(8)
+                val above = bubbleTop - h - dp(10)
+                y = if (above >= minY()) above else (ol.y + orbPx + dp(10)).coerceAtMost((screenH - navBarH() - h).coerceAtLeast(minY()))
+            }
+            wm.addView(panel, lp)
+            card = panel
+            panel.alpha = 0f
+            panel.scaleY = 0.6f
+            panel.animate().alpha(1f).scaleY(1f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
+            main.postDelayed(hideCard, 9_000)
+        } catch (t: Throwable) {
+            crumb(this, "card failed: ${t.javaClass.simpleName}")
+            removeCard()
+        }
+    }
+
+    // ---------------------------------------------------------------- screen scan sweep
+
+    private class ScanView(ctx: Context) : View(ctx) {
+        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#00E5FF"); strokeWidth = 3f * ctx.resources.displayMetrics.density
+        }
+        private val trail = Paint()
+        var f = 0f
+
+        override fun onDraw(c: Canvas) {
+            val y = f * height
+            val tail = height * 0.18f
+            trail.shader = LinearGradient(0f, y - tail, 0f, y, Color.TRANSPARENT, Color.parseColor("#3300E5FF"), Shader.TileMode.CLAMP)
+            c.drawRect(0f, y - tail, width.toFloat(), y, trail)
+            c.drawLine(0f, y, width.toFloat(), y, line)
+        }
+    }
+
+    /** A cyan scan line sweeps the whole screen top to bottom, with the rising scan chirp. */
+    private fun scanSweep() {
+        try {
+            com.jondude.anzu.Ears.earcon("scan")
+            val v = ScanView(this)
+            wm.addView(
+                v,
+                WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply { gravity = Gravity.TOP or Gravity.START }
+            )
+            ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 900L
+                addUpdateListener { v.f = it.animatedValue as Float; v.invalidate() }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) {
+                        try { wm.removeView(v) } catch (_: Throwable) {}
+                    }
+                })
+                start()
+            }
+        } catch (t: Throwable) {
+            crumb(this, "scan failed: ${t.javaClass.simpleName}")
+        }
+    }
+
     private val hideBubble = Runnable { fadeBubble() }
 
     /** Timer path: fade out, then remove. Everything else removes immediately via [removeBubble]. */
@@ -470,6 +641,8 @@ class OverlayService : Service() {
             if (orb == null || rect.isEmpty) return
             endPoint()
             pointing = true
+            wake()
+            com.jondude.anzu.Ears.earcon("lock")
             val lp = orbLp
             if (lp != null && !expanded) {
                 val gap = dp(8)
@@ -595,6 +768,7 @@ class OverlayService : Service() {
                 }
                 orb?.mode = m
                 hudOrb?.mode = m
+                if (s != "idle") wake()
                 refreshHud()
             }
         }
@@ -604,13 +778,16 @@ class OverlayService : Service() {
                     orb?.playAttention()
                     hudOrb?.playAttention()
                 }
-                if (said.isNotBlank() && said != lastSaid) showBubble(said)
+                if (said.isNotBlank() && said != lastSaid) { wake(); showBubble(said) }
                 lastSaid = said
                 refreshHud()
             }
         }
         scope.launch {
             combine(Glasses.lastHeard, Glasses.connected) { a, b -> a to b }.collect { refreshHud() }
+        }
+        scope.launch {
+            Glasses.micLevel.collect { lv -> orb?.level = lv; hudOrb?.level = lv }
         }
     }
 
@@ -656,7 +833,13 @@ class OverlayService : Service() {
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
             letterSpacing = 0.12f
         }
-        head.addView(mono(9f, Holo.CYAN_DIM).apply { text = "A.T.L.A.S // ONLINE" }, LinearLayout.LayoutParams(0, -2, 1f))
+        val idText = "A.T.L.A.S // ONLINE"
+        idLine = mono(9f, Holo.CYAN_DIM).also { head.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+        ValueAnimator.ofInt(0, idText.length).apply {
+            duration = 550L
+            addUpdateListener { idLine?.text = idText.substring(0, it.animatedValue as Int) }
+            start()
+        }
         clockLine = mono(9f, Holo.CYAN_DIM).also { head.addView(it, LinearLayout.LayoutParams(-2, -2)) }
         col.addView(head, LinearLayout.LayoutParams(-1, -2))
         val big = ParticleOrbView(ctx, 130)
@@ -780,6 +963,14 @@ class OverlayService : Service() {
             animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(DecelerateInterpolator(1.6f)).start()
         }
         haptic(HapticFeedbackConstants.LONG_PRESS)
+        wake()
+        try {
+            val sm = getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+            sensors = sm
+            sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)?.let {
+                sm.registerListener(tilt, it, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            }
+        } catch (_: Throwable) {}
         refreshHud()
         armAutoCollapse()
     }
@@ -834,6 +1025,8 @@ class OverlayService : Service() {
         main.removeCallbacks(autoCollapse)
         if (!expanded) return
         expanded = false
+        try { sensors?.unregisterListener(tilt) } catch (_: Throwable) {}
+        sensors = null
         // Fold back to a slit, then remove; state is cleared immediately so a quick re-open is safe.
         panel?.let { pv ->
             pv.animate().alpha(0f).scaleY(0.04f).scaleX(0.92f).setDuration(160).withEndAction {
@@ -843,7 +1036,7 @@ class OverlayService : Service() {
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
-        clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false
+        clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false; idLine = null
         if (save) {
             orb?.visibility = View.VISIBLE
             lastTouchAt = System.currentTimeMillis()
@@ -914,6 +1107,18 @@ class OverlayService : Service() {
 
         @Volatile
         private var instance: OverlayService? = null
+
+        /** Floating info card beside the orb (weather, agenda, timers, systems). Safe from any thread; no-op if the overlay isn't running. */
+        fun card(title: String, lines: List<String>) {
+            val svc = instance ?: return
+            svc.main.post { svc.showCard(title, lines) }
+        }
+
+        /** Full-screen cyan scan sweep, used when Atlas looks at the screen. */
+        fun scan() {
+            val svc = instance ?: return
+            svc.main.post { svc.scanSweep() }
+        }
 
         /** Show & Point: glide the orb to the target, ring it for ~3s, then send the orb home. No-op if the service isn't running. */
         fun pointAt(ctx: Context, rect: Rect) {

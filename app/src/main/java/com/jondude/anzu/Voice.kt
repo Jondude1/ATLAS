@@ -345,6 +345,7 @@ object Ears {
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {
                 if (rmsdB > peak) peak = rmsdB
+                Glasses.micLevel.value = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
             }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
@@ -591,6 +592,9 @@ object Earcons {
         "think" -> listOf(Triple(440.0, 220, 0))                           // A4, held softly
         "notice" -> listOf(Triple(1046.5, 260, 0))                         // C6, bell-like decay
         "urgent" -> listOf(Triple(784.0, 120, 60), Triple(1046.5, 180, 0)) // G5, C6
+        "boot" -> listOf(Triple(440.0, 70, 10), Triple(659.3, 70, 10), Triple(880.0, 70, 10), Triple(1318.5, 180, 0)) // systems up
+        "lock" -> listOf(Triple(1760.0, 45, 25), Triple(2349.3, 80, 0))    // target acquired
+        "scan" -> (0 until 8).map { Triple(500.0 + it * 220.0, 38, 0) }   // rising sweep
         else -> listOf(Triple(880.0, 90, 20), Triple(659.3, 140, 0))       // done: A5 → E5
     }
 

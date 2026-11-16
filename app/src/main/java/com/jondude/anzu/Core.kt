@@ -693,6 +693,8 @@ object Glasses {
     val battery = MutableStateFlow(-1)
     val connectedSince = MutableStateFlow(0L)
     val micArmed = MutableStateFlow(false)
+    /** 0..1 live microphone loudness while listening, for the orb. */
+    val micLevel = MutableStateFlow(0f)
     /** idle, listening, thinking, speaking */
     /** The microphone the last listen used, e.g. "Pixel mic" or "Galaxy Buds". */
     val inputSource = MutableStateFlow("")

@@ -56,6 +56,9 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
     private var attentionStart = -1L
     private var bounceStart = -1L
     private var shakeStart = -1L
+    /** Live mic loudness 0..1, set from outside; only drives the orb while LISTENING. */
+    @Volatile var level = 0f
+    private var lvl = 0f
     private var swirl = 0.2f // smoothed state intensity values
     private var gather = 0f
     private var ringGlow = 0f // 0 white .. 1 orange
@@ -137,6 +140,7 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
             else -> 0f
         }
         val k = min(1f, dt * 4f)
+        lvl += (level - lvl) * min(1f, dt * 14f)
         swirl += (targetSwirl - swirl) * k
         gather += (targetGather - gather) * k
         ringGlow += ((if (m == OrbMode.LISTENING) 1f else if (attn) 0.8f else 0f) - ringGlow) * k
@@ -190,7 +194,8 @@ class ParticleOrbView(ctx: Context, private val pointCount: Int = 110) : View(ct
                 fun bump(c: Float) = max(0f, 1f - abs(e - c) / 110f)
                 max(bump(120f), bump(370f))
             }
-            mode == OrbMode.LISTENING -> 0.5f + 0.5f * sin(t * 2f * PI.toFloat() * 1.2f)
+            // Listening follows your actual voice, with a faint resting breath so it never looks dead.
+            mode == OrbMode.LISTENING -> (0.12f + 0.08f * sin(t * 2f * PI.toFloat() * 1.2f) + 0.8f * lvl).coerceIn(0f, 1f)
             mode == OrbMode.SPEAKING -> {
                 // voice-like envelope: ~3.5 Hz syllables modulated by a slower phrase wobble
                 val syl = 0.5f + 0.5f * sin(t * 2f * PI.toFloat() * 3.5f)

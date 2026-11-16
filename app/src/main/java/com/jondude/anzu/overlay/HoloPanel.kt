@@ -36,6 +36,7 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
     private val scan = Paint().apply { color = Color.parseColor("#3300E5FF"); strokeWidth = 2f * d }
     private val frame = Path()
     private var running = false
+    private var bootAt = 0L
 
     init {
         setWillNotDraw(false)
@@ -44,6 +45,7 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         running = true
+        bootAt = SystemClock.uptimeMillis()
         postInvalidateOnAnimation()
     }
 
@@ -56,6 +58,11 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w > 0f && h > 0f) {
+            // Boot-in: the frame traces itself over ~0.7 s. p runs 0..1; brackets grow, grid and glass fade up.
+            val p = ((SystemClock.uptimeMillis() - bootAt) / 700f).coerceIn(0f, 1f)
+            val ease = 1f - (1f - p) * (1f - p)
+            fill.alpha = (Color.alpha(Color.parseColor(Holo.FILL)) * ease).toInt()
+            grid.alpha = (15 * ease).toInt()
             val cut = 14f * d
             frame.reset()
             frame.moveTo(cut, 0f); frame.lineTo(w - cut, 0f); frame.lineTo(w, cut)
@@ -67,10 +74,10 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
             while (y < h) { c.drawLine(0f, y, w, y, grid); y += 12f * d }
             c.drawPath(frame, edge)
             // scan line sweeps top to bottom every 3 s
-            val t = (SystemClock.uptimeMillis() % 3000L) / 3000f
+            val t = if (p < 1f) p else (SystemClock.uptimeMillis() % 3000L) / 3000f
             c.drawLine(cut, t * h, w - cut, t * h, scan)
             // corner brackets
-            val b = 18f * d
+            val b = 18f * d * (0.3f + 0.7f * ease)
             val m = 1f * d
             c.drawLine(cut, m, m + cut + b, m, bracket); c.drawLine(m + 0f, cut, m, cut + b, bracket)
             c.drawLine(w - cut - b, m, w - cut, m, bracket); c.drawLine(w - m, cut, w - m, cut + b, bracket)
@@ -116,4 +123,14 @@ class SegmentBar(ctx: Context, private val total: Int = 10) : View(ctx) {
             c.drawRect(l, 0f, l + cw, height.toFloat(), if (i < lit) on else off)
         }
     }
+}
+
+/** Pure helper for floating info cards: turn a tool's spoken-style text into a few short readout lines. */
+object HoloCards {
+    fun lines(text: String, max: Int = 5, width: Int = 46): List<String> =
+        text.split(Regex("\\n|(?<=[.;])\\s+"))
+            .map { it.replace(Regex("\\s+"), " ").trim().trimEnd('.', ';') }
+            .filter { it.isNotBlank() }
+            .map { if (it.length <= width) it else it.take(width - 1).trimEnd() + "…" }
+            .take(max)
 }
