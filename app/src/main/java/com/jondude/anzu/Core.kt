@@ -185,6 +185,9 @@ object Prefs {
     /** How the personality has shifted lately. Rewritten slowly over time. */
     var drift by StrPref("drift", "")
     var story by StrPref("story", "")
+    /** Dry, brief, JARVIS-style manner of speaking. */
+    var jarvisManner by BoolPref("jarvisManner", true)
+    var honorific by StrPref("honorific", "sir")
     /** One-shot: the bundled memory seed pack (assets/atlas_seed_v1.json) has been merged in. */
     var seedV1 by BoolPref("seedV1", false)
     var lastDriftDay by StrPref("lastDriftDay", "")

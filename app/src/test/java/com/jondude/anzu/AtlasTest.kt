@@ -1341,3 +1341,62 @@ class CorrectionsTest {
         org.junit.Assert.assertTrue(c.hint("I meant the garage").contains("learn_correction"))
     }
 }
+
+class PresenceTest {
+    private fun ev(vararg kv: Pair<String, Any>): org.json.JSONObject = org.json.JSONObject().also { o -> kv.forEach { o.put(it.first, it.second) } }
+
+    @org.junit.Test
+    fun streamingEmitsSentencesAsTheyCompleteAndKeepsToolCalls() {
+        val said = ArrayList<String>()
+        val a = com.jondude.anzu.assist.StreamAssembler { said.add(it); true }
+        a.feed(ev("type" to "content_block_start", "content_block" to ev("type" to "text")))
+        for (chunk in listOf("Sure thing, I can check ", "that for you. Give me ", "a second", " and I'll have it.")) {
+            a.feed(ev("type" to "content_block_delta", "delta" to ev("type" to "text_delta", "text" to chunk)))
+        }
+        org.junit.Assert.assertEquals(listOf("Sure thing, I can check that for you."), said)
+        a.feed(ev("type" to "content_block_stop"))
+        org.junit.Assert.assertEquals(2, said.size)
+        a.feed(ev("type" to "content_block_start", "content_block" to ev("type" to "tool_use", "id" to "t1", "name" to "weather")))
+        a.feed(ev("type" to "content_block_delta", "delta" to ev("type" to "input_json_delta", "partial_json" to "{\"a\":")))
+        a.feed(ev("type" to "content_block_delta", "delta" to ev("type" to "input_json_delta", "partial_json" to "1}")))
+        a.feed(ev("type" to "content_block_stop"))
+        a.feed(ev("type" to "message_delta", "delta" to ev("stop_reason" to "tool_use"), "usage" to ev("output_tokens" to 9)))
+        val r = a.result()
+        org.junit.Assert.assertEquals("tool_use", r.getString("stop_reason"))
+        org.junit.Assert.assertEquals(2, r.getJSONArray("content").length())
+        org.junit.Assert.assertEquals(1, r.getJSONArray("content").getJSONObject(1).getJSONObject("input").getInt("a"))
+        org.junit.Assert.assertEquals("", a.remainder())
+    }
+
+    @org.junit.Test
+    fun refusedSentenceStaysInTheRemainder() {
+        var n = 0
+        val a = com.jondude.anzu.assist.StreamAssembler { n++; n < 2 }
+        a.feed(ev("type" to "content_block_start", "content_block" to ev("type" to "text")))
+        a.feed(ev("type" to "content_block_delta", "delta" to ev("type" to "text_delta", "text" to "First sentence is long enough. Second sentence is also long. Third one here too.")))
+        a.feed(ev("type" to "content_block_stop"))
+        org.junit.Assert.assertTrue(a.remainder().startsWith("Second sentence"))
+    }
+
+    @org.junit.Test
+    fun terseCommandsAndRepairs() {
+        val t = com.jondude.anzu.assist.Terse
+        org.junit.Assert.assertTrue(t.isAgain("Do that again"))
+        org.junit.Assert.assertTrue(t.expand("again", "turn on the porch light").startsWith("turn on the porch light"))
+        org.junit.Assert.assertEquals("what time is it", t.expand("what time is it", "x"))
+        org.junit.Assert.assertTrue(t.isUndo("never mind, put it back"))
+        org.junit.Assert.assertFalse(t.isUndo("put the milk back on the list"))
+        org.junit.Assert.assertTrue(com.jondude.anzu.assist.SelfRepair.detect("turn on the kitchen light, no wait, the bedroom"))
+        org.junit.Assert.assertFalse(com.jondude.anzu.assist.SelfRepair.detect("turn on the kitchen light"))
+    }
+
+    @org.junit.Test
+    fun moodShorthandAndWindow() {
+        org.junit.Assert.assertEquals(com.jondude.anzu.assist.Mood.Kind.STRESSED, com.jondude.anzu.assist.Mood.detect("I'm so swamped today"))
+        org.junit.Assert.assertEquals(com.jondude.anzu.assist.Mood.Kind.NONE, com.jondude.anzu.assist.Mood.detect("what's the weather"))
+        val mem = listOf(com.jondude.anzu.assist.Shorthand.entry("the usual", "dim the lights and play jazz"))
+        org.junit.Assert.assertTrue(com.jondude.anzu.assist.Shorthand.hint("do the usual please", mem).contains("jazz"))
+        org.junit.Assert.assertEquals("", com.jondude.anzu.assist.Shorthand.hint("hello", mem))
+        org.junit.Assert.assertTrue(com.jondude.anzu.assist.Conversation.followWindowMs("Want me to?") > com.jondude.anzu.assist.Conversation.followWindowMs("Done."))
+    }
+}

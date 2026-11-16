@@ -578,6 +578,7 @@ Everything you write is spoken aloud. Announcements and lines you start on your 
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
+            if (Prefs.jarvisManner) append(Manner.prompt(Prefs.honorific))
             Hub.brief()?.let { b ->
                 if (b.text.isNotBlank()) append("\nThe brief from your hub on Obelisk (digested from everything Jon's apps and systems report): ").append(b.text).append('\n')
                 if (b.urgent.isNotEmpty()) append("Urgent and not yet told to Jon: ").append(b.urgent.joinToString("; ") { "${it.app}: ${it.title}" }).append('\n')
@@ -681,6 +682,10 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             JSONObject().put("scenario", str("The what-if, in full, with any numbers or dates Jon gave.")), listOf("scenario")))
         a.put(tool("handoff", "Hand a job to another agent and track it. agent 'hermes' runs it in the background and you report when it answers; agent 'helios' passes it through the hub and you report when Helios replies.",
             JSONObject().put("agent", str("hermes or helios.")).put("task", str("The full task or message, with every detail.")), listOf("agent", "task")))
+        a.put(tool("keep_moment", "Keep something worth bringing back later: a running joke, a firm preference, or a decision with its reasons. Use sparingly.",
+            JSONObject().put("kind", str("joke, preference or decision.")).put("text", str("What to keep, in a sentence, with the reason if it is a decision.")), listOf("kind", "text")))
+        a.put(tool("learn_shorthand", "Remember a phrase Jon uses as shorthand ('the usual', 'that thing', 'lights') and what it means, so he never has to spell it out again.",
+            JSONObject().put("phrase", str("The phrase as he says it.")).put("meaning", str("What it means, as a full instruction or thing.")), listOf("phrase", "meaning")))
         a.put(tool("learn_correction", "Keep a lasting lesson when Jon corrects you: a misheard name, a wrong fact, a preference about how he wants things done. Not for one-off slips.",
             JSONObject().put("wrong", str("What you had wrong or assumed.")).put("right", str("What is actually right, in Jon's words.")), listOf("wrong", "right")))
         a.put(tool("helios_status", "Helios's latest status update (Helios is Jon's coordinator agent overseeing the builders). Use for 'what's Helios saying', 'status update from Helios', 'how's the build going'. Summarize it in two or three spoken sentences."))
@@ -988,6 +993,25 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     "$sent I'll tell you when Helios replies."
                 } else "I can hand off to Hermes or Helios. Which one?"
             }
+            "keep_moment" -> {
+                val kind = input.optString("kind").trim().lowercase().ifBlank { "moment" }.take(12)
+                val t = input.optString("text").trim().take(220)
+                if (t.isBlank()) "Nothing to keep." else {
+                    val fact = "Moment ($kind): $t"
+                    Store.addMemory(fact)
+                    lastUndo = { val i = Store.memory.value.indexOf(fact); if (i >= 0) Store.removeMemory(i); "Dropped it." }
+                    "Kept."
+                }
+            }
+            "learn_shorthand" -> {
+                val ph = input.optString("phrase").trim(); val me = input.optString("meaning").trim()
+                if (ph.isBlank() || me.isBlank()) "I need the phrase and what it means." else {
+                    val fact = Shorthand.entry(ph, me)
+                    Store.addMemory(fact)
+                    lastUndo = { val i = Store.memory.value.indexOf(fact); if (i >= 0) Store.removeMemory(i); "Forgot that shorthand." }
+                    "Understood: \"$ph\" means $me."
+                }
+            }
             "learn_correction" -> {
                 val wrong = input.optString("wrong").trim().take(120)
                 val right = input.optString("right").trim().take(160)
@@ -1268,6 +1292,45 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         return parseBoxes(textOf(resp))
     }
 
+    /** Like [call] but streamed: finished sentences go to [asm] as they arrive, so speech can begin before the reply ends. */
+    private fun callStream(system: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, asm: StreamAssembler, timeoutMs: Int = 60_000) {
+        val body = JSONObject()
+            .put("model", Prefs.model.trim().ifBlank { "claude-sonnet-5-5" })
+            .put("max_tokens", maxTokens)
+            .put("system", system)
+            .put("messages", messages)
+            .put("stream", true)
+        if (tools != null) body.put("tools", tools)
+        val conn = URL(com.jondude.anzu.tailnet(API)).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 8_000
+            conn.readTimeout = timeoutMs
+            conn.setRequestProperty("x-api-key", Prefs.apiKey.trim())
+            conn.setRequestProperty("anthropic-version", "2023-06-01")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val text = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                val msg = try { JSONObject(text).optJSONObject("error")?.optString("message") ?: text } catch (e: Exception) { text }
+                throw RuntimeException("API $code: ${msg.take(140)}")
+            }
+            conn.inputStream.bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    if (data.isEmpty() || data == "[DONE]") continue
+                    asm.feed(JSONObject(data))
+                }
+            }
+            Usage.add(asm.inTokens, asm.outTokens)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private fun call(
         system: String, messages: JSONArray, tools: JSONArray?, maxTokens: Int, timeoutMs: Int = 30_000
     ): JSONObject {
@@ -1363,8 +1426,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
 
     /** Jon said (or typed) something; Atlas answers. */
     suspend fun reply(
-        ctx: Context, userText: String, confirm: suspend (String) -> Boolean = { false }
+        ctx: Context, said: String, pipe: SpeechPipe? = null, confirm: suspend (String) -> Boolean = { false }
     ): String = withContext(Dispatchers.IO) {
+        val userText = Terse.expand(said, Store.recentExchanges().lastOrNull()?.first)
+        if (Terse.isUndo(said)) {
+            val out = runTool(ctx, "undo", JSONObject(), confirm)
+            record(said, out)
+            return@withContext out
+        }
         // "Say that again" repeats the last full answer without a model call.
         if (Spoken.isRepeatRequest(userText) && Spoken.lastFull.isNotBlank()) return@withContext Spoken.lastFull
         // At the table: "loot: …", "name: …", "ruling: …" go straight to tonight's chronicle.
@@ -1403,14 +1472,29 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Mcp.refresh()
         } catch (_: Exception) {
         }
-        val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText)
+        val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText) + SelfRepair.hint(userText) +
+            Mood.hint(userText) + Shorthand.hint(userText, Store.memory.value)
         var brainFailure: String? = null
         if (hasKey()) {
             try {
                 val messages = historyMessages()
                 messages.put(JSONObject().put("role", "user").put("content", stampNow(userText)))
                 val tools = tools()
-                var resp = call(sys, messages, tools, 1200)
+                var asm: StreamAssembler? = null
+                fun go(): JSONObject {
+                    if (pipe == null) return call(sys, messages, tools, 1200)
+                    return try {
+                        val a = StreamAssembler { pipe.offer(it) }
+                        callStream(sys, messages, tools, 1200, a)
+                        asm = a
+                        a.result()
+                    } catch (e: Exception) {
+                        if (pipe.used) throw e
+                        asm = null
+                        call(sys, messages, tools, 1200)
+                    }
+                }
+                var resp = go()
                 var rounds = 0
                 while (resp.optString("stop_reason") == "tool_use" && rounds < 4) {
                     rounds++
@@ -1429,12 +1513,13 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         }
                     }
                     messages.put(JSONObject().put("role", "user").put("content", results))
-                    resp = call(sys, messages, tools, 1200)
+                    resp = go()
                 }
                 val answer = if (resp.optString("stop_reason") == "tool_use")
                     // Out of tool rounds mid-task: say so rather than claiming it's finished.
                     textOf(resp).ifBlank { "I ran out of steps before I finished that. Check what I did under Done on its own." }
                 else textOf(resp).ifBlank { "Done." }
+                pipe?.remainder = asm?.takeIf { it.fullText.isNotBlank() }?.remainder()
                 record(userText, answer)
                 return@withContext answer
             } catch (e: Exception) {

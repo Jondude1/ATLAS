@@ -74,7 +74,8 @@ object Atlas {
                     volume = if (Prefs.whisperBack && heard.quiet) 0.45f else 1f
                     Glasses.atlasState.value = "thinking"
                     Ears.earcon("think")
-                    val answer = Brain.reply(ctx, heard.text) { question ->
+                    val pipe = SpeechPipe(volume, scope)
+                    val answer = Brain.reply(ctx, heard.text, pipe) { question ->
                         Glasses.atlasState.value = "speaking"
                         Speaker.say(question, volume)
                         Glasses.atlasState.value = "listening"
@@ -82,9 +83,13 @@ object Atlas {
                         Glasses.atlasState.value = "thinking"
                         r != null && yes.containsMatchIn(r.text)
                     }
+                    pipe.finish()
                     Glasses.atlasState.value = "speaking"
-                    Speaker.say(answer, volume, conversation = true)
-                    windowUntil = System.currentTimeMillis() + 30_000
+                    val rest = pipe.remainder ?: answer
+                    if (rest.isNotBlank()) Speaker.say(rest, volume, conversation = true)
+                    Glasses.lastSaid.value = answer
+                    Spoken.lastFull = answer
+                    windowUntil = System.currentTimeMillis() + Conversation.followWindowMs(answer)
                 }
             } finally {
                 Glasses.atlasState.value = "idle"
@@ -111,7 +116,8 @@ object Atlas {
                         Glasses.atlasState.value = "thinking"
                         Ears.earcon("think")
                         // From the earbuds' wake word there's no follow-up listen, so a gated action asks aloud and waits for a tap.
-                        val answer = Brain.reply(app, text) { question ->
+                        val pipe = SpeechPipe(1f, scope)
+                        val answer = Brain.reply(app, text, pipe) { question ->
                             Glasses.atlasState.value = "speaking"
                             if (CoPilot.active) {
                                 // Behind the wheel: never "look at your phone". Ask out loud and listen for yes.
@@ -126,8 +132,14 @@ object Atlas {
                                 Approvals.ask(app, question)
                             }
                         }
+                        pipe.finish()
                         Glasses.atlasState.value = "speaking"
-                        Speaker.say(answer, conversation = true)
+                        val rest = pipe.remainder ?: answer
+                        if (rest.isNotBlank()) Speaker.say(rest, conversation = true)
+                        Glasses.lastSaid.value = answer
+                        Spoken.lastFull = answer
+                        windowUntil = System.currentTimeMillis() + Conversation.followWindowMs(answer)
+                        return@withLock
                     }
                     windowUntil = System.currentTimeMillis() + 30_000
                 } finally {
@@ -242,6 +254,8 @@ object Atlas {
     fun announce(text: String, source: String = "") {
         val level = com.jondude.anzu.overlay.AlertLevel.classify(source, text)
         if (level != com.jondude.anzu.overlay.AlertLevel.NORMAL) com.jondude.anzu.overlay.OverlayService.alert(level, text)
+        // An emergency cuts across whatever is being said, politely.
+        val said = if (level >= com.jondude.anzu.overlay.AlertLevel.CRIT && busy) { Speaker.stop(); "Pardon the interruption. $text" } else text
         scope.launch {
             mutex.withLock {
                 try {
@@ -249,8 +263,8 @@ object Atlas {
                     Glasses.atlasState.value = "speaking"
                     // Nothing worn: hand off to a house speaker if one is set up.
                     val handedOff = !Glasses.connected.value && Prefs.houseSpeaker &&
-                        kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(text) }
-                    if (!handedOff) Speaker.say(text)
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(said) }
+                    if (!handedOff) Speaker.say(said)
                 } finally {
                     speakingSource = ""
                     Glasses.atlasState.value = "idle"
