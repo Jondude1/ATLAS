@@ -592,6 +592,7 @@ object Earcons {
         "think" -> listOf(Triple(440.0, 220, 0))                           // A4, held softly
         "notice" -> listOf(Triple(1046.5, 260, 0))                         // C6, bell-like decay
         "urgent" -> listOf(Triple(784.0, 120, 60), Triple(1046.5, 180, 0)) // G5, C6
+        "critical" -> listOf(Triple(1318.5, 110, 40), Triple(987.8, 110, 40), Triple(1318.5, 110, 40), Triple(987.8, 160, 0)) // two-tone alarm
         "boot" -> listOf(Triple(440.0, 70, 10), Triple(659.3, 70, 10), Triple(880.0, 70, 10), Triple(1318.5, 180, 0)) // systems up
         "lock" -> listOf(Triple(1760.0, 45, 25), Triple(2349.3, 80, 0))    // target acquired
         "scan" -> (0 until 8).map { Triple(500.0 + it * 220.0, 38, 0) }   // rising sweep

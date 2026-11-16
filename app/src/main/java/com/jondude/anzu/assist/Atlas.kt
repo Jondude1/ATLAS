@@ -240,6 +240,8 @@ object Atlas {
     }
 
     fun announce(text: String, source: String = "") {
+        val level = com.jondude.anzu.overlay.AlertLevel.classify(source, text)
+        if (level != com.jondude.anzu.overlay.AlertLevel.NORMAL) com.jondude.anzu.overlay.OverlayService.alert(level, text)
         scope.launch {
             mutex.withLock {
                 try {

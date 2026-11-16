@@ -1283,3 +1283,18 @@ class AtlasTest {
         assertTrue(a.holdMs(a.CRIT) > a.holdMs(a.WARN))
     }
 }
+
+class GlobeMathTest {
+    @org.junit.Test
+    fun frontPointStaysInFrontAndPoleIsAbove() {
+        val front = com.jondude.anzu.overlay.GlobeMath.project(0f, 0f, 1f, 0f, 0f)
+        org.junit.Assert.assertTrue(front.third > 0.9f)
+        val pole = com.jondude.anzu.overlay.GlobeMath.project(0f, 1f, 0f, 1.3f, 0f)
+        org.junit.Assert.assertTrue(pole.second > 0.9f)
+    }
+
+    @org.junit.Test
+    fun criticalEarconExists() {
+        org.junit.Assert.assertEquals(4, com.jondude.anzu.Earcons.notes("critical").size)
+    }
+}

@@ -65,6 +65,10 @@ class OverlayService : Service() {
     private var catcher: View? = null
     private var hudOrb: WaveformView? = null
     private var hudCol: View? = null
+    private var globe: WireGlobeView? = null
+    private var edge: EdgeGlowView? = null
+    private var alertLevel = AlertLevel.NORMAL
+    private val alertReset = Runnable { applyAlert(AlertLevel.NORMAL) }
     private var convo = false
     private var stateLine: TextView? = null
     private var saidLine: TextView? = null
@@ -177,6 +181,8 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        try { edge?.let { wm.removeView(it) } } catch (_: Throwable) {}
+        edge = null
         isRunning = false
         if (instance === this) instance = null
         main.removeCallbacksAndMessages(null)
@@ -796,6 +802,8 @@ class OverlayService : Service() {
                 }
                 orb?.mode = m
                 hudOrb?.mode = m
+                globe?.mode = m
+                if (s == "idle") hideEdge() else showEdge()
                 if (s != "idle") wake()
                 if (expanded && convo) { if (s == "idle") armAutoCollapse(10_000) else main.removeCallbacks(autoCollapse) }
                 refreshHud()
@@ -816,7 +824,7 @@ class OverlayService : Service() {
             combine(Glasses.lastHeard, Glasses.connected) { a, b -> a to b }.collect { refreshHud() }
         }
         scope.launch {
-            Glasses.micLevel.collect { lv -> orb?.level = lv; hudOrb?.level = lv }
+            Glasses.micLevel.collect { lv -> orb?.level = lv; hudOrb?.level = lv; globe?.level = lv; edge?.drive = lv }
         }
     }
 
@@ -875,6 +883,9 @@ class OverlayService : Service() {
         hudOrb = big
         big.mode = orb?.mode ?: OrbMode.IDLE
         col.addView(big, LinearLayout.LayoutParams(-1, dp(120)))
+        val gl = WireGlobeView(ctx).also { it.mode = big.mode; it.setAlert(alertLevel) }
+        globe = gl
+        col.addView(gl, LinearLayout.LayoutParams(-1, dp(84)))
 
         fun text(sizeSp: Float, color: String, bold: Boolean = false) = TextView(ctx).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
@@ -1068,7 +1079,7 @@ class OverlayService : Service() {
             }.start()
         }
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
-        panel = null; catcher = null; hudOrb = null
+        panel = null; catcher = null; hudOrb = null; globe = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
         clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false; idLine = null; hudCol = null; convo = false
         if (save) {
@@ -1077,6 +1088,55 @@ class OverlayService : Service() {
             orbLp?.let { it.x = xFor(edgeRight); it.y = yFor(yFrac) }
             updateOrb()
             scheduleRoam()
+        }
+    }
+
+    // ---------------------------------------------------------------- edge glow + alerts
+    private fun showEdge() {
+        if (edge != null) return
+        try {
+            val v = EdgeGlowView(this).apply { colorHex = AlertLevel.colorHex(alertLevel) }
+            wm.addView(
+                v,
+                WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                )
+            )
+            edge = v
+        } catch (_: Throwable) {}
+    }
+
+    private fun hideEdge() {
+        if (alertLevel != AlertLevel.NORMAL) return   // alerts keep the rim lit until they reset
+        edge?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        edge = null
+    }
+
+    private fun applyAlert(level: Int) {
+        alertLevel = level
+        orb?.setAlert(level); hudOrb?.setAlert(level); globe?.setAlert(level)
+        if (level == AlertLevel.NORMAL) {
+            main.removeCallbacks(alertReset)
+            edge?.pulseHz = 1.2f
+            if (state == "idle") hideEdge() else edge?.colorHex = Holo.CYAN
+        } else {
+            showEdge()
+            edge?.colorHex = AlertLevel.colorHex(level)
+            edge?.pulseHz = if (level >= AlertLevel.CRIT) 2.6f else 1.6f
+        }
+    }
+
+    private fun raiseAlert(level: Int, text: String) {
+        applyAlert(level)
+        if (level != AlertLevel.NORMAL) {
+            main.removeCallbacks(alertReset)
+            main.postDelayed(alertReset, AlertLevel.holdMs(level))
+            try { Earcons.play(if (level >= AlertLevel.CRIT) "critical" else "urgent") } catch (_: Throwable) {}
+            wake()
+            showBubble(text)
         }
     }
 
@@ -1152,6 +1212,12 @@ class OverlayService : Service() {
         fun card(title: String, lines: List<String>) {
             val svc = instance ?: return
             svc.main.post { svc.showCard(title, lines) }
+        }
+
+        /** Colour-coded alert: lights the rim and recolours the display (amber warning, red critical). Safe from any thread. */
+        fun alert(level: Int, text: String) {
+            val svc = instance ?: return
+            svc.main.post { svc.raiseAlert(level, text) }
         }
 
         /** Full-screen cyan scan sweep, used when Atlas looks at the screen. */
