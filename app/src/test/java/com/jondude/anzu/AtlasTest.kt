@@ -1217,4 +1217,15 @@ class AtlasTest {
         assertEquals(3_000L, b.holdMs("hi"))
         assertEquals(9_000L, b.holdMs("x".repeat(500)))
     }
+
+    @Test
+    fun segmentBarLightsTheRightCells() {
+        val b = com.jondude.anzu.overlay.HoloBar
+        assertEquals(0, b.cells(0))
+        assertEquals(10, b.cells(100))
+        assertEquals(10, b.cells(250))
+        assertEquals(0, b.cells(-5))
+        assertEquals(5, b.cells(50))
+        assertEquals(9, b.cells(87))
+    }
 }

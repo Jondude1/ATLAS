@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.os.SystemClock
+import android.view.View
 import android.widget.LinearLayout
 
 /** One place for the holographic look, so the whole HUD can be re-tinted by editing three numbers. */
@@ -91,4 +92,28 @@ object HoloBubble {
 
     /** Roughly reading time: 2.5 s plus 55 ms a character, held between 3 and 9 seconds. */
     fun holdMs(text: String): Long = (2_500L + 55L * text.length).coerceIn(3_000L, 9_000L)
+}
+
+/** Pure helper for segmented gauges: how many of [total] cells light up for [percent]. */
+object HoloBar {
+    fun cells(percent: Int, total: Int = 10): Int = ((percent.coerceIn(0, 100) * total) + 50) / 100
+}
+
+/** A row of small cyan cells, filled left to right, like a reactor power readout. */
+class SegmentBar(ctx: Context, private val total: Int = 10) : View(ctx) {
+    private val d = resources.displayMetrics.density
+    private val on = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor(Holo.CYAN); style = Paint.Style.FILL }
+    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2200E5FF"); style = Paint.Style.FILL }
+    var percent = 0
+        set(v) { field = v; invalidate() }
+
+    override fun onDraw(c: Canvas) {
+        val gap = 2f * d
+        val cw = (width - gap * (total - 1)) / total
+        val lit = HoloBar.cells(percent, total)
+        for (i in 0 until total) {
+            val l = i * (cw + gap)
+            c.drawRect(l, 0f, l + cw, height.toFloat(), if (i < lit) on else off)
+        }
+    }
 }

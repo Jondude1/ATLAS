@@ -65,6 +65,9 @@ class OverlayService : Service() {
     private var glassesChip: TextView? = null
     private var sizeChip: TextView? = null
     private var bubble: View? = null
+    private var clockLine: TextView? = null
+    private var powerBar: SegmentBar? = null
+    private var powerText: TextView? = null
 
     private var edgeRight = true
     private var yFrac = 0.4f
@@ -472,6 +475,10 @@ class OverlayService : Service() {
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = stroke * 0.6f; color = cyan }
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = cyan }
         private val box = RectF()
+        private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = cyan; typeface = Typeface.MONOSPACE; textSize = pad * 2f; letterSpacing = 0.15f; isFakeBoldText = true
+        }
+        private val scan = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = stroke * 0.5f; color = cyan }
         private val pulse = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 900L
             repeatMode = ValueAnimator.REVERSE
@@ -497,6 +504,13 @@ class OverlayService : Service() {
             c.drawLine(r, t, r - len, t, paint); c.drawLine(r, t, r, t + len, paint)
             c.drawLine(l, b, l + len, b, paint); c.drawLine(l, b, l, b - len, paint)
             c.drawLine(r, b, r - len, b, paint); c.drawLine(r, b, r, b - len, paint)
+            // scan sweep inside the box, and the lock label
+            scan.alpha = 110
+            val sy = box.top + f * box.height()
+            c.drawLine(box.left + len * 0.3f, sy, box.right - len * 0.3f, sy, scan)
+            label.alpha = (255 * (1f - 0.3f * f)).toInt()
+            val ly = if (box.top > label.textSize * 1.6f) box.top - pad * 0.8f else box.bottom + label.textSize + pad * 0.8f
+            c.drawText("TARGET LOCK", box.left, ly, label)
             // leader line from the orb to the nearest point on the box
             val o = orbCenter() ?: return
             val ex = o.first.coerceIn(box.left, box.right)
@@ -581,6 +595,17 @@ class OverlayService : Service() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(18), dp(16), dp(18), dp(16))
         }
+        // Telemetry header: identity on the left, clock on the right.
+        val head = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        fun mono(sizeSp: Float, color: String) = TextView(ctx).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+            setTextColor(Color.parseColor(color))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            letterSpacing = 0.12f
+        }
+        head.addView(mono(9f, Holo.CYAN_DIM).apply { text = "A.T.L.A.S // ONLINE" }, LinearLayout.LayoutParams(0, -2, 1f))
+        clockLine = mono(9f, Holo.CYAN_DIM).also { head.addView(it, LinearLayout.LayoutParams(-2, -2)) }
+        col.addView(head, LinearLayout.LayoutParams(-1, -2))
         val big = ParticleOrbView(ctx, 130)
         hudOrb = big
         big.mode = orb?.mode ?: OrbMode.IDLE
@@ -639,6 +664,12 @@ class OverlayService : Service() {
         col.addView(row2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         col.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) armAutoCollapse(); false }
 
+        // Power readout: segmented bar for the phone battery.
+        val pwr = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        pwr.addView(mono(9f, Holo.CYAN_DIM).apply { text = "PWR" }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        powerBar = SegmentBar(ctx).also { pwr.addView(it, LinearLayout.LayoutParams(0, dp(8), 1f)) }
+        powerText = mono(9f, Holo.CYAN).also { pwr.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }
+        col.addView(pwr, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         val w = dp(264)
         val lp = overlayParams(w, WindowManager.LayoutParams.WRAP_CONTENT)
         val ol = orbLp
@@ -675,6 +706,7 @@ class OverlayService : Service() {
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
+        clockLine = null; powerBar = null; powerText = null
         if (save) {
             orb?.visibility = View.VISIBLE
             lastTouchAt = System.currentTimeMillis()
@@ -708,6 +740,12 @@ class OverlayService : Service() {
         musicChip?.text = if (Atlas.musicPlaying()) "♪ AUDIO ON" else "♪ AUDIO IDLE"
         glassesChip?.text = if (Glasses.connected.value) "◉ LINK UP" else "○ LINK DOWN"
         sizeChip?.text = "SIZE ${Holo.tag(OrbSize.label(sizeKey))}"
+        clockLine?.text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        try {
+            val pct = (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
+                .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (pct in 0..100) { powerBar?.percent = pct; powerText?.text = "$pct%" }
+        } catch (_: Throwable) {}
     }
 
     companion object {
