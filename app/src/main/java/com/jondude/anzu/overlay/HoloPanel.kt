@@ -205,3 +205,14 @@ object AlertLevel {
 
     fun holdMs(level: Int) = if (level >= CRIT) 20_000L else 12_000L
 }
+
+/** Ambient colour of the screen-edge glow: follows what Atlas is doing and, softly, how Jon sounds. Pure. */
+object Ambient {
+    fun hex(state: String, mood: com.jondude.anzu.assist.Mood.Kind): String = when {
+        mood == com.jondude.anzu.assist.Mood.Kind.STRESSED || mood == com.jondude.anzu.assist.Mood.Kind.LOW -> "#FFB86B"
+        mood == com.jondude.anzu.assist.Mood.Kind.UP -> "#7DFFD9"
+        state == "thinking" -> "#3D8BFF"
+        state == "speaking" -> "#9BF3FF"
+        else -> Holo.CYAN
+    }
+}

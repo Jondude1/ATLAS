@@ -77,6 +77,10 @@ class OverlayService : Service() {
     }
     private var edge: EdgeGlowView? = null
     private var alertLevel = AlertLevel.NORMAL
+    private var moodKind = com.jondude.anzu.assist.Mood.Kind.NONE
+    private var talkSince = 0L
+    private var lastLoud = 0L
+    private var lastBackchannel = 0L
     private val alertReset = Runnable { applyAlert(AlertLevel.NORMAL) }
     private var convo = false
     private var stateLine: TextView? = null
@@ -346,6 +350,7 @@ class OverlayService : Service() {
     }
 
     private fun wakeOpen() {
+        try { Earcons.play("ack") } catch (_: Throwable) {}
         convo = true
         if (!expanded) expand()
     }
@@ -504,10 +509,33 @@ class OverlayService : Service() {
 
     private var cardPinned = false
 
+    /** After a drag the card glides on with a little momentum, then settles; it bounces softly off the screen edges. */
+    private fun settleCard(v: View, lp: WindowManager.LayoutParams, vx: Float, vy: Float) {
+        val maxX = (screenW - v.width).coerceAtLeast(0)
+        val maxY = (screenH - navBarH() - v.height).coerceAtLeast(minY())
+        var x = lp.x.toFloat(); var y = lp.y.toFloat()
+        var ax = vx * 0.28f; var ay = vy * 0.28f
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 520
+            addUpdateListener {
+                x += ax * 0.016f; y += ay * 0.016f
+                ax *= 0.93f; ay *= 0.93f
+                if (x < 0f) { x = 0f; ax = -ax * 0.5f } else if (x > maxX) { x = maxX.toFloat(); ax = -ax * 0.5f }
+                if (y < minY()) { y = minY().toFloat(); ay = -ay * 0.5f } else if (y > maxY) { y = maxY.toFloat(); ay = -ay * 0.5f }
+                lp.x = x.toInt(); lp.y = y.toInt()
+                try { if (v.parent != null) wm.updateViewLayout(v, lp) } catch (_: Throwable) {}
+            }
+            start()
+        }
+    }
+
     /** Drag a card anywhere, flick it away, or tap to pin it so it stays until tapped again. */
     private fun makeCardInteractive(panel: View, lp: WindowManager.LayoutParams, title: TextView, label: String) {
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var downAt = 0L; var moved = false
+        var vel: android.view.VelocityTracker? = null
         panel.setOnTouchListener { v, e ->
+            if (vel == null) vel = android.view.VelocityTracker.obtain()
+            vel?.addMovement(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; downAt = System.currentTimeMillis(); moved = false
@@ -526,6 +554,7 @@ class OverlayService : Service() {
                     val quick = System.currentTimeMillis() - downAt < 260
                     if (moved && quick && Math.abs(dx) > dp(70)) {
                         haptic(HapticFeedbackConstants.CLOCK_TICK)
+                        try { Earcons.play("dismiss") } catch (_: Throwable) {}
                         if (card === v) card = null
                         cardPinned = false
                         v.animate().translationX(if (dx > 0) screenW.toFloat() else -screenW.toFloat()).alpha(0f).setDuration(200).withEndAction {
@@ -536,9 +565,12 @@ class OverlayService : Service() {
                         title.text = "◢ " + Holo.tag(label) + if (cardPinned) "  ◆ PINNED" else ""
                         haptic(HapticFeedbackConstants.CONTEXT_CLICK)
                         if (!cardPinned) main.postDelayed(hideCard, 4_000)
-                    } else if (!cardPinned) {
-                        main.postDelayed(hideCard, 6_000)
+                    } else {
+                        vel?.computeCurrentVelocity(1000)
+                        settleCard(v, lp, (vel?.xVelocity ?: 0f), (vel?.yVelocity ?: 0f))
+                        if (!cardPinned) main.postDelayed(hideCard, 6_000)
                     }
+                    vel?.recycle(); vel = null
                 }
             }
             true
@@ -546,11 +578,44 @@ class OverlayService : Service() {
     }
 
 
+    private val backCards = ArrayList<View>()
+
     private fun removeCard() {
         cardPinned = false
         main.removeCallbacks(hideCard)
         card?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
         card = null
+        backCards.forEach { try { wm.removeView(it) } catch (_: Throwable) {} }
+        backCards.clear()
+    }
+
+    /** A new card arrives: the one in front sinks back, dimmer and smaller, instead of vanishing. Two layers at most. */
+    private fun pushCardBack() {
+        val v = card ?: return
+        card = null
+        cardPinned = false
+        main.removeCallbacks(hideCard)
+        v.setOnTouchListener(null)
+        try {
+            val lp = v.layoutParams as WindowManager.LayoutParams
+            lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            wm.updateViewLayout(v, lp)
+        } catch (_: Throwable) {}
+        backCards.add(0, v)
+        while (backCards.size > 2) {
+            val old = backCards.removeAt(backCards.size - 1)
+            old.animate().alpha(0f).setDuration(180).withEndAction { try { wm.removeView(old) } catch (_: Throwable) {} }.start()
+        }
+        backCards.forEachIndexed { i, b ->
+            val depth = i + 1
+            b.animate().scaleX(1f - 0.07f * depth).scaleY(1f - 0.07f * depth).alpha(0.62f - 0.22f * i).translationY(-dp(12).toFloat() * depth)
+                .setDuration(260).start()
+        }
+        main.postDelayed({
+            backCards.filter { it === v }.forEach { b ->
+                b.animate().alpha(0f).setDuration(240).withEndAction { try { wm.removeView(b) } catch (_: Throwable) {} ; backCards.remove(b) }.start()
+            }
+        }, 6_000)
     }
 
     private fun fadeCard() {
@@ -566,8 +631,9 @@ class OverlayService : Service() {
     private fun showCard(title: String, lines: List<String>) {
         if (orb == null || lines.isEmpty()) return
         try {
-            removeCard()
+            pushCardBack()
             wake()
+            try { Earcons.play("data") } catch (_: Throwable) {}
             val ctx = this
             val panel = HoloPanel(ctx).apply {
                 orientation = LinearLayout.VERTICAL
@@ -628,7 +694,16 @@ class OverlayService : Service() {
             panel.rotationY = if (edgeRight) -8f else 8f
             panel.alpha = 0f
             panel.scaleY = 0.6f
-            panel.animate().alpha(1f).scaleY(1f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
+            panel.animate().alpha(1f).scaleY(1f).setDuration(380).setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
+            // Gentle float, like it's hanging in light.
+            android.animation.ObjectAnimator.ofFloat(panel, View.TRANSLATION_Y, 0f, -dp(3).toFloat()).apply {
+                duration = 2_400; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+                startDelay = 400; start()
+                panel.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) {}
+                    override fun onViewDetachedFromWindow(v: View) { cancel() }
+                })
+            }
             main.postDelayed(hideCard, 9_000)
         } catch (t: Throwable) {
             crumb(this, "card failed: ${t.javaClass.simpleName}")
@@ -897,7 +972,8 @@ class OverlayService : Service() {
                 orb?.mode = m
                 hudOrb?.mode = m
                 globe?.mode = m
-                if (s == "idle") hideEdge() else showEdge()
+                Speaker.pan = if (edgeRight) 0.55f else -0.55f
+                if (s == "idle") hideEdge() else { showEdge(); tintEdge() }
                 if (s != "idle") wake()
                 if (expanded && convo) { if (s == "idle") armAutoCollapse(10_000) else main.removeCallbacks(autoCollapse) }
                 refreshHud()
@@ -915,10 +991,29 @@ class OverlayService : Service() {
             }
         }
         scope.launch {
-            combine(Glasses.lastHeard, Glasses.connected) { a, b -> a to b }.collect { refreshHud() }
+            combine(Glasses.lastHeard, Glasses.connected) { a, b -> a to b }.collect { (heard, _) ->
+                moodKind = com.jondude.anzu.assist.Mood.detect(heard)
+                tintEdge()
+                refreshHud()
+            }
         }
         scope.launch {
-            Glasses.micLevel.collect { lv -> orb?.level = lv; hudOrb?.level = lv; globe?.level = lv; edge?.drive = lv }
+            Glasses.micLevel.collect { lv ->
+                orb?.level = lv; hudOrb?.level = lv; globe?.level = lv; edge?.drive = lv
+                // Backchannel: while Jon talks at length, it nods now and then, with a flash and a tick, never a sound.
+                if (state == "listening") {
+                    val now = System.currentTimeMillis()
+                    if (lv > 0.25f) {
+                        if (now - lastLoud > 700) talkSince = now
+                        lastLoud = now
+                        if (now - talkSince > 6_000 && now - lastBackchannel > 4_500) {
+                            lastBackchannel = now
+                            orb?.playAttention(); hudOrb?.playAttention(); globe?.playAttention()
+                            haptic(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -934,6 +1029,7 @@ class OverlayService : Service() {
     private fun expand() {
         if (expanded) return
         expanded = true
+        try { Earcons.play("open") } catch (_: Throwable) {}
         removeBubble()
         glide?.cancel()
         orb?.visibility = View.INVISIBLE
@@ -1115,6 +1211,7 @@ class OverlayService : Service() {
             setOnEditorActionListener { v, _, _ ->
                 val t = v.text.toString().trim()
                 if (t.isNotEmpty()) {
+                    try { Earcons.play("send") } catch (_: Throwable) {}
                     Atlas.typed(ctx, t)
                     v.text = ""
                 }
@@ -1210,6 +1307,7 @@ class OverlayService : Service() {
         main.removeCallbacks(autoCollapse)
         if (!expanded) return
         expanded = false
+        try { Earcons.play("close") } catch (_: Throwable) {}
         try { sensors?.unregisterListener(tilt) } catch (_: Throwable) {}
         sensors = null
         // Fold back to a slit, then remove; state is cleared immediately so a quick re-open is safe.
@@ -1306,6 +1404,8 @@ class OverlayService : Service() {
             if (wx.isNotBlank()) main.postDelayed({ showCard("Weather", HoloCards.lines(wx, 3)) }, 2_200)
             if (ag.isNotBlank()) main.postDelayed({ showCard("Today", HoloCards.lines(ag, 5)) }, 7_000)
             main.postDelayed({ if (state == "idle") hideEdge() }, 14_000)
+            val hello = try { com.jondude.anzu.assist.Brain.rapport() } catch (_: Throwable) { "" }
+            if (hello.isNotBlank()) main.postDelayed({ com.jondude.anzu.assist.Atlas.polite(hello, source = "rapport") }, 9_000)
         }.start()
     }
 
@@ -1325,6 +1425,12 @@ class OverlayService : Service() {
             )
             edge = v
         } catch (_: Throwable) {}
+    }
+
+    /** The rim takes its colour from what's happening: cyan listening, deep blue thinking, bright ice speaking, warm when Jon sounds stretched. */
+    private fun tintEdge() {
+        if (alertLevel != AlertLevel.NORMAL) return
+        edge?.colorHex = Ambient.hex(state, moodKind)
     }
 
     private fun hideEdge() {

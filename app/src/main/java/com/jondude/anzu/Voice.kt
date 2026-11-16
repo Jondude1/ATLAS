@@ -42,6 +42,10 @@ object Speaker : TextToSpeech.OnInitListener {
     @Volatile
     var lastCloudError = ""
 
+    /** -1 (left) .. 1 (right): the voice leans toward the side of the screen the hologram is on. */
+    @Volatile
+    var pan = 0f
+
     private val attrs: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -159,7 +163,8 @@ object Speaker : TextToSpeech.OnInitListener {
             mp.setOnCompletionListener { done.complete(Unit) }
             mp.setOnErrorListener { _, _, _ -> done.complete(Unit); true }
             withContext(Dispatchers.IO) { mp.prepare() }
-            mp.setVolume(volume.coerceAtMost(1f), volume.coerceAtMost(1f))
+            val vv = volume.coerceAtMost(1f)
+            mp.setVolume(if (pan > 0f) vv * (1f - pan * 0.6f) else vv, if (pan < 0f) vv * (1f + pan * 0.6f) else vv)
             val boost = if (volume > 1f) Loud.enhancer(mp.audioSessionId, volume) else null
             // The loudness boost and the stream lift don't stack: lift the stream only when no enhancer is on this line.
             val restore = if (boost == null) Loud.liftStream(am) else ({})
@@ -212,6 +217,7 @@ object Speaker : TextToSpeech.OnInitListener {
             t.setSpeechRate(Prefs.speechRate / 100f)
             val params = Bundle()
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceAtMost(1f))
+            params.putFloat(TextToSpeech.Engine.KEY_PARAM_PAN, pan.coerceIn(-1f, 1f))
             // Above 100%: route the speech through its own audio session with a loudness boost.
             val session = if (volume > 1f) am.generateAudioSessionId() else 0
             val boost = if (session > 0) Loud.enhancer(session, volume) else null
@@ -595,6 +601,12 @@ object Earcons {
         "critical" -> listOf(Triple(1318.5, 110, 40), Triple(987.8, 110, 40), Triple(1318.5, 110, 40), Triple(987.8, 160, 0)) // two-tone alarm
         "boot" -> listOf(Triple(440.0, 70, 10), Triple(659.3, 70, 10), Triple(880.0, 70, 10), Triple(1318.5, 180, 0)) // systems up
         "lock" -> listOf(Triple(1760.0, 45, 25), Triple(2349.3, 80, 0))    // target acquired
+        "ack" -> listOf(Triple(1318.5, 40, 15), Triple(1760.0, 60, 0))     // heard you
+        "open" -> listOf(Triple(523.3, 50, 10), Triple(784.0, 50, 10), Triple(1046.5, 90, 0)) // HUD unfolds
+        "close" -> listOf(Triple(1046.5, 50, 10), Triple(784.0, 50, 10), Triple(523.3, 90, 0)) // HUD folds
+        "dismiss" -> listOf(Triple(1200.0, 35, 0), Triple(700.0, 70, 0))   // card flicked away
+        "data" -> listOf(Triple(1568.0, 30, 20), Triple(1568.0, 30, 0))     // information arrives
+        "send" -> listOf(Triple(880.0, 40, 10), Triple(1318.5, 40, 10), Triple(1760.0, 70, 0)) // message away
         "scan" -> (0 until 8).map { Triple(500.0 + it * 220.0, 38, 0) }   // rising sweep
         else -> listOf(Triple(880.0, 90, 20), Triple(659.3, 140, 0))       // done: A5 → E5
     }

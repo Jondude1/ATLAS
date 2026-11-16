@@ -1439,3 +1439,39 @@ class AgencyTest {
         org.junit.Assert.assertNull(com.jondude.anzu.assist.Habits.candidate(twice, now))
     }
 }
+
+class PresenceVisualsTest {
+    @org.junit.Test
+    fun shapesHaveExpectedStructure() {
+        val ws = com.jondude.anzu.overlay.WireShapes
+        org.junit.Assert.assertEquals(12, ws.lines(com.jondude.anzu.overlay.HoloShape.CUBE).size)
+        org.junit.Assert.assertEquals(13, ws.lines(com.jondude.anzu.overlay.HoloShape.SPHERE).size)
+        org.junit.Assert.assertTrue(ws.lines(com.jondude.anzu.overlay.HoloShape.TORUS).all { it.size > 2 })
+        org.junit.Assert.assertEquals(com.jondude.anzu.overlay.HoloShape.SPHERE, ws.next(com.jondude.anzu.overlay.HoloShape.TORUS))
+    }
+
+    @org.junit.Test
+    fun ambientColourFollowsStateAndMood() {
+        val a = com.jondude.anzu.overlay.Ambient
+        val k = com.jondude.anzu.assist.Mood.Kind.NONE
+        org.junit.Assert.assertEquals(com.jondude.anzu.overlay.Holo.CYAN, a.hex("listening", k))
+        org.junit.Assert.assertNotEquals(a.hex("thinking", k), a.hex("speaking", k))
+        org.junit.Assert.assertEquals("#FFB86B", a.hex("listening", com.jondude.anzu.assist.Mood.Kind.STRESSED))
+    }
+
+    @org.junit.Test
+    fun styleLineWaitsForEnoughTurns() {
+        val ad = com.jondude.anzu.assist.Adapt
+        org.junit.Assert.assertEquals("", ad.style(5, 20, 5))
+        org.junit.Assert.assertTrue(ad.style(40, 120, 30).contains("short commands"))
+        org.junit.Assert.assertTrue(ad.style(40, 800, 0).contains("depth"))
+    }
+
+    @org.junit.Test
+    fun newEarconsExist() {
+        for (k in listOf("ack", "open", "close", "dismiss", "data", "send")) {
+            org.junit.Assert.assertTrue(k, com.jondude.anzu.Earcons.notes(k).isNotEmpty())
+            org.junit.Assert.assertTrue(k, com.jondude.anzu.Earcons.notes(k) != com.jondude.anzu.Earcons.notes("done"))
+        }
+    }
+}

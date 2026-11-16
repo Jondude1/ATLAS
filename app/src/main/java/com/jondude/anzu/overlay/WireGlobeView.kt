@@ -24,6 +24,60 @@ object GlobeMath {
     }
 }
 
+/** Wireframe shapes as lists of 3D polylines, so they can be spun and projected the same way. Pure. */
+enum class HoloShape { SPHERE, CUBE, TORUS }
+
+object WireShapes {
+    fun lines(shape: HoloShape, seg: Int = 40): List<List<FloatArray>> = when (shape) {
+        HoloShape.SPHERE -> sphere(seg)
+        HoloShape.CUBE -> cube()
+        HoloShape.TORUS -> torus(seg)
+    }
+
+    fun next(s: HoloShape) = HoloShape.values()[(s.ordinal + 1) % HoloShape.values().size]
+
+    private fun sphere(seg: Int): List<List<FloatArray>> {
+        val out = ArrayList<List<FloatArray>>()
+        val pi = PI.toFloat()
+        for (m in 0 until 8) {
+            val lon = m * pi / 8f
+            out += (0..seg).map { i -> val phi = i * 2f * pi / seg; floatArrayOf(cos(phi) * cos(lon), sin(phi), cos(phi) * sin(lon)) }
+        }
+        for (lat in -2..2) {
+            val la = lat * pi / 6f
+            out += (0..seg).map { i -> val th = i * 2f * pi / seg; floatArrayOf(cos(la) * cos(th), sin(la), cos(la) * sin(th)) }
+        }
+        return out
+    }
+
+    private fun cube(): List<List<FloatArray>> {
+        val k = 0.72f
+        val v = { x: Int, y: Int, z: Int -> floatArrayOf(x * k, y * k, z * k) }
+        val out = ArrayList<List<FloatArray>>()
+        for (a in listOf(-1, 1)) for (b in listOf(-1, 1)) {
+            out += listOf(v(-1, a, b), v(1, a, b))
+            out += listOf(v(a, -1, b), v(a, 1, b))
+            out += listOf(v(a, b, -1), v(a, b, 1))
+        }
+        return out
+    }
+
+    private fun torus(seg: Int): List<List<FloatArray>> {
+        val out = ArrayList<List<FloatArray>>()
+        val pi = PI.toFloat()
+        val big = 0.62f; val small = 0.28f
+        for (m in 0 until 12) {
+            val u = m * 2f * pi / 12f
+            out += (0..seg).map { i -> val v = i * 2f * pi / seg; floatArrayOf((big + small * cos(v)) * cos(u), small * sin(v), (big + small * cos(v)) * sin(u)) }
+        }
+        for (n in 0 until 5) {
+            val v = n * 2f * pi / 5f
+            out += (0..seg).map { i -> val u = i * 2f * pi / seg; floatArrayOf((big + small * cos(v)) * cos(u), small * sin(v), (big + small * cos(v)) * sin(u)) }
+        }
+        return out
+    }
+}
+
 /**
  * A rotating wireframe globe with real 3D perspective: meridians and parallels rotate around a tilted
  * axis, front lines bright and back lines faint. Spins faster while thinking and swells with your voice.
@@ -40,6 +94,15 @@ class WireGlobeView(ctx: Context) : View(ctx) {
     private var speed = 0.3f
     private var swell = 0f
     private var time = 0f
+    var shape = HoloShape.SPHERE
+    private var userTilt = 0f
+    private var spinVel = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var dragged = false
+    private var polys: List<List<FloatArray>> = WireShapes.lines(HoloShape.SPHERE)
 
     fun setAlert(level: Int) { tint = Color.parseColor(AlertLevel.colorHex(level)) }
 
@@ -71,7 +134,8 @@ class WireGlobeView(ctx: Context) : View(ctx) {
             else -> 0.3f
         }
         speed += (target - speed) * min(1f, dt * 3f)
-        spin += speed * dt
+        spin += (speed + spinVel) * dt
+        spinVel *= (1f - min(1f, dt * 2.5f))
         swell += (((if (mode == OrbMode.LISTENING) level else 0f)) - swell) * min(1f, dt * 10f)
 
         val w = width.toFloat()
@@ -88,30 +152,43 @@ class WireGlobeView(ctx: Context) : View(ctx) {
         paint.color = a(0.35f)
         c.drawCircle(cx, cy, r * 1.05f, paint)
 
-        val seg = 40
-        // meridians: great circles through the poles
-        for (m in 0 until 8) {
-            val lon = m * PI.toFloat() / 8f
+        for ((idx, poly) in polys.withIndex()) {
             var prev: Triple<Float, Float, Float>? = null
-            for (i in 0..seg) {
-                val phi = i * 2f * PI.toFloat() / seg
-                val p = GlobeMath.project(cos(phi) * cos(lon), sin(phi), cos(phi) * sin(lon), spin, tilt)
-                prev?.let { q -> line(c, cx, cy, r, q, p) }
-                prev = p
-            }
-        }
-        // parallels
-        for (lat in -2..2) {
-            val la = lat * PI.toFloat() / 6f
-            var prev: Triple<Float, Float, Float>? = null
-            for (i in 0..seg) {
-                val th = i * 2f * PI.toFloat() / seg
-                val p = GlobeMath.project(cos(la) * cos(th), sin(la), cos(la) * sin(th), spin, tilt)
-                prev?.let { q -> line(c, cx, cy, r, q, p, if (lat == 0) 1.6f else 1f) }
+            for (pt in poly) {
+                val p = GlobeMath.project(pt[0], pt[1], pt[2], spin, tilt + userTilt)
+                prev?.let { q -> line(c, cx, cy, r, q, p, if (shape == HoloShape.SPHERE && idx == 8 + 2) 1.6f else 1f) }
                 prev = p
             }
         }
     }
+
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                downX = e.x; downY = e.y; lastX = e.x; lastY = e.y; dragged = false
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = e.x - lastX; val dy = e.y - lastY
+                if (Math.abs(e.x - downX) > 12f || Math.abs(e.y - downY) > 12f) dragged = true
+                spin += dx * 0.012f
+                userTilt = (userTilt + dy * 0.01f).coerceIn(-1.2f, 1.2f)
+                spinVel = dx * 0.012f * 30f
+                lastX = e.x; lastY = e.y
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                if (!dragged) {
+                    shape = WireShapes.next(shape)
+                    polys = WireShapes.lines(shape)
+                    swell = 1f
+                    performClick()
+                }
+            }
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean { super.performClick(); return true }
 
     private fun line(c: Canvas, cx: Float, cy: Float, r: Float, p: Triple<Float, Float, Float>, q: Triple<Float, Float, Float>, boost: Float = 1f) {
         val depth = (p.third + q.third) / 2f

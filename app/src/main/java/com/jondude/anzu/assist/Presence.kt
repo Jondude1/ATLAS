@@ -208,3 +208,34 @@ class SpeechPipe(private val volume: Float, private val scope: CoroutineScope, p
         job?.join()
     }
 }
+
+/** Slowly learns how Jon talks (short bursts or full sentences) so replies fit him. Counts only; nothing he says is kept here. */
+object Adapt {
+    private const val KEY_N = "adaptN"; private const val KEY_W = "adaptW"; private const val KEY_T = "adaptT"
+
+    fun note(text: String) {
+        val words = text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+        if (words == 0) return
+        val sp = com.jondude.anzu.Prefs.sp
+        sp.edit().putInt(KEY_N, sp.getInt(KEY_N, 0) + 1).putInt(KEY_W, sp.getInt(KEY_W, 0) + minOf(words, 60))
+            .putInt(KEY_T, sp.getInt(KEY_T, 0) + if (words <= 4) 1 else 0).apply()
+    }
+
+    /** One line for the system prompt, or empty until there is enough to go on. Pure. */
+    fun style(n: Int, totalWords: Int, terse: Int): String {
+        if (n < 20) return ""
+        val avg = totalWords.toFloat() / n
+        val terseShare = terse.toFloat() / n
+        return when {
+            terseShare > 0.5f -> "\nHow Jon talks: mostly short commands. Keep replies tight and skip pleasantries."
+            avg <= 7f -> "\nHow Jon talks: brief. Keep replies short."
+            avg >= 16f -> "\nHow Jon talks: in full sentences, and he likes some depth. You can give more room."
+            else -> ""
+        }
+    }
+
+    fun line(): String {
+        val sp = com.jondude.anzu.Prefs.sp
+        return style(sp.getInt(KEY_N, 0), sp.getInt(KEY_W, 0), sp.getInt(KEY_T, 0))
+    }
+}

@@ -578,7 +578,7 @@ Everything you write is spoken aloud. Announcements and lines you start on your 
 Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. standing_order saves 'whenever X, do Y'. set_authority changes how freely you may use a tool. protocol switches modes. prep_day readies a day. sweep is the 'what am I missing' scan. keep_moment and learn_shorthand keep jokes, decisions and his shorthand. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
-            if (Prefs.jarvisManner) append(Manner.prompt(Prefs.honorific))
+            if (Prefs.jarvisManner) append(Manner.prompt(Prefs.honorific)).append(Adapt.line())
             Hub.brief()?.let { b ->
                 if (b.text.isNotBlank()) append("\nThe brief from your hub on Obelisk (digested from everything Jon's apps and systems report): ").append(b.text).append('\n')
                 if (b.urgent.isNotEmpty()) append("Urgent and not yet told to Jon: ").append(b.urgent.joinToString("; ") { "${it.app}: ${it.title}" }).append('\n')
@@ -1439,6 +1439,19 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         return sb.toString().trim()
     }
 
+    /** One warm, dry line to open the morning with: a question or an observation, not a data dump. Blocking; empty if unavailable. */
+    fun rapport(): String {
+        if (!hasKey()) return ""
+        return try {
+            val last = Store.recentExchanges().takeLast(2).joinToString("\n") { it.first }
+            val mem = Store.memory.value.takeLast(12).joinToString("; ")
+            ask(
+                "You are ${Prefs.name}, Jon's AI. Open his morning with ONE short spoken line, at most 20 words: warm, dry, and personal. A light question or a small observation, not a briefing and not the weather. Use only what is in this background, and say nothing you can't back up. No markdown.",
+                "Time: ${When.stamp(System.currentTimeMillis())}. Things he said recently: $last. Background notes: $mem", 80
+            ).trim()
+        } catch (e: Exception) { "" }
+    }
+
     /** One-shot call with no tools or history, for housekeeping. Blocking. */
     private fun ask(system: String, prompt: String, maxTokens: Int): String =
         textOf(call(system, JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), null, maxTokens))
@@ -1543,6 +1556,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             Mcp.refresh()
         } catch (_: Exception) {
         }
+        Adapt.note(said)
         val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText) + SelfRepair.hint(userText) +
             Mood.hint(userText) + Shorthand.hint(userText, Store.memory.value)
         var brainFailure: String? = null
