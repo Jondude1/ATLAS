@@ -1313,3 +1313,17 @@ class ParseBoxesTest {
         org.junit.Assert.assertTrue(com.jondude.anzu.assist.Brain.parseBoxes("no json here").isEmpty())
     }
 }
+
+class MotesTest {
+    @org.junit.Test
+    fun motesStayInsideTheUnitSquareAndRise() {
+        val m = com.jondude.anzu.overlay.Motes(14)
+        val y0 = m.y[0]
+        for (k in 0 until 600) m.step(0.016f, k * 0.016f)
+        for (i in 0 until 14) {
+            org.junit.Assert.assertTrue(m.x[i] in 0f..1f)
+            org.junit.Assert.assertTrue(m.y[i] in 0f..1f)
+        }
+        org.junit.Assert.assertNotEquals(y0, m.y[0])
+    }
+}

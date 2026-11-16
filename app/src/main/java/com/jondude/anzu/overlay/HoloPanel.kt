@@ -21,6 +21,36 @@ object Holo {
     fun tag(s: String) = s.trim().uppercase()
 }
 
+/** Pure drifting-dust model: motes rise slowly through the light and wrap round. Kept apart so it can be tested. */
+class Motes(private val n: Int = 14, seed: Long = 7L) {
+    val x = FloatArray(n)
+    val y = FloatArray(n)
+    val speed = FloatArray(n)
+    val phase = FloatArray(n)
+    val size = FloatArray(n)
+
+    init {
+        val r = java.util.Random(seed)
+        for (i in 0 until n) {
+            x[i] = r.nextFloat(); y[i] = r.nextFloat()
+            speed[i] = 0.02f + 0.05f * r.nextFloat()
+            phase[i] = r.nextFloat() * 6.28f
+            size[i] = 0.6f + 1.4f * r.nextFloat()
+        }
+    }
+
+    /** Advance by [dt] seconds; positions stay in 0..1. */
+    fun step(dt: Float, t: Float) {
+        for (i in 0 until n) {
+            y[i] -= speed[i] * dt
+            if (y[i] < 0f) { y[i] += 1f }
+            x[i] = (x[i] + 0.004f * kotlin.math.sin(t * 0.8f + phase[i]) * dt * 10f).let { if (it < 0f) it + 1f else if (it > 1f) it - 1f else it }
+        }
+    }
+
+    fun alpha(i: Int, t: Float): Float = 0.25f + 0.55f * (0.5f + 0.5f * kotlin.math.sin(t * 1.6f + phase[i]))
+}
+
 /**
  * A Stark-style hologram frame: dark teal glass with cut corners, a faint grid, bright corner
  * brackets, and a scan line that sweeps down the panel. Children are laid out as a normal column.
@@ -37,6 +67,9 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
     private val frame = Path()
     private var running = false
     private var bootAt = 0L
+    private val motes = Motes()
+    private val moteP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private var lastMote = 0L
 
     init {
         setWillNotDraw(false)
@@ -83,6 +116,17 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
             c.drawLine(w - cut - b, m, w - cut, m, bracket); c.drawLine(w - m, cut, w - m, cut + b, bracket)
             c.drawLine(cut, h - m, cut + b, h - m, bracket); c.drawLine(m, h - cut - b, m, h - cut, bracket)
             c.drawLine(w - cut - b, h - m, w - cut, h - m, bracket); c.drawLine(w - m, h - cut - b, w - m, h - cut, bracket)
+        }
+        if (w > 0f && h > 0f) {
+            val nowMs = SystemClock.uptimeMillis()
+            val dt = if (lastMote == 0L) 0.016f else ((nowMs - lastMote) / 1000f).coerceAtMost(0.1f)
+            lastMote = nowMs
+            val tt = nowMs / 1000f
+            motes.step(dt, tt)
+            for (i in motes.x.indices) {
+                moteP.color = Color.argb((motes.alpha(i, tt) * 150).toInt(), 160, 245, 255)
+                c.drawCircle(motes.x[i] * w, motes.y[i] * h, motes.size[i] * d, moteP)
+            }
         }
         super.dispatchDraw(c)
         if (running) postInvalidateOnAnimation()

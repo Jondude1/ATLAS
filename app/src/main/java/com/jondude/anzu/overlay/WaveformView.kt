@@ -61,6 +61,7 @@ class WaveformView(ctx: Context, private val bars: Int = 9) : View(ctx) {
     private var lastFrame = 0L
     private var time = 0f
     private var attnStart = -1L
+    private var cutStart = -1L
     private var beam: Shader? = null
     private var beamKey = 0
 
@@ -77,6 +78,13 @@ class WaveformView(ctx: Context, private val bars: Int = 9) : View(ctx) {
     fun playBounce() = playAttention()
 
     fun playShake() = playAttention()
+
+    /** Speech was interrupted: the bars snap flat and the display flashes red for a beat. */
+    fun playCut() {
+        cutStart = SystemClock.uptimeMillis()
+        kick()
+        invalidate()
+    }
 
     private fun kick() {
         if (isAttachedToWindow && !running) {
@@ -121,7 +129,22 @@ class WaveformView(ctx: Context, private val bars: Int = 9) : View(ctx) {
             if (e >= 1f) attnStart = -1L else attn = 1f - e
         }
         val k = min(1f, dt * 14f)
-        for (i in 0 until bars) heights[i] += (WaveMath.target(mode, i, bars, time, level, attn) - heights[i]) * k
+        var cut = 0f
+        if (cutStart >= 0) {
+            val e = (now - cutStart) / 450f
+            if (e >= 1f) cutStart = -1L else cut = 1f - e
+        }
+        val cutTint = Color.parseColor(AlertLevel.colorHex(AlertLevel.CRIT))
+        for (i in 0 until bars) {
+            val tgt = WaveMath.target(mode, i, bars, time, level, attn)
+            heights[i] += ((if (cut > 0f) 0.05f else tgt) - heights[i]) * (if (cut > 0f) 1f else k)
+        }
+        val saved = tint
+        if (cut > 0f) tint = cutTint
+        render(canvas)
+        tint = saved
+        postInvalidateOnAnimation()
+        return
         render(canvas)
         postInvalidateOnAnimation()
     }

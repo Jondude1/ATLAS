@@ -258,7 +258,7 @@ class OverlayService : Service() {
         private val longPress = Runnable {
             if (!moved && !dragging) {
                 longFired = true
-                expand()
+                peek()
             }
         }
 
@@ -291,6 +291,7 @@ class OverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     main.removeCallbacks(longPress)
+                    if (longFired) endPeek()
                     val wasDrag = moved
                     dragging = false
                     if (wasDrag) snapToEdge()
@@ -299,6 +300,7 @@ class OverlayService : Service() {
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     main.removeCallbacks(longPress)
+                    if (longFired) endPeek()
                     dragging = false
                     if (moved) snapToEdge()
                 }
@@ -340,7 +342,15 @@ class OverlayService : Service() {
         if (!expanded) expand()
     }
 
+    /** Speaking over ATLAS: silence him at once, flash the waveform, and go straight to listening. */
+    private fun interrupt() {
+        try { Speaker.stop() } catch (_: Throwable) {}
+        orb?.playCut(); hudOrb?.playCut()
+        haptic(HapticFeedbackConstants.REJECT)
+    }
+
     private fun talk() {
+        if (state == "speaking") interrupt()
         if (!Glasses.micArmed.value) {
             armMic("talk")
             // The service attaches the mic type asynchronously; give it a moment before choosing a path.
@@ -1217,6 +1227,34 @@ class OverlayService : Service() {
             try { val w = com.jondude.anzu.assist.Weather.brief(); put("WEATHER", if (w.isBlank()) "n/a" else short(w, 18)) } catch (_: Throwable) { put("WEATHER", "—") }
             try { val a = com.jondude.anzu.assist.Phone.agenda(ctx, 0); put("NEXT", if (a.isBlank()) "clear" else short(a, 18)) } catch (_: Throwable) { put("NEXT", "—") }
         }.start()
+    }
+
+    // ---------------------------------------------------------------- hold to peek
+    private var peeking = false
+
+    /** Holding the waveform shows a quick glance card that vanishes on release; tap still opens everything. */
+    private fun peek() {
+        if (expanded || orb == null) return
+        peeking = true
+        haptic(HapticFeedbackConstants.LONG_PRESS)
+        try { Earcons.play("lock") } catch (_: Throwable) {}
+        val bat = try { (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) } catch (_: Throwable) { -1 }
+        val time = java.text.SimpleDateFormat("HH:mm  EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date())
+        val base = listOf(time, "PWR ${if (bat >= 0) "$bat%" else "—"}  //  ATLAS ${state.uppercase()}")
+        showCard("Glance", base)
+        val ctx = this
+        Thread {
+            val ag = try { com.jondude.anzu.assist.Phone.agenda(ctx, 0) } catch (_: Throwable) { "" }
+            val wx = try { com.jondude.anzu.assist.Weather.brief() } catch (_: Throwable) { "" }
+            val extra = HoloCards.lines(wx, 1) + HoloCards.lines(ag, 2)
+            if (extra.isNotEmpty()) main.post { if (peeking) showCard("Glance", base + extra) }
+        }.start()
+    }
+
+    private fun endPeek() {
+        if (!peeking) return
+        peeking = false
+        if (!cardPinned) fadeCard()
     }
 
     // ---------------------------------------------------------------- morning briefing
