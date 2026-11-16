@@ -1190,4 +1190,16 @@ class AtlasTest {
         val s = com.jondude.anzu.assist.BrainHealth.describe(now = 1_000_000L + 5 * 60_000)
         assertTrue(s, s.contains("5 minutes ago") && s.contains("HTTP 529 overloaded") && s.contains("local model"))
     }
+
+    @Test
+    fun orbSizeCyclesAndSurvivesGarbage() {
+        val o = com.jondude.anzu.overlay.OrbSize
+        assertEquals("small", o.next("default"))
+        assertEquals("mini", o.next("small"))
+        assertEquals("default", o.next("mini"))
+        assertEquals("default", o.normalize("huge"))
+        assertEquals("small", o.next(null))
+        assertEquals(84, o.dp("bogus"))
+        assertTrue(o.dp("mini") < o.dp("small") && o.dp("small") < o.dp("default"))
+    }
 }

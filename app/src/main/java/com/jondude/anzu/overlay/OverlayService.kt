@@ -62,6 +62,7 @@ class OverlayService : Service() {
     private var heardLine: TextView? = null
     private var musicChip: TextView? = null
     private var glassesChip: TextView? = null
+    private var sizeChip: TextView? = null
 
     private var edgeRight = true
     private var yFrac = 0.4f
@@ -74,7 +75,8 @@ class OverlayService : Service() {
     private var highlight: View? = null
     private var pointing = false
 
-    private val orbPx get() = dp(ORB_DP)
+    private var sizeKey = SIZE_DEFAULT
+    private val orbPx get() = dp(OrbSize.dp(sizeKey))
     private val screenW get() = resources.displayMetrics.widthPixels
     private val screenH get() = resources.displayMetrics.heightPixels
     private fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
@@ -117,6 +119,7 @@ class OverlayService : Service() {
             val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
             edgeRight = sp.getBoolean(KEY_RIGHT, true)
             yFrac = sp.getFloat(KEY_Y, 0.4f).coerceIn(0f, 1f)
+            sizeKey = OrbSize.normalize(sp.getString(KEY_SIZE, SIZE_DEFAULT))
             addOrb()
             crumb(this, "addOrb ok")
             observe()
@@ -516,8 +519,13 @@ class OverlayService : Service() {
             setTextColor(Color.parseColor("#FF5C00"))
             (background as GradientDrawable).setStroke(dp(1), Color.parseColor("#FF5C00"))
         }
-        row.addView(hide)
         col.addView(row, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
+        // Second row: size and hide, so four chips never overflow the 240dp panel.
+        val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        sizeChip = chip().also { row2.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+        sizeChip?.setOnClickListener { cycleSize() }
+        row2.addView(hide)
+        col.addView(row2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         col.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) armAutoCollapse(); false }
 
         val w = dp(240)
@@ -548,7 +556,7 @@ class OverlayService : Service() {
         panel?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
-        stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null
+        stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
         if (save) {
             orb?.visibility = View.VISIBLE
             lastTouchAt = System.currentTimeMillis()
@@ -556,6 +564,16 @@ class OverlayService : Service() {
             updateOrb()
             scheduleRoam()
         }
+    }
+
+    /** Default -> Small -> Mini -> Default. The orb resizes in place and keeps its edge and height. */
+    private fun cycleSize() {
+        sizeKey = OrbSize.next(sizeKey)
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_SIZE, sizeKey).apply()
+        orbLp?.let { it.width = orbPx; it.height = orbPx; it.x = xFor(edgeRight); it.y = yFor(yFrac) }
+        updateOrb()
+        refreshHud()
+        armAutoCollapse()
     }
 
     private fun refreshHud() {
@@ -570,6 +588,7 @@ class OverlayService : Service() {
         heardLine?.text = Glasses.lastHeard.value.takeIf { it.isNotBlank() }?.let { "You: $it" } ?: ""
         musicChip?.text = if (Atlas.musicPlaying()) "♪ Music playing" else "♪ Music idle"
         glassesChip?.text = if (Glasses.connected.value) "Glasses connected" else "Glasses off"
+        sizeChip?.text = "Size: ${OrbSize.label(sizeKey)}"
     }
 
     companion object {
@@ -581,11 +600,12 @@ class OverlayService : Service() {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_RIGHT = "edgeRight"
         private const val KEY_Y = "yFrac"
+        private const val KEY_SIZE = "orbSize"
+        private const val SIZE_DEFAULT = "default"
         private const val KEY_ERROR = "lastError"
         private const val KEY_CRUMBS = "crumbs"
         private const val MAX_TRACE = 3000
         private const val MAX_CRUMBS = 1200
-        private const val ORB_DP = 84
         private const val HUD_ORB_DP = 140
         private const val LONG_PRESS_MS = 500L
         private const val TAP_MS = 300L
