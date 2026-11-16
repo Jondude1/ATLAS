@@ -37,6 +37,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import com.jondude.anzu.Earcons
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.GlassesService
 import com.jondude.anzu.Prefs
