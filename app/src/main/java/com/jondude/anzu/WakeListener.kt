@@ -230,6 +230,7 @@ object WakeListener {
         Prefs.lastWakeSource = source
         state.value = "woke · $source"
         if (System.currentTimeMillis() < Prefs.quietUntil) return
+        com.jondude.anzu.overlay.OverlayService.onWake()
         val done = java.util.concurrent.CountDownLatch(1)
         Atlas.scope.launch {
             try {

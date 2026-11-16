@@ -1250,4 +1250,36 @@ class AtlasTest {
             assertTrue(k, com.jondude.anzu.Earcons.render(k).isNotEmpty())
         }
     }
+
+    @Test
+    fun waveformShapesFollowTheMode() {
+        val m = com.jondude.anzu.overlay.WaveMath
+        val modes = listOf(
+            com.jondude.anzu.overlay.OrbMode.IDLE, com.jondude.anzu.overlay.OrbMode.LISTENING,
+            com.jondude.anzu.overlay.OrbMode.THINKING, com.jondude.anzu.overlay.OrbMode.SPEAKING,
+            com.jondude.anzu.overlay.OrbMode.ATTENTION
+        )
+        for (mode in modes) for (i in 0 until 9) for (step in 0..20) {
+            val v = m.target(mode, i, 9, step * 0.37f, 0.6f)
+            assertTrue("$mode $i $v", v in 0.04f..1f)
+        }
+        // resting is calm; a loud voice lifts the middle bars well above it
+        val calm = m.target(com.jondude.anzu.overlay.OrbMode.IDLE, 4, 9, 1f, 0f)
+        assertTrue(calm < 0.3f)
+        var loud = 0f
+        for (step in 0..40) loud = maxOf(loud, m.target(com.jondude.anzu.overlay.OrbMode.LISTENING, 4, 9, step * 0.11f, 1f))
+        assertTrue(loud > 0.7f)
+        // attention flash raises every bar
+        assertTrue(m.target(com.jondude.anzu.overlay.OrbMode.IDLE, 0, 9, 1f, 0f, attn = 1f) > 0.5f)
+    }
+
+    @Test
+    fun alertLevelsFromAnnouncements() {
+        val a = com.jondude.anzu.overlay.AlertLevel
+        assertEquals(a.CRIT, a.classify("house", "Smoke detected in the basement"))
+        assertEquals(a.WARN, a.classify("house", "The garage door has been left open for 20 minutes"))
+        assertEquals(a.NORMAL, a.classify("", "Timer's up: pasta"))
+        assertEquals("#FF3B30", a.colorHex(a.CRIT))
+        assertTrue(a.holdMs(a.CRIT) > a.holdMs(a.WARN))
+    }
 }

@@ -59,11 +59,13 @@ class OverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private var orb: ParticleOrbView? = null
+    private var orb: WaveformView? = null
     private var orbLp: WindowManager.LayoutParams? = null
     private var panel: View? = null
     private var catcher: View? = null
-    private var hudOrb: ParticleOrbView? = null
+    private var hudOrb: WaveformView? = null
+    private var hudCol: View? = null
+    private var convo = false
     private var stateLine: TextView? = null
     private var saidLine: TextView? = null
     private var heardLine: TextView? = null
@@ -213,7 +215,7 @@ class OverlayService : Service() {
     ).apply { gravity = Gravity.TOP or Gravity.START }
 
     private fun addOrb() {
-        val v = ParticleOrbView(this)
+        val v = WaveformView(this)
         val lp = overlayParams(orbPx, orbPx).apply {
             x = xFor(edgeRight)
             y = yFor(yFrac)
@@ -283,7 +285,7 @@ class OverlayService : Service() {
                     val wasDrag = moved
                     dragging = false
                     if (wasDrag) snapToEdge()
-                    else if (!longFired && e.eventTime - downAt < TAP_MS) talk()
+                    else if (!longFired && e.eventTime - downAt < TAP_MS) openConvo()
                     scheduleRoam()
                 }
                 MotionEvent.ACTION_CANCEL -> {
@@ -314,6 +316,19 @@ class OverlayService : Service() {
         } catch (t: Throwable) {
             crumb(this, "armMic failed: ${t.javaClass.simpleName}")
         }
+    }
+
+    /** Touching the waveform (or saying "Atlas") opens the full overlay; touch also starts listening. */
+    private fun openConvo() {
+        haptic(HapticFeedbackConstants.VIRTUAL_KEY)
+        convo = true
+        expand()
+        talk()
+    }
+
+    private fun wakeOpen() {
+        convo = true
+        if (!expanded) expand()
     }
 
     private fun talk() {
@@ -407,8 +422,9 @@ class OverlayService : Service() {
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
             tx += (-(e.values[0] / 9.8f).coerceIn(-1f, 1f) - tx) * 0.12f
             ty += ((e.values[2] / 9.8f).coerceIn(-1f, 1f) - ty) * 0.12f
-            hudOrb?.translationX = tx * dp(6); hudOrb?.translationY = ty * dp(6)
-            stateLine?.translationX = -tx * dp(2); stateLine?.translationY = -ty * dp(2)
+            // Real parallax: the whole projection leans with the phone; the waveform and title shift on top.
+            hudCol?.rotationY = tx * 9f; hudCol?.rotationX = -ty * 7f
+            hudOrb?.translationX = tx * dp(5); stateLine?.translationX = -tx * dp(2)
         }
         override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
     }
@@ -455,7 +471,7 @@ class OverlayService : Service() {
 
     /** A translucent readout that hovers above the orb: weather, agenda, timers, systems. Touch-transparent. */
     private fun showCard(title: String, lines: List<String>) {
-        if (expanded || orb == null || lines.isEmpty()) return
+        if (orb == null || lines.isEmpty()) return
         try {
             removeCard()
             wake()
@@ -496,12 +512,22 @@ class OverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = if (edgeRight) (screenW - w - dp(8)).coerceAtLeast(0) else dp(8)
-                val above = bubbleTop - h - dp(10)
-                y = if (above >= minY()) above else (ol.y + orbPx + dp(10)).coerceAtMost((screenH - navBarH() - h).coerceAtLeast(minY()))
+                val pl = this@OverlayService.panel?.layoutParams as? WindowManager.LayoutParams
+                if (expanded && pl != null) {
+                    val pw = this@OverlayService.panel?.width ?: w
+                    x = (if (edgeRight) pl.x + pw - w else pl.x).coerceIn(0, (screenW - w).coerceAtLeast(0))
+                    val below = pl.y + (this@OverlayService.panel?.height ?: 0) + dp(8)
+                    y = if (below + h <= screenH - navBarH()) below else (pl.y - h - dp(8)).coerceAtLeast(minY())
+                } else {
+                    x = if (edgeRight) (screenW - w - dp(8)).coerceAtLeast(0) else dp(8)
+                    val above = bubbleTop - h - dp(10)
+                    y = if (above >= minY()) above else (ol.y + orbPx + dp(10)).coerceAtMost((screenH - navBarH() - h).coerceAtLeast(minY()))
+                }
             }
             wm.addView(panel, lp)
             card = panel
+            panel.cameraDistance = dp(1200).toFloat()
+            panel.rotationY = if (edgeRight) -8f else 8f
             panel.alpha = 0f
             panel.scaleY = 0.6f
             panel.animate().alpha(1f).scaleY(1f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
@@ -623,6 +649,8 @@ class OverlayService : Service() {
             wm.addView(panel, lp)
             bubble = panel
             panel.alpha = 0f
+            panel.cameraDistance = dp(1200).toFloat()
+            panel.rotationY = if (edgeRight) -8f else 8f
             panel.translationY = dp(4).toFloat()
             panel.animate().alpha(1f).translationY(0f).setDuration(200).setInterpolator(DecelerateInterpolator()).start()
             main.postDelayed(hideBubble, HoloBubble.holdMs(shown))
@@ -769,6 +797,7 @@ class OverlayService : Service() {
                 orb?.mode = m
                 hudOrb?.mode = m
                 if (s != "idle") wake()
+                if (expanded && convo) { if (s == "idle") armAutoCollapse(10_000) else main.removeCallbacks(autoCollapse) }
                 refreshHud()
             }
         }
@@ -842,10 +871,10 @@ class OverlayService : Service() {
         }
         clockLine = mono(9f, Holo.CYAN_DIM).also { head.addView(it, LinearLayout.LayoutParams(-2, -2)) }
         col.addView(head, LinearLayout.LayoutParams(-1, -2))
-        val big = ParticleOrbView(ctx, 130)
+        val big = WaveformView(ctx, 13)
         hudOrb = big
         big.mode = orb?.mode ?: OrbMode.IDLE
-        col.addView(big, LinearLayout.LayoutParams(dp(HUD_ORB_DP), dp(HUD_ORB_DP)))
+        col.addView(big, LinearLayout.LayoutParams(-1, dp(120)))
 
         fun text(sizeSp: Float, color: String, bold: Boolean = false) = TextView(ctx).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
@@ -902,7 +931,7 @@ class OverlayService : Service() {
 
         // Controls, so the app never has to be opened: talk, speak up, quiet, and a typed message line.
         val act = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        act.addView(chip("TALK") { collapse(); talk() }.apply {
+        act.addView(chip("TALK") { convo = true; talk() }.apply {
             setTextColor(Color.parseColor("#031A24"))
             (background as GradientDrawable).setColor(Color.parseColor(Holo.CYAN))
         }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
@@ -958,9 +987,13 @@ class OverlayService : Service() {
         panel = FrameLayout(ctx).apply { addView(col) }
         wm.addView(panel, lp)
         // Materialise like a hologram: a thin horizontal slit that unfolds to full height.
+        hudCol = col
+        col.cameraDistance = dp(1200).toFloat()
+        col.rotationX = -78f
+        col.animate().rotationX(0f).setDuration(340).setInterpolator(DecelerateInterpolator(1.6f)).start()
         panel?.apply {
-            alpha = 0f; scaleX = 0.92f; scaleY = 0.04f
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(DecelerateInterpolator(1.6f)).start()
+            alpha = 0f
+            animate().alpha(1f).setDuration(240).setInterpolator(DecelerateInterpolator()).start()
         }
         haptic(HapticFeedbackConstants.LONG_PRESS)
         wake()
@@ -978,7 +1011,7 @@ class OverlayService : Service() {
     private val autoCollapse = Runnable { collapse() }
     private fun armAutoCollapse(ms: Long = 6_000) {
         main.removeCallbacks(autoCollapse)
-        if (!typing) main.postDelayed(autoCollapse, ms)
+        if (!typing && !(convo && state != "idle")) main.postDelayed(autoCollapse, ms)
     }
 
     private fun setFocusable(on: Boolean) {
@@ -1029,14 +1062,15 @@ class OverlayService : Service() {
         sensors = null
         // Fold back to a slit, then remove; state is cleared immediately so a quick re-open is safe.
         panel?.let { pv ->
-            pv.animate().alpha(0f).scaleY(0.04f).scaleX(0.92f).setDuration(160).withEndAction {
+            hudCol?.animate()?.rotationX(78f)?.setDuration(170)?.start()
+            pv.animate().alpha(0f).setDuration(170).withEndAction {
                 try { wm.removeView(pv) } catch (_: Throwable) {}
             }.start()
         }
         catcher?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null; catcher = null; hudOrb = null
         stateLine = null; saidLine = null; heardLine = null; musicChip = null; glassesChip = null; sizeChip = null
-        clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false; idLine = null
+        clockLine = null; powerBar = null; powerText = null; quietChip = null; input = null; typing = false; idLine = null; hudCol = null; convo = false
         if (save) {
             orb?.visibility = View.VISIBLE
             lastTouchAt = System.currentTimeMillis()
@@ -1107,6 +1141,12 @@ class OverlayService : Service() {
 
         @Volatile
         private var instance: OverlayService? = null
+
+        /** The wake word was heard: open the full overlay. Safe from any thread; no-op if the overlay isn't running. */
+        fun onWake() {
+            val svc = instance ?: return
+            svc.main.post { svc.wakeOpen() }
+        }
 
         /** Floating info card beside the orb (weather, agenda, timers, systems). Safe from any thread; no-op if the overlay isn't running. */
         fun card(title: String, lines: List<String>) {

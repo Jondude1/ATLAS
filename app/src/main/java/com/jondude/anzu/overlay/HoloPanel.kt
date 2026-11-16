@@ -134,3 +134,30 @@ object HoloCards {
             .map { if (it.length <= width) it else it.take(width - 1).trimEnd() + "…" }
             .take(max)
 }
+
+/** Alert colouring: cyan normally, amber for warnings (door left open), red for emergencies. */
+object AlertLevel {
+    const val NORMAL = 0
+    const val WARN = 1
+    const val CRIT = 2
+
+    private val crit = listOf("smoke", "fire", "carbon monoxide", "leak", "flood", "intruder", "break-in", "alarm triggered", "glass break")
+    private val warn = listOf("left open", "still open", "unlocked", "open for", "garage", "door open", "window open")
+
+    fun classify(source: String, text: String): Int {
+        val t = text.lowercase()
+        return when {
+            crit.any { t.contains(it) } -> CRIT
+            warn.any { t.contains(it) } -> WARN
+            else -> NORMAL
+        }
+    }
+
+    fun colorHex(level: Int) = when (level) {
+        CRIT -> "#FF3B30"
+        WARN -> "#FFB000"
+        else -> Holo.CYAN
+    }
+
+    fun holdMs(level: Int) = if (level >= CRIT) 20_000L else 12_000L
+}

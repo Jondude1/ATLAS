@@ -598,6 +598,20 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
     }
 
+    private val cardTitles = mapOf(
+        "weather" to "Weather", "agenda" to "Agenda", "status" to "Systems", "set_timer" to "Timer",
+        "home_state" to "Home", "home_assistant" to "Home", "recall" to "Memory", "vault_search" to "Vault",
+        "checklist" to "Checklist", "held_notifications" to "Held", "open_loops" to "Open loops",
+        "actions_today" to "Done today", "athena_status" to "Athena", "service_status" to "Services",
+        "ask_hub" to "Hub", "helios_status" to "Helios", "last_time_on" to "History", "guests" to "Guests"
+    )
+
+    /** Whatever Jon just asked for shows up beside the overlay as a holographic card the moment the tool answers. */
+    private fun holoFor(tool: String, out: String) {
+        val title = cardTitles[tool] ?: return
+        holoCard(title, out, if (tool == "status") 6 else 5)
+    }
+
     /** Mirror a tool's answer as a floating holographic card near the orb (no-op when the overlay is off). */
     private fun holoCard(title: String, text: String, max: Int = 5) {
         val lines = com.jondude.anzu.overlay.HoloCards.lines(text, max)
@@ -907,7 +921,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             "open_screen" -> Phone.openScreen(ctx, input.optString("target"))
             "navigate" -> Phone.navigate(ctx, input.optString("destination"))
             "set_alarm" -> Phone.setAlarm(ctx, input.optInt("hour", 7), input.optInt("minute", 0), input.optString("label", "Alarm"))
-            "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0)).also { holoCard("Agenda", it) }
+            "agenda" -> Phone.agenda(ctx, input.optInt("day_offset", 0))
             "create_event" -> {
                 val start = Phone.parseWhen(input.optString("start"))
                 if (start == null) "I need the start time as YYYY-MM-DD HH:MM."
@@ -999,7 +1013,6 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             }
             "meeting_stop" -> com.jondude.anzu.Meeting.finish(ctx)
             "weather" -> Weather.brief().ifBlank { "Couldn't get the weather; no location or no connection." }
-                .also { holoCard("Weather", it) }
             "research" -> {
                 val topic = input.optString("topic")
                 if (!hasKey()) "Research needs the Anthropic API key." else {
@@ -1122,7 +1135,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     "Okay. I'll keep things to cards while they're here."
                 }
             }
-            "status" -> statusReport().also { holoCard("Systems", it, 6) }
+            "status" -> statusReport()
             "home_state" -> HomeAssistant.summary()
             "home_assistant" -> {
                 val cmd = input.optString("command")
@@ -1317,6 +1330,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                         val b = content.getJSONObject(i)
                         if (b.optString("type") == "tool_use") {
                             val out = runTool(ctx, b.optString("name"), b.optJSONObject("input") ?: JSONObject(), confirm)
+                            holoFor(b.optString("name"), out)
                             results.put(
                                 JSONObject().put("type", "tool_result")
                                     .put("tool_use_id", b.optString("id")).put("content", out)

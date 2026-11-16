@@ -1015,6 +1015,7 @@ object BuddieLink {
                         (am.mode == android.media.AudioManager.MODE_IN_COMMUNICATION && Glasses.atlasState.value == "idle")
                     val cmd = if (Prefs.wakeWord && !muted) Wake.extract(text, Prefs.name) else null
                     if (cmd != null) {
+                        com.jondude.anzu.overlay.OverlayService.onWake()
                         Atlas.heard(ctx, cmd)
                         return@withLock
                     }
