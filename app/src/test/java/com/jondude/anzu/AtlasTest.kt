@@ -1414,7 +1414,7 @@ class AgencyTest {
     fun jobsStripReadsSecondsThenMinutes() {
         val j = com.jondude.anzu.assist.Jobs
         val now = 1_000_000L
-        val s = j.strip(listOf(j.Job(1, "Hermes", now - 12_000), j.Job(2, "Research", now - 300_000)), now)
+        val s = j.strip(listOf(com.jondude.anzu.assist.Jobs.Job(1, "Hermes", now - 12_000), com.jondude.anzu.assist.Jobs.Job(2, "Research", now - 300_000)), now)
         org.junit.Assert.assertTrue(s.contains("HERMES 12s"))
         org.junit.Assert.assertTrue(s.contains("RESEARCH 5m"))
     }
