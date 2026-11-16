@@ -94,7 +94,8 @@ jobs:
           script: |
             bash ci/fetch-deps.sh
             adb logcat -c
-            gradle connectedDebugAndroidTest --no-daemon || echo "DEVICE_TESTS_FAILED" > device-tests-failed
+            # WhisperDeviceTest downloads a 300 MB model and stalls on CI emulators; it runs nightly in whisper-nightly.yml instead.
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.jondude.anzu.WhisperDeviceTest --no-daemon || echo "DEVICE_TESTS_FAILED" > device-tests-failed
             adb logcat -d -s ATLASTEST:I > atlastest.log || true
             adb uninstall com.jondude.anzu || true
             bash ci/smoke.sh
