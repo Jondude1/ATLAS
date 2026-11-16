@@ -142,6 +142,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Brain
 import com.jondude.anzu.assist.Atlas
+import com.jondude.anzu.assist.Links
 import com.jondude.anzu.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -322,10 +323,15 @@ fun AppRoot(resumes: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
+    var diagOpen by remember { mutableStateOf(false) }
+    val linkResults by Links.results.collectAsState()
     val update by Updater.available.collectAsState()
     val progress by Updater.progress.collectAsState()
 
     LaunchedEffect(resumes) { Updater.check() }
+    // One probe round per foreground, off the main thread; no polling loop.
+    LaunchedEffect(resumes) { Links.check() }
+    BackHandler(enabled = diagOpen) { diagOpen = false }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -381,15 +387,81 @@ fun AppRoot(resumes: Int) {
                     }
                 }
             }
-            Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { t ->
+            if (tab == 0 && !diagOpen && Links.allDown(linkResults)) {
+                Row(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.error.copy(alpha = 0.18f))
+                        .clickable { diagOpen = true }.padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(Links.STRIP, color = Cream, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
+                }
+            }
+            if (diagOpen) DiagnosticsScreen { diagOpen = false }
+            else Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { t ->
                 when (t) {
                     0 -> HomeScreen(resumes)
                     1 -> NotesScreen()
                     2 -> WhisperScreen()
-                    else -> SettingsScreen()
+                    else -> SettingsScreen { diagOpen = true }
                 }
             }
         }
+    }
+}
+
+/** Live status of every link home: a verdict sentence, then one holo tile per target. Re-checks on open. */
+@Composable
+fun DiagnosticsScreen(onBack: () -> Unit) {
+    val results by Links.results.collectAsState()
+    val checking by Links.checking.collectAsState()
+    LaunchedEffect(Unit) { Links.check() }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Cream) }
+            Text("Connection diagnostics", fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream)
+        }
+        val r = results
+        Text(
+            if (r == null) "Checking the links home…" else Links.verdict(r),
+            color = Cream, fontSize = 16.sp, lineHeight = 24.sp
+        )
+        val scope = rememberCoroutineScope()
+        SoftButton(onClick = { scope.launch { Links.check() } }, enabled = !checking) {
+            Text(if (checking) "Checking…" else "Re-check")
+        }
+        HoloHeader("Links", Modifier.padding(top = 4.dp))
+        r?.forEach { res ->
+            HoloCard(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(10.dp).clip(CircleShape).background(
+                            when (res.state) {
+                                Links.State.REACHABLE -> Stark.cyan
+                                Links.State.HTTP_ERROR -> Gold
+                                Links.State.UNREACHABLE -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                    )
+                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                        Text(res.target.name, color = Cream, fontSize = 16.sp)
+                        Text(
+                            when (res.state) {
+                                Links.State.REACHABLE -> "Reachable · ${res.detail}"
+                                Links.State.HTTP_ERROR -> "Answered with an error · ${res.detail}"
+                                Links.State.UNREACHABLE -> "Unreachable · ${res.detail}"
+                            },
+                            color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Light
+                        )
+                    }
+                    Text("${res.ms} ms", color = Muted, fontSize = 13.sp, fontFamily = HoloMono)
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -1339,7 +1411,7 @@ fun WhisperScreen() {
 }
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by Updater.status.collectAsState()
@@ -1773,6 +1845,7 @@ fun SettingsScreen() {
                 SoftButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
                 SoftButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
             }
+            SoftButton(onClick = onDiagnostics) { Text("Connection diagnostics") }
         }
         }
         Spacer(Modifier.height(24.dp))
