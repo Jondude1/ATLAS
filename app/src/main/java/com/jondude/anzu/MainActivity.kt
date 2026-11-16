@@ -142,6 +142,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Brain
 import com.jondude.anzu.assist.Atlas
+import com.jondude.anzu.assist.Links
 import com.jondude.anzu.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -157,12 +158,12 @@ private var isDark by mutableStateOf(true)
 // The names are historical: Gold is the accent, Cream the main text, Muted the secondary text.
 private val Gold: Color get() = if (com.jondude.anzu.assist.Discretion.grayscale()) Color(0xFF9A9A9A) else Color(0xFFFF5C00)
 private val OnGold: Color get() = Color(0xFF000000)
-private val Cream: Color get() = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
-private val Muted: Color get() = if (isDark) Color(0xFF888888) else Color(0xFF777777)
-private val Ground: Color get() = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-private val Panel: Color get() = if (isDark) Color(0xFF111111) else Color(0xFFF5F5F5)
-private val Fill: Color get() = if (isDark) Color(0xFF111111) else Color(0xFFF5F5F5)
-private val Hairline: Color get() = if (isDark) Color(0xFF222222) else Color(0xFFE5E5E5)
+private val Cream: Color get() = Stark.text
+private val Muted: Color get() = Stark.muted
+private val Ground: Color get() = Stark.ground
+private val Panel: Color get() = Stark.panel
+private val Fill: Color get() = Stark.fill
+private val Hairline: Color get() = Stark.hairline
 
 /** Square corners everywhere: flat, flush, nothing floats. */
 private val Chamfer = androidx.compose.ui.graphics.RectangleShape
@@ -223,34 +224,35 @@ private fun Switch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, colors:
     }
 }
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFF5C00),
-    onPrimary = Color(0xFF000000),
-    secondary = Color(0xFF888888),
-    onSecondary = Color(0xFF000000),
-    background = Color(0xFF000000),
-    onBackground = Color(0xFFFFFFFF),
-    surface = Color(0xFF111111),
-    onSurface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFF111111),
-    onSurfaceVariant = Color(0xFF888888),
-    outline = Color(0xFF888888),
-    error = Color(0xFFFF5A52)
+/** The Stark scheme: cyan-tinted ground and panels, hologram cyan primary; orange stays on action buttons and alerts. */
+private fun darkColors() = darkColorScheme(
+    primary = Stark.cyan,
+    onPrimary = Color(0xFF021218),
+    secondary = Stark.muted,
+    onSecondary = Color(0xFF021218),
+    background = Color(0xFF02070A).let { Stark.gray(it) },
+    onBackground = Stark.text,
+    surface = Stark.panel,
+    onSurface = Stark.text,
+    surfaceVariant = Stark.fill,
+    onSurfaceVariant = Stark.muted,
+    outline = Stark.cyanDim,
+    error = Stark.gray(Color(0xFFFF5A52))
 )
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFFFF5C00),
-    onPrimary = Color(0xFF000000),
-    secondary = Color(0xFF777777),
+private fun lightColors() = lightColorScheme(
+    primary = Stark.cyan,
+    onPrimary = Color(0xFFFFFFFF),
+    secondary = Stark.muted,
     onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFFFFFFF),
-    onBackground = Color(0xFF000000),
-    surface = Color(0xFFF5F5F5),
-    onSurface = Color(0xFF000000),
-    surfaceVariant = Color(0xFFF5F5F5),
-    onSurfaceVariant = Color(0xFF777777),
-    outline = Color(0xFF777777),
-    error = Color(0xFFC81E1E)
+    background = Stark.ground,
+    onBackground = Stark.text,
+    surface = Stark.panel,
+    onSurface = Stark.text,
+    surfaceVariant = Stark.fill,
+    onSurfaceVariant = Stark.muted,
+    outline = Stark.cyanDim,
+    error = Stark.gray(Color(0xFFC81E1E))
 )
 
 /** Text fields are soft filled wells with the label inside, no outline. */
@@ -294,10 +296,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.jondude.anzu.overlay.OverlayService.ensureRunning(this)
+        // Power-on plays on a cold start only, never when the activity is recreated.
+        val cold = savedInstanceState == null
         setContent {
             isDark = isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (isDark) DarkColors else LightColors, typography = ConsoleType, shapes = ConsoleShapes) {
-                AppRoot(resumes.intValue)
+            Stark.dark = isDark
+            MaterialTheme(colorScheme = if (isDark) darkColors() else lightColors(), typography = ConsoleType, shapes = ConsoleShapes) {
+                Box(Modifier.fillMaxSize()) {
+                    AppRoot(resumes.intValue)
+                    BootIn(enabled = cold)
+                }
             }
         }
     }
@@ -315,34 +323,28 @@ fun AppRoot(resumes: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
+    var diagOpen by remember { mutableStateOf(false) }
+    val linkResults by Links.results.collectAsState()
     val update by Updater.available.collectAsState()
     val progress by Updater.progress.collectAsState()
 
     LaunchedEffect(resumes) { Updater.check() }
+    // One probe round per foreground, off the main thread; no polling loop.
+    LaunchedEffect(resumes) { Links.check() }
+    BackHandler(enabled = diagOpen) { diagOpen = false }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // A flat bar: a short orange line sits above the tab you are on.
-            val items = listOf(
-                "Atlas" to Icons.Outlined.Home,
-                "Notes" to Icons.Outlined.Create,
-                "Whisper" to Icons.Outlined.Notifications,
-                "Settings" to Icons.Outlined.Settings
-            )
-            Row(Modifier.fillMaxWidth().background(Ground).navigationBarsPadding().height(56.dp)) {
-                items.forEachIndexed { i, (label, icon) ->
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight().clickable { tab = i },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(Modifier.fillMaxWidth().height(2.dp).background(if (tab == i) Gold else Color.Transparent))
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Icon(icon, contentDescription = label, tint = if (tab == i) Cream else Muted, modifier = Modifier.size(24.dp))
-                        }
-                    }
-                }
-            }
+            HoloNavBar(
+                listOf(
+                    "Atlas" to Icons.Outlined.Home,
+                    "Notes" to Icons.Outlined.Create,
+                    "Whisper" to Icons.Outlined.Notifications,
+                    "Settings" to Icons.Outlined.Settings
+                ),
+                tab
+            ) { tab = it }
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
@@ -371,11 +373,7 @@ fun AppRoot(resumes: Int) {
             }
             val rel = update
             if (rel != null) {
-                Card(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = Flat,
-                    colors = CardDefaults.cardColors(containerColor = Panel)
-                ) {
+                HoloCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                         Text("Atlas ${rel.tag} is available", fontWeight = FontWeight.SemiBold)
                         if (progress >= 0f) {
@@ -389,15 +387,81 @@ fun AppRoot(resumes: Int) {
                     }
                 }
             }
-            Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { t ->
+            if (tab == 0 && !diagOpen && Links.allDown(linkResults)) {
+                Row(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.error.copy(alpha = 0.18f))
+                        .clickable { diagOpen = true }.padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(Links.STRIP, color = Cream, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = Muted)
+                }
+            }
+            if (diagOpen) DiagnosticsScreen { diagOpen = false }
+            else Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { t ->
                 when (t) {
                     0 -> HomeScreen(resumes)
                     1 -> NotesScreen()
                     2 -> WhisperScreen()
-                    else -> SettingsScreen()
+                    else -> SettingsScreen { diagOpen = true }
                 }
             }
         }
+    }
+}
+
+/** Live status of every link home: a verdict sentence, then one holo tile per target. Re-checks on open. */
+@Composable
+fun DiagnosticsScreen(onBack: () -> Unit) {
+    val results by Links.results.collectAsState()
+    val checking by Links.checking.collectAsState()
+    LaunchedEffect(Unit) { Links.check() }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Cream) }
+            Text("Connection diagnostics", fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = Cream)
+        }
+        val r = results
+        Text(
+            if (r == null) "Checking the links home…" else Links.verdict(r),
+            color = Cream, fontSize = 16.sp, lineHeight = 24.sp
+        )
+        val scope = rememberCoroutineScope()
+        SoftButton(onClick = { scope.launch { Links.check() } }, enabled = !checking) {
+            Text(if (checking) "Checking…" else "Re-check")
+        }
+        HoloHeader("Links", Modifier.padding(top = 4.dp))
+        r?.forEach { res ->
+            HoloCard(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(10.dp).clip(CircleShape).background(
+                            when (res.state) {
+                                Links.State.REACHABLE -> Stark.cyan
+                                Links.State.HTTP_ERROR -> Gold
+                                Links.State.UNREACHABLE -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                    )
+                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                        Text(res.target.name, color = Cream, fontSize = 16.sp)
+                        Text(
+                            when (res.state) {
+                                Links.State.REACHABLE -> "Reachable · ${res.detail}"
+                                Links.State.HTTP_ERROR -> "Answered with an error · ${res.detail}"
+                                Links.State.UNREACHABLE -> "Unreachable · ${res.detail}"
+                            },
+                            color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Light
+                        )
+                    }
+                    Text("${res.ms} ms", color = Muted, fontSize = 13.sp, fontFamily = HoloMono)
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -451,12 +515,11 @@ fun Section(title: String, content: @Composable () -> Unit) {
     }
     if (nav != null && nav.page != title) return
     Column {
-        if (nav == null) Text(
-            title, color = Cream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
-        )
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            content()
+        if (nav == null) HoloHeader(title, Modifier.padding(bottom = 12.dp, top = 8.dp))
+        HoloCard(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                content()
+            }
         }
     }
 }
@@ -822,7 +885,8 @@ fun RecorderCard() {
         if (granted) { permError = null; consent = true }
         else permError = "Microphone permission is off — recording can't start"
     }
-    Column(Modifier.fillMaxWidth().background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    HoloCard(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Session Recorder", color = Cream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         if (rec != null) {
             Text("Recording — ${rec.label}", color = Gold, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -867,6 +931,7 @@ fun RecorderCard() {
                 shareError?.let { Text(it, color = Gold, fontSize = 14.sp) }
             }
         }
+    }
     }
     if (consent) {
         AlertDialog(
@@ -971,6 +1036,7 @@ fun HomeScreen(resumes: Int) {
         // A presence, not a dashboard: a greeting that knows the hour, what ATLAS knows in a sentence,
         // the ring, the last thing it said, then the message box and three actions.
         Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PresenceHeader(state)
             Text(greeting(), fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = Cream)
             Text(knows, fontSize = 18.sp, lineHeight = 26.sp, letterSpacing = 0.18.sp, color = Muted)
             RecorderCard()
@@ -1345,7 +1411,7 @@ fun WhisperScreen() {
 }
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by Updater.status.collectAsState()
@@ -1779,6 +1845,7 @@ fun SettingsScreen() {
                 SoftButton(onClick = { scope.launch { Updater.check(true) } }) { Text("Check for updates") }
                 SoftButton(onClick = { Store.clearHistory() }) { Text("Clear recent chat") }
             }
+            SoftButton(onClick = onDiagnostics) { Text("Connection diagnostics") }
         }
         }
         Spacer(Modifier.height(24.dp))

@@ -557,17 +557,42 @@ object CloudVoice {
         else -> null
     }
 
+    /** Sentence-sized chunks: split on . ! ? followed by whitespace or the end. Never empty; an over-long sentence stays one chunk. */
+    fun splitSentences(text: String): List<String> {
+        val out = ArrayList<String>()
+        var start = 0
+        for (i in text.indices) {
+            val c = text[i]
+            if ((c == '.' || c == '!' || c == '?') && (i + 1 == text.length || text[i + 1].isWhitespace())) {
+                out.add(text.substring(start, i + 1))
+                start = i + 1
+            }
+        }
+        out.add(text.substring(start))
+        return out.map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
     /** Blocking. Audio bytes, or null (with Speaker.lastCloudError set) so the phone voice takes over. */
     fun synth(text: String): ByteArray? {
+        // Chatterbox runs on CPU (~3 s/word), so a real reply goes sentence by sentence, each with its own read cap.
+        val chunks = if (Prefs.voiceProvider == 4) splitSentences(text).ifEmpty { listOf(text) } else listOf(text)
+        val out = java.io.ByteArrayOutputStream()
+        for (chunk in chunks) {
+            val bytes = synthOne(chunk) ?: return null
+            out.write(bytes)
+        }
+        return out.toByteArray()
+    }
+
+    private fun synthOne(text: String): ByteArray? {
         val (url, headers, body) = request(text) ?: run {
             Speaker.lastCloudError = "Premium voice isn't fully set up."
             return null
         }
         return try {
             val (code, bytes) = com.jondude.anzu.assist.Net.requestBytes(
-                "POST", url, headers, body, 30_000,
-                // a dead Obelisk should hand over to the phone voice fast
-                connectTimeoutMs = if (Prefs.voiceProvider == 3 || Prefs.voiceProvider == 4) 2_500 else 8_000
+                "POST", url, headers, body, if (Prefs.voiceProvider == 4) 60_000 else 30_000,
+                connectTimeoutMs = 8_000
             )
             if (code in 200..299 && bytes.size > 200) {
                 Speaker.lastCloudError = ""
