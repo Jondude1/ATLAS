@@ -462,13 +462,79 @@ class OverlayService : Service() {
 
     private val hideCard = Runnable { fadeCard() }
 
+    /** Types text in character by character with a faint flicker, like a projected readout. Measured size is already fixed, so layout doesn't jump. */
+    private fun typeIn(tv: TextView, full: String, totalMs: Long = 420L) {
+        tv.text = ""
+        if (full.isEmpty()) return
+        val n = full.length
+        ValueAnimator.ofInt(0, n).apply {
+            duration = totalMs.coerceIn(160L, 900L)
+            addUpdateListener {
+                val k = it.animatedValue as Int
+                tv.text = full.substring(0, k)
+                tv.alpha = if (k < n && (k % 3 == 0)) 0.72f else 1f
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) { tv.alpha = 1f; tv.text = full }
+                override fun onAnimationCancel(a: android.animation.Animator) { tv.alpha = 1f; tv.text = full }
+            })
+            start()
+        }
+    }
+
+    private var cardPinned = false
+
+    /** Drag a card anywhere, flick it away, or tap to pin it so it stays until tapped again. */
+    private fun makeCardInteractive(panel: View, lp: WindowManager.LayoutParams, title: TextView, label: String) {
+        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var downAt = 0L; var moved = false
+        panel.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; downAt = System.currentTimeMillis(); moved = false
+                    main.removeCallbacks(hideCard)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX; val dy = e.rawY - downY
+                    if (!moved && (Math.abs(dx) > dp(6) || Math.abs(dy) > dp(6))) moved = true
+                    if (moved) {
+                        lp.x = (startX + dx).toInt(); lp.y = (startY + dy).toInt()
+                        try { wm.updateViewLayout(v, lp) } catch (_: Throwable) {}
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = e.rawX - downX
+                    val quick = System.currentTimeMillis() - downAt < 260
+                    if (moved && quick && Math.abs(dx) > dp(70)) {
+                        haptic(HapticFeedbackConstants.CLOCK_TICK)
+                        if (card === v) card = null
+                        cardPinned = false
+                        v.animate().translationX(if (dx > 0) screenW.toFloat() else -screenW.toFloat()).alpha(0f).setDuration(200).withEndAction {
+                            try { wm.removeView(v) } catch (_: Throwable) {}
+                        }.start()
+                    } else if (!moved) {
+                        cardPinned = !cardPinned
+                        title.text = "◢ " + Holo.tag(label) + if (cardPinned) "  ◆ PINNED" else ""
+                        haptic(HapticFeedbackConstants.CONTEXT_CLICK)
+                        if (!cardPinned) main.postDelayed(hideCard, 4_000)
+                    } else if (!cardPinned) {
+                        main.postDelayed(hideCard, 6_000)
+                    }
+                }
+            }
+            true
+        }
+    }
+
+
     private fun removeCard() {
+        cardPinned = false
         main.removeCallbacks(hideCard)
         card?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
         card = null
     }
 
     private fun fadeCard() {
+        if (cardPinned) return
         val v = card ?: return
         card = null
         v.animate().alpha(0f).translationYBy(-dp(6).toFloat()).setDuration(260).withEndAction {
@@ -487,15 +553,18 @@ class OverlayService : Service() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(10), dp(14), dp(12))
             }
-            panel.addView(TextView(ctx).apply {
+            val titleView = TextView(ctx).apply {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
                 setTextColor(Color.parseColor(Holo.CYAN))
                 setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                 letterSpacing = 0.15f
                 text = "◢ " + Holo.tag(title)
-            })
+            }
+            panel.addView(titleView)
+            val lineViews = ArrayList<Pair<TextView, String>>()
             lines.forEachIndexed { i, l ->
                 panel.addView(TextView(ctx).apply {
+                    lineViews.add(this to l)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                     setTextColor(Color.parseColor("#E6FBFF"))
                     setTypeface(Typeface.MONOSPACE)
@@ -514,7 +583,7 @@ class OverlayService : Service() {
             val bubbleTop = (bubble?.layoutParams as? WindowManager.LayoutParams)?.y ?: ol.y
             val lp = WindowManager.LayoutParams(
                 w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             ).apply {
@@ -533,6 +602,8 @@ class OverlayService : Service() {
             }
             wm.addView(panel, lp)
             card = panel
+            makeCardInteractive(panel, lp, titleView, title)
+            lineViews.forEachIndexed { i, (tv, full) -> tv.postDelayed({ if (tv.parent != null) typeIn(tv, full, 260L + full.length * 8L) }, 120L + i * 140L) }
             panel.cameraDistance = dp(1200).toFloat()
             panel.rotationY = if (edgeRight) -8f else 8f
             panel.alpha = 0f
@@ -626,7 +697,7 @@ class OverlayService : Service() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(10), dp(14), dp(10))
             }
-            panel.addView(TextView(ctx).apply {
+            val bubbleText = TextView(ctx).apply {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setTextColor(Color.parseColor("#E6FBFF"))
                 setTypeface(Typeface.MONOSPACE)
@@ -634,7 +705,8 @@ class OverlayService : Service() {
                 maxLines = 7
                 ellipsize = TextUtils.TruncateAt.END
                 this.text = "ATLAS ▸ $shown"
-            })
+            }
+            panel.addView(bubbleText)
             val maxW = minOf((screenW * 0.7f).toInt(), dp(280))
             panel.measure(
                 android.view.View.MeasureSpec.makeMeasureSpec(maxW, android.view.View.MeasureSpec.AT_MOST),
@@ -655,6 +727,7 @@ class OverlayService : Service() {
             }
             wm.addView(panel, lp)
             bubble = panel
+            typeIn(bubbleText, "ATLAS ▸ $shown", 200L + shown.length * 14L)
             panel.alpha = 0f
             panel.cameraDistance = dp(1200).toFloat()
             panel.rotationY = if (edgeRight) -8f else 8f
@@ -887,6 +960,27 @@ class OverlayService : Service() {
         val gl = WireGlobeView(ctx).also { it.mode = big.mode; it.setAlert(alertLevel) }
         globe = gl
         col.addView(gl, LinearLayout.LayoutParams(-1, dp(84)))
+        // Live diagnostics: four small readouts, filled in off the main thread.
+        val tileRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val tiles = listOf("OBELISK", "HOME", "WEATHER", "NEXT").map { name ->
+            val t = TextView(ctx).apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f)
+                setTextColor(Color.parseColor(Holo.CYAN))
+                setTypeface(Typeface.MONOSPACE)
+                maxLines = 2
+                gravity = Gravity.CENTER
+                text = "$name\n…"
+                setPadding(dp(2), dp(4), dp(2), dp(4))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#0E00E5FF"))
+                    setStroke(dp(1), Color.parseColor(Holo.CYAN_FAINT))
+                }
+            }
+            tileRow.addView(t, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(3) })
+            name to t
+        }.toMap()
+        col.addView(tileRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        loadTiles(ctx, tiles)
 
         fun text(sizeSp: Float, color: String, bold: Boolean = false) = TextView(ctx).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
@@ -1090,6 +1184,22 @@ class OverlayService : Service() {
             updateOrb()
             scheduleRoam()
         }
+    }
+
+    private fun loadTiles(ctx: Context, tiles: Map<String, TextView>) {
+        fun short(t: String, n: Int) = t.trim().replace(Regex("\\s+"), " ").let { if (it.length > n) it.take(n - 1) + "…" else it }
+        fun put(name: String, value: String, bad: Boolean = false) = main.post {
+            val v = tiles[name] ?: return@post
+            if (v.parent == null) return@post
+            v.text = "$name\n$value"
+            v.setTextColor(Color.parseColor(if (bad) AlertLevel.colorHex(AlertLevel.WARN) else Holo.CYAN))
+        }
+        Thread {
+            try { val ms = com.jondude.anzu.assist.Obelisk.pingMs(); put("OBELISK", if (ms >= 0) "${ms}ms" else "OFFLINE", ms < 0) } catch (_: Throwable) { put("OBELISK", "—", true) }
+            try { val ms = com.jondude.anzu.assist.HomeAssistant.pingMs(); put("HOME", if (ms >= 0) "${ms}ms" else "OFFLINE", ms < 0) } catch (_: Throwable) { put("HOME", "—", true) }
+            try { val w = com.jondude.anzu.assist.Weather.brief(); put("WEATHER", if (w.isBlank()) "n/a" else short(w, 18)) } catch (_: Throwable) { put("WEATHER", "—") }
+            try { val a = com.jondude.anzu.assist.Phone.agenda(ctx, 0); put("NEXT", if (a.isBlank()) "clear" else short(a, 18)) } catch (_: Throwable) { put("NEXT", "—") }
+        }.start()
     }
 
     // ---------------------------------------------------------------- edge glow + alerts
