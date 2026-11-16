@@ -151,7 +151,8 @@ class OverlayService : Service() {
             com.jondude.anzu.Ears.earcon("boot")
             main.postDelayed({ showBubble("ATLAS ONLINE") }, 700)
             armAmbient()
-            observe()
+            try { registerReceiver(unlockReceiver, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)) } catch (_: Throwable) {}
+        observe()
             crumb(this, "observe ok")
             scheduleRoam()
         } catch (t: Throwable) {
@@ -182,6 +183,7 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        try { unregisterReceiver(unlockReceiver) } catch (_: Throwable) {}
         try { edge?.let { wm.removeView(it) } } catch (_: Throwable) {}
         edge = null
         isRunning = false
@@ -1199,6 +1201,39 @@ class OverlayService : Service() {
             try { val ms = com.jondude.anzu.assist.HomeAssistant.pingMs(); put("HOME", if (ms >= 0) "${ms}ms" else "OFFLINE", ms < 0) } catch (_: Throwable) { put("HOME", "—", true) }
             try { val w = com.jondude.anzu.assist.Weather.brief(); put("WEATHER", if (w.isBlank()) "n/a" else short(w, 18)) } catch (_: Throwable) { put("WEATHER", "—") }
             try { val a = com.jondude.anzu.assist.Phone.agenda(ctx, 0); put("NEXT", if (a.isBlank()) "clear" else short(a, 18)) } catch (_: Throwable) { put("NEXT", "—") }
+        }.start()
+    }
+
+    // ---------------------------------------------------------------- morning briefing
+    private val unlockReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { maybeMorning() }
+    }
+
+    /** First unlock between 5 and 11 am each day: boot chirp, rim glow, then weather and agenda cards in sequence. */
+    private fun maybeMorning() {
+        val cal = java.util.Calendar.getInstance()
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val day = cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+        val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (hour !in 5..10 || sp.getInt("morningDay", 0) == day || orb == null) return
+        sp.edit().putInt("morningDay", day).apply()
+        runMorning()
+    }
+
+    private fun runMorning() {
+        val greet = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) { in 5..11 -> "Good morning, sir." else -> "Hello, sir." }
+        wake()
+        try { Earcons.play("boot") } catch (_: Throwable) {}
+        showEdge()
+        orb?.playAttention()
+        main.postDelayed({ showBubble("$greet Systems online. Here's your day.") }, 500)
+        val ctx = this
+        Thread {
+            val wx = try { com.jondude.anzu.assist.Weather.brief() } catch (_: Throwable) { "" }
+            val ag = try { com.jondude.anzu.assist.Phone.agenda(ctx, 0) } catch (_: Throwable) { "" }
+            if (wx.isNotBlank()) main.postDelayed({ showCard("Weather", HoloCards.lines(wx, 3)) }, 2_200)
+            if (ag.isNotBlank()) main.postDelayed({ showCard("Today", HoloCards.lines(ag, 5)) }, 7_000)
+            main.postDelayed({ if (state == "idle") hideEdge() }, 14_000)
         }.start()
     }
 
