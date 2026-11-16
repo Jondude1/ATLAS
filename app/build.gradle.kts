@@ -73,6 +73,7 @@ dependencies {
     implementation(files("libs/sherpa-onnx-1.13.8.aar"))
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("androidx.test:core:1.6.1")
 
