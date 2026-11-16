@@ -80,3 +80,15 @@ class HoloPanel(ctx: Context) : LinearLayout(ctx) {
         if (running) postInvalidateOnAnimation()
     }
 }
+
+/** Pure helpers for the speech bubble, kept apart from the views so they can be unit tested. */
+object HoloBubble {
+    /** Collapse whitespace and cap the length so a long answer never covers the screen. */
+    fun shorten(text: String, max: Int = 220): String {
+        val t = text.replace(Regex("\\s+"), " ").trim()
+        return if (t.length <= max) t else t.take(max - 1).trimEnd() + "…"
+    }
+
+    /** Roughly reading time: 2.5 s plus 55 ms a character, held between 3 and 9 seconds. */
+    fun holdMs(text: String): Long = (2_500L + 55L * text.length).coerceIn(3_000L, 9_000L)
+}

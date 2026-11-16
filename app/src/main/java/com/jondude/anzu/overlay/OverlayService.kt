@@ -63,6 +63,7 @@ class OverlayService : Service() {
     private var musicChip: TextView? = null
     private var glassesChip: TextView? = null
     private var sizeChip: TextView? = null
+    private var bubble: View? = null
 
     private var edgeRight = true
     private var yFrac = 0.4f
@@ -158,6 +159,7 @@ class OverlayService : Service() {
         main.removeCallbacksAndMessages(null)
         glide?.cancel()
         removeHighlight()
+        removeBubble()
         collapse(save = false)
         orb?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         orb = null
@@ -324,6 +326,66 @@ class OverlayService : Service() {
         scheduleRoam()
     }
 
+    // ---------------------------------------------------------------- speech bubble
+
+    private val hideBubble = Runnable { removeBubble() }
+
+    private fun removeBubble() {
+        main.removeCallbacks(hideBubble)
+        bubble?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        bubble = null
+    }
+
+    /** What Atlas just said, in a holographic bubble beside the orb. Touch-transparent; fades after a reading-time hold. */
+    private fun showBubble(text: String) {
+        if (expanded || dragging || orb == null) return
+        try {
+            removeBubble()
+            val ctx = this
+            val shown = HoloBubble.shorten(text)
+            if (shown.isBlank()) return
+            val panel = HoloPanel(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+            }
+            panel.addView(TextView(ctx).apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(Color.parseColor("#E6FBFF"))
+                setTypeface(Typeface.MONOSPACE)
+                letterSpacing = 0.04f
+                maxLines = 7
+                ellipsize = TextUtils.TruncateAt.END
+                this.text = "ATLAS ▸ $shown"
+            })
+            val maxW = minOf((screenW * 0.7f).toInt(), dp(280))
+            panel.measure(
+                android.view.View.MeasureSpec.makeMeasureSpec(maxW, android.view.View.MeasureSpec.AT_MOST),
+                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED)
+            )
+            val w = panel.measuredWidth
+            val h = panel.measuredHeight
+            val ol = orbLp ?: return
+            val lp = WindowManager.LayoutParams(
+                w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = if (edgeRight) (ol.x - w - dp(6)).coerceAtLeast(dp(4)) else (ol.x + orbPx + dp(6)).coerceAtMost((screenW - w - dp(4)).coerceAtLeast(0))
+                y = (ol.y + orbPx / 2 - h / 2).coerceIn(minY(), (screenH - navBarH() - h).coerceAtLeast(minY()))
+            }
+            wm.addView(panel, lp)
+            bubble = panel
+            panel.alpha = 0f
+            panel.animate().alpha(1f).setDuration(160).start()
+            main.postDelayed(hideBubble, HoloBubble.holdMs(shown))
+        } catch (t: Throwable) {
+            crumb(this, "bubble failed: ${t.javaClass.simpleName}")
+            removeBubble()
+        }
+    }
+
     // ---------------------------------------------------------------- show & point
 
     private val finishPoint = Runnable { endPoint() }
@@ -341,7 +403,9 @@ class OverlayService : Service() {
                 if (ty < minY()) ty = rect.bottom + gap
                 glideTo(tx, ty.coerceIn(minY(), maxY()), 600L, DecelerateInterpolator())
             }
-            val v = HighlightView(this, rect, dp(RING_PAD_DP).toFloat(), dp(RING_STROKE_DP).toFloat())
+            val v = HighlightView(this, rect, dp(RING_PAD_DP).toFloat(), dp(RING_STROKE_DP).toFloat()) {
+                orbLp?.let { Pair(it.x + orbPx / 2f, it.y + orbPx / 2f) }
+            }
             val lpH = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -375,13 +439,19 @@ class OverlayService : Service() {
         } catch (_: Throwable) {}
     }
 
-    /** One orange rounded-rect ring around [target] with a soft pulse. Touch-transparent. */
-    private class HighlightView(ctx: Context, private val target: Rect, private val pad: Float, stroke: Float) : View(ctx) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = stroke
-            color = Color.parseColor("#FF5C00")
-        }
+    /**
+     * Holographic target lock around [target]: cyan corner brackets that breathe, a faint tinted fill,
+     * and a dashed leader line running from the orb to the nearest edge of the target. Touch-transparent.
+     */
+    private class HighlightView(
+        ctx: Context, private val target: Rect, private val pad: Float, private val stroke: Float,
+        private val orbCenter: () -> Pair<Float, Float>?
+    ) : View(ctx) {
+        private val cyan = Color.parseColor("#00E5FF")
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = stroke; strokeCap = Paint.Cap.SQUARE }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.parseColor("#1A00E5FF") }
+        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = stroke * 0.6f; color = cyan }
+        private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = cyan }
         private val box = RectF()
         private val pulse = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 900L
@@ -397,12 +467,27 @@ class OverlayService : Service() {
         override fun onDraw(c: Canvas) {
             val f = pulse.animatedValue as Float
             val grow = pad + f * pad * 0.5f
-            box.set(
-                target.left - grow, target.top - grow, target.right + grow, target.bottom + grow
-            )
-            paint.alpha = (255 * (1f - 0.45f * f)).toInt()
-            val r = (minOf(box.width(), box.height()) / 4f).coerceIn(pad, pad * 3f)
-            c.drawRoundRect(box, r, r, paint)
+            box.set(target.left - grow, target.top - grow, target.right + grow, target.bottom + grow)
+            c.drawRect(box, fill)
+            // corner brackets
+            val len = (minOf(box.width(), box.height()) * 0.3f).coerceIn(pad * 2f, pad * 6f)
+            paint.color = cyan
+            paint.alpha = (255 * (1f - 0.35f * f)).toInt()
+            val l = box.left; val t = box.top; val r = box.right; val b = box.bottom
+            c.drawLine(l, t, l + len, t, paint); c.drawLine(l, t, l, t + len, paint)
+            c.drawLine(r, t, r - len, t, paint); c.drawLine(r, t, r, t + len, paint)
+            c.drawLine(l, b, l + len, b, paint); c.drawLine(l, b, l, b - len, paint)
+            c.drawLine(r, b, r - len, b, paint); c.drawLine(r, b, r, b - len, paint)
+            // leader line from the orb to the nearest point on the box
+            val o = orbCenter() ?: return
+            val ex = o.first.coerceIn(box.left, box.right)
+            val ey = o.second.coerceIn(box.top, box.bottom)
+            if (Math.hypot((o.first - ex).toDouble(), (o.second - ey).toDouble()) > pad) {
+                line.pathEffect = android.graphics.DashPathEffect(floatArrayOf(stroke * 3f, stroke * 2f), f * stroke * 5f)
+                line.alpha = 200
+                c.drawLine(o.first, o.second, ex, ey, line)
+            }
+            c.drawCircle(ex, ey, stroke * 1.6f, dot)
         }
     }
 
@@ -433,6 +518,7 @@ class OverlayService : Service() {
                     orb?.playAttention()
                     hudOrb?.playAttention()
                 }
+                if (said.isNotBlank() && said != lastSaid) showBubble(said)
                 lastSaid = said
                 refreshHud()
             }
@@ -454,6 +540,7 @@ class OverlayService : Service() {
     private fun expand() {
         if (expanded) return
         expanded = true
+        removeBubble()
         glide?.cancel()
         orb?.visibility = View.INVISIBLE
         val ctx = this

@@ -1207,4 +1207,14 @@ class AtlasTest {
     fun holoReadoutsAreUppercase() {
         assertEquals("STANDING BY", com.jondude.anzu.overlay.Holo.tag("  Standing by "))
     }
+
+    @Test
+    fun bubbleTextIsShortenedAndHeldForReading() {
+        val b = com.jondude.anzu.overlay.HoloBubble
+        assertEquals("a b c", b.shorten("  a \n b\tc "))
+        val long = b.shorten("word ".repeat(100))
+        assertTrue(long.length <= 220 && long.endsWith("…"))
+        assertEquals(3_000L, b.holdMs("hi"))
+        assertEquals(9_000L, b.holdMs("x".repeat(500)))
+    }
 }
