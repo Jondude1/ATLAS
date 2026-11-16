@@ -1202,4 +1202,9 @@ class AtlasTest {
         assertEquals(84, o.dp("bogus"))
         assertTrue(o.dp("mini") < o.dp("small") && o.dp("small") < o.dp("default"))
     }
+
+    @Test
+    fun holoReadoutsAreUppercase() {
+        assertEquals("STANDING BY", com.jondude.anzu.overlay.Holo.tag("  Standing by "))
+    }
 }

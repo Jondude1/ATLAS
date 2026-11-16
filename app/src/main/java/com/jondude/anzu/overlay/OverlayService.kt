@@ -470,16 +470,10 @@ class OverlayService : Service() {
         )
         catcher = catcherView
 
-        val bg = GradientDrawable().apply {
-            setColor(Color.parseColor("#F2121212"))
-            cornerRadius = dp(24).toFloat()
-            setStroke(dp(1), Color.parseColor("#33FFFFFF"))
-        }
-        val col = LinearLayout(ctx).apply {
+        val col = HoloPanel(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = bg
-            setPadding(dp(16), dp(12), dp(16), dp(14))
+            setPadding(dp(18), dp(16), dp(18), dp(16))
         }
         val big = ParticleOrbView(ctx, 130)
         hudOrb = big
@@ -489,22 +483,26 @@ class OverlayService : Service() {
         fun text(sizeSp: Float, color: String, bold: Boolean = false) = TextView(ctx).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
             setTextColor(Color.parseColor(color))
-            if (bold) setTypeface(typeface, Typeface.BOLD)
+            setTypeface(Typeface.MONOSPACE, if (bold) Typeface.BOLD else Typeface.NORMAL)
+            letterSpacing = 0.06f
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         }
-        stateLine = text(16f, "#FFFFFF", true).also { col.addView(it, LinearLayout.LayoutParams(-1, -2)) }
-        saidLine = text(12f, "#B3FFFFFF").also { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }) }
-        heardLine = text(12f, "#80FFFFFF").also { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) }) }
+        stateLine = text(15f, Holo.CYAN, true).also { col.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+        saidLine = text(11f, "#CCE6FBFF").also { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }) }
+        heardLine = text(11f, Holo.CYAN_DIM).also { col.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) }) }
 
         fun chip(label: String? = null, onClick: (() -> Unit)? = null) = TextView(ctx).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setTextColor(Color.WHITE)
-            setPadding(dp(10), dp(5), dp(10), dp(5))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            setTypeface(Typeface.MONOSPACE)
+            letterSpacing = 0.08f
+            setPadding(dp(9), dp(5), dp(9), dp(5))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#26FFFFFF"))
-                cornerRadius = dp(14).toFloat()
+                setColor(Color.parseColor("#1400E5FF"))
+                cornerRadius = dp(2).toFloat()
+                setStroke(dp(1), Color.parseColor(Holo.CYAN_DIM))
             }
             if (label != null) text = label
             if (onClick != null) setOnClickListener { onClick() }
@@ -512,12 +510,12 @@ class OverlayService : Service() {
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         musicChip = chip().also { row.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
         glassesChip = chip().also { row.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
-        val hide = chip("Hide") {
+        val hide = chip("HIDE") {
             setEnabled(ctx, false)
             stopSelf()
         }.apply {
-            setTextColor(Color.parseColor("#FF5C00"))
-            (background as GradientDrawable).setStroke(dp(1), Color.parseColor("#FF5C00"))
+            setTextColor(Color.parseColor(Holo.ACCENT))
+            (background as GradientDrawable).setStroke(dp(1), Color.parseColor(Holo.ACCENT))
         }
         col.addView(row, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
         // Second row: size and hide, so four chips never overflow the 240dp panel.
@@ -528,7 +526,7 @@ class OverlayService : Service() {
         col.addView(row2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
         col.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) armAutoCollapse(); false }
 
-        val w = dp(240)
+        val w = dp(264)
         val lp = overlayParams(w, WindowManager.LayoutParams.WRAP_CONTENT)
         val ol = orbLp
         lp.x = if (edgeRight) screenW - w - dp(8) else dp(8)
@@ -578,17 +576,17 @@ class OverlayService : Service() {
 
     private fun refreshHud() {
         if (!expanded) return
-        stateLine?.text = when (state) {
-            "listening" -> "Listening…"
-            "thinking" -> "Thinking…"
+        stateLine?.text = "◢ " + Holo.tag(when (state) {
+            "listening" -> "Listening"
+            "thinking" -> "Thinking"
             "speaking" -> "Speaking"
-            else -> "Idle"
-        }
-        saidLine?.text = Glasses.lastSaid.value.takeIf { it.isNotBlank() }?.let { "Atlas: $it" } ?: ""
-        heardLine?.text = Glasses.lastHeard.value.takeIf { it.isNotBlank() }?.let { "You: $it" } ?: ""
-        musicChip?.text = if (Atlas.musicPlaying()) "♪ Music playing" else "♪ Music idle"
-        glassesChip?.text = if (Glasses.connected.value) "Glasses connected" else "Glasses off"
-        sizeChip?.text = "Size: ${OrbSize.label(sizeKey)}"
+            else -> "Standing by"
+        })
+        saidLine?.text = Glasses.lastSaid.value.takeIf { it.isNotBlank() }?.let { "ATLAS ▸ $it" } ?: ""
+        heardLine?.text = Glasses.lastHeard.value.takeIf { it.isNotBlank() }?.let { "YOU ▸ $it" } ?: ""
+        musicChip?.text = if (Atlas.musicPlaying()) "♪ AUDIO ON" else "♪ AUDIO IDLE"
+        glassesChip?.text = if (Glasses.connected.value) "◉ LINK UP" else "○ LINK DOWN"
+        sizeChip?.text = "SIZE ${Holo.tag(OrbSize.label(sizeKey))}"
     }
 
     companion object {
