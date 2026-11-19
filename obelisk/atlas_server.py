@@ -301,6 +301,20 @@ def status():
     }
 
 
+@app.get("/atlas/hermes-config", dependencies=[Depends(require_token)])
+def hermes_config():
+    """Hermes (Athena) API endpoint + key for the app primary-brain tier.
+
+    Served only to hub-token holders (the app) so an install can provision
+    itself without the owner typing a 64-char key. The key lives in
+    hermes_config.json beside this file (mode 600, kept out of git).
+    """
+    try:
+        return json.loads((Path(__file__).parent / "hermes_config.json").read_text())
+    except Exception:
+        raise HTTPException(status_code=503, detail="hermes config not provisioned on the hub")
+
+
 
 # ---------------------------------------------------------------------------
 # Proactive trigger registry (Life OS Phase 3). Producers register structured
