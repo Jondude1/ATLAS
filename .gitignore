@@ -10,6 +10,3 @@ obelisk/.venv/
 obelisk/**/__pycache__/
 obelisk/.pytest_cache/
 obelisk/*.db
-
-# Hub-provisioned Hermes endpoint+key (live secret, never commit)
-obelisk/hermes_config.json

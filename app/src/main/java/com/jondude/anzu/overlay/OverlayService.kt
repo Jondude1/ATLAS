@@ -42,6 +42,7 @@ import com.jondude.anzu.Glasses
 import com.jondude.anzu.GlassesService
 import com.jondude.anzu.Prefs
 import com.jondude.anzu.Speaker
+import com.jondude.anzu.WakeListener
 import com.jondude.anzu.assist.AssistActivity
 import com.jondude.anzu.assist.Atlas
 import kotlinx.coroutines.CoroutineScope
@@ -160,8 +161,8 @@ class OverlayService : Service() {
             addOrb()
             crumb(this, "addOrb ok")
             armMic("overlay start")
-            com.jondude.anzu.Ears.earcon("boot")
-            main.postDelayed({ showBubble("ATLAS ONLINE") }, 700)
+            WakeListener.start(this)
+            announceOnline(sp)
             armAmbient()
             try { registerReceiver(unlockReceiver, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)) } catch (_: Throwable) {}
         observe()
@@ -196,6 +197,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         try { unregisterReceiver(unlockReceiver) } catch (_: Throwable) {}
+        WakeListener.stop()
         try { edge?.let { wm.removeView(it) } } catch (_: Throwable) {}
         edge = null
         isRunning = false
@@ -1375,22 +1377,51 @@ class OverlayService : Service() {
     }
 
     // ---------------------------------------------------------------- morning briefing
+    /** In-process guard: the morning greeting runs at most once per service instance, however the receiver fires. */
+    @Volatile private var morningRan = false
+
     private val unlockReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) { maybeMorning() }
     }
 
-    /** First unlock between 5 and 11 am each day: boot chirp, rim glow, then weather and agenda cards in sequence. */
-    private fun maybeMorning() {
+    /** True when the morning greeting will run at the next unlock — the one condition both the startup announcement and [maybeMorning] check. */
+    private fun morningPending(): Boolean {
         val cal = java.util.Calendar.getInstance()
         val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
         val day = cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
-        val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
-        if (hour !in 5..10 || sp.getInt("morningDay", 0) == day || orb == null) return
-        sp.edit().putInt("morningDay", day).apply()
+        return hour in 5..10 && getSharedPreferences(PREFS, MODE_PRIVATE).getInt("morningDay", 0) != day
+    }
+
+    /**
+     * The one startup announcement: boot earcon + "ATLAS ONLINE" bubble. Skipped when the morning
+     * greeting is pending (that greeting IS this startup's announcement) and when an announcement
+     * already played in the last 30 minutes, so sticky restarts and surface recreations stay silent.
+     */
+    private fun announceOnline(sp: android.content.SharedPreferences) {
+        if (morningPending()) return
+        val now = System.currentTimeMillis()
+        if (now - sp.getLong("onlineAnnouncedAt", 0L) < 30 * 60_000L) return
+        // Committed synchronously, before the bubble posts: two rapid onCreate passes (an Android Auto
+        // connect burst restarts this service back to back) must not both slip past the guard.
+        sp.edit().putLong("onlineAnnouncedAt", now).commit()
+        com.jondude.anzu.Ears.earcon("boot")
+        main.postDelayed({ showBubble("ATLAS ONLINE") }, 700)
+    }
+
+    /** First unlock between 5 and 11 am each day: boot chirp, rim glow, then weather and agenda cards in sequence. */
+    private fun maybeMorning() {
+        if (!morningPending() || orb == null) return
+        val cal = java.util.Calendar.getInstance()
+        val day = cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("morningDay", day).apply()
         runMorning()
     }
 
     private fun runMorning() {
+        if (morningRan) return
+        morningRan = true
+        // The greeting is this startup's announcement: stamp it so a restart within 30 minutes doesn't announce again.
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("onlineAnnouncedAt", System.currentTimeMillis()).commit()
         val greet = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) { in 5..11 -> "Good morning, sir." else -> "Hello, sir." }
         wake()
         try { Earcons.play("boot") } catch (_: Throwable) {}
