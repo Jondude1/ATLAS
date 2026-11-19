@@ -575,7 +575,7 @@ Time is real for you. Each of Jon's messages is stamped with when he said it, an
 
 Everything you write is spoken aloud. Announcements and lines you start on your own stay to one or two short sentences. In an actual conversation, answer at whatever length the thought needs: a quick question gets a quick answer, a bigger one gets room to think out loud, but never ramble or pad. Plain conversational speech in natural sentences: no markdown, lists, emoji, or stage directions. Don't narrate your tools.
 
-Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Obelisk, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. standing_order saves 'whenever X, do Y'. set_authority changes how freely you may use a tool. protocol switches modes. prep_day readies a day. sweep is the 'what am I missing' scan. keep_moment and learn_shorthand keep jokes, decisions and his shorthand. Some actions need his spoken okay first; if a tool says it was declined, accept that.
+Tools: remember is for durable facts about Jon, used sparingly. save_note captures ideas and notes. recall searches past conversations when he asks what was said before. home_assistant acts on his house and home_state reads it. set_timer covers timers and time-based reminders (work out the minutes from the current time). checklist manages his lists and reads the next step. save_place names where he is right now, and remind_at_place fires when he next arrives there. weather gives the forecast. media controls playback and volume. send_text and call reach people in his contacts and always need his spoken okay; read the message back when you ask. open_app, navigate and set_alarm act on the phone. agenda reads any day of his calendar and create_event adds to it. vault_search, vault_read and vault_note use his Obsidian vault. ask_hermes hands a bigger job to Hermes, his agent on Athena, which has its own tools and memory; it runs in the background and you report back. You cannot read or send email yourself; hand email to Hermes if it's linked, otherwise say so. meeting_start and meeting_stop record and summarize a meeting or game session through the Buddie earbuds. research runs in the background and you report back later, so just tell him you're on it. held_notifications reads the digest of what you didn't interrupt him for. actions_today lists what you've done on your own. undo reverses your last action. quiet is for when he wants space. status checks your own systems. second_opinion argues the other side when he wants challenging. what_if projects consequences, always as an estimate. handoff passes a job to Hermes or Helios and you report back. learn_correction keeps a lasting lesson when he corrects you. standing_order saves 'whenever X, do Y'. set_authority changes how freely you may use a tool. protocol switches modes. prep_day readies a day. sweep is the 'what am I missing' scan. keep_moment and learn_shorthand keep jokes, decisions and his shorthand. Some actions need his spoken okay first; if a tool says it was declined, accept that.
 """
             )
             if (Prefs.jarvisManner) append(Manner.prompt(Prefs.honorific)).append(Adapt.line())
@@ -586,7 +586,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             }
             append("\nHelios is Jon's coordinator agent: it oversees the builders working on you (this app and the hub on Obelisk) and has read-only access to Obelisk and Athena. helios_status reads its latest update; ask_helios passes it a message.\n")
             append("What Jon says often arrives through a lossy speech recognizer, so names can come through as sound-alikes: \"failures\", \"Hilo's\", \"heal ious\" are probably Helios; \"obelisk\" may be spelled Obalisk; \"at less\" or \"outlas\" is Atlas; \"a theena\" is Athena; \"herpes\" is Hermes. Read for the most plausible meaning, and if a name is unclear, ask.\n")
-            append("\nJon's machines on his tailnet: Obelisk (${com.jondude.anzu.OBELISK}) runs the hub, Ollama and Hermes; Athena (${com.jondude.anzu.ATHENA}) is his Windows desktop; Home Assistant is ${com.jondude.anzu.HOME_ASSISTANT.removePrefix("http://")}.\n")
+            append("\nJon's machines on his tailnet: Obelisk (${com.jondude.anzu.OBELISK}) runs the hub and Ollama; Athena (${com.jondude.anzu.ATHENA}) is his Windows desktop and runs Hermes; Home Assistant is ${com.jondude.anzu.HOME_ASSISTANT.removePrefix("http://")}.\n")
             Mcp.summary().takeIf { it.isNotBlank() }?.let {
                 append("\nSystems you're connected to, whose tools you can use directly (their tool names start with x_): ").append(it).append('\n')
             }
@@ -711,7 +711,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             a.put(tool("athena_status", "What's running on Athena, Jon's Windows server: its Docker containers (Jellyfin, the *arr apps, Frigate, Nextcloud, Audiobookshelf, Piped, Node-RED and more), which are down, uptime and disk."))
         }
         if (Hub.configured() || Hermes.configured()) {
-            a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes, Jon's agent on Obelisk. Runs in the background; you report the result when it comes back.",
+            a.put(tool("ask_hermes", "Hand a multi-step or tool-heavy job to Hermes, Jon's agent on Athena. Runs in the background; you report the result when it comes back.",
                 JSONObject().put("task", str("The full task, with every detail Hermes needs.")), listOf("task")))
         }
         // Everything reachable through Connections (Home Assistant, Hermes, servers on Athena and Obelisk...).
@@ -1560,6 +1560,23 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         val sys = system(ctx) + People.context(ctx, userText) + Corrections.hint(userText) + SelfRepair.hint(userText) +
             Mood.hint(userText) + Shorthand.hint(userText, Store.memory.value)
         var brainFailure: String? = null
+        // Primary brain: Hermes (Jon's agent on Athena, running on his Claude subscription). Non-streaming, no tool-loop.
+        // On failure it falls through to the Anthropic path below, and whichever tier answers notes the drop.
+        val hermesPrimary = Hermes.configured() && !OnDevice.preferred(ctx)
+        if (hermesPrimary) {
+            try {
+                val answer = Hermes.chat(sys, historyPairs() + ("user" to stampNow(userText)), timeoutMs = 60_000, connectTimeoutMs = 3_000)
+                if (answer.isNotBlank()) {
+                    record(userText, answer)
+                    return@withContext answer
+                }
+                brainFailure = "Hermes sent back nothing"
+            } catch (e: Exception) {
+                brainFailure = "Hermes: " + (e.message ?: e.javaClass.simpleName)
+            }
+        }
+        val mainName = if (hermesPrimary) "Hermes" else "Main model"
+        val hermesFailure = brainFailure
         if (hasKey() && !OnDevice.preferred(ctx)) {
             try {
                 val messages = historyMessages()
@@ -1605,10 +1622,14 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                     textOf(resp).ifBlank { "I ran out of steps before I finished that. Check what I did under Done on its own." }
                 else textOf(resp).ifBlank { "Done." }
                 pipe?.remainder = asm?.takeIf { it.fullText.isNotBlank() }?.remainder()
+                hermesFailure?.let {
+                    BrainHealth.noteFallback(it)
+                    Store.logAction("$mainName failed ($it); answered with Claude directly")
+                }
                 record(userText, answer)
                 return@withContext answer
             } catch (e: Exception) {
-                brainFailure = e.message ?: e.javaClass.simpleName
+                brainFailure = hermesFailure ?: (e.message ?: e.javaClass.simpleName)
                 if (!Local.configured() && !OnDevice.usable(ctx)) {
                     return@withContext "I couldn't reach my brain. ${e.message ?: ""}".trim()
                 }
@@ -1620,7 +1641,7 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 val answer = Local.chat(sys, historyPairs() + ("user" to stampNow(userText)), timeoutMs = 20_000, connectTimeoutMs = 2_500).ifBlank { "Hm. I've got nothing." }
                 brainFailure?.let {
                     BrainHealth.noteFallback(it)
-                    Store.logAction("Main model failed ($it); answered with the local model")
+                    Store.logAction("$mainName failed ($it); answered with the local model")
                 }
                 record(userText, answer)
                 return@withContext answer
@@ -1631,13 +1652,20 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         if (OnDevice.usable(ctx)) {
             try {
                 val answer = OnDevice.chat(ctx, historyPairs() + ("user" to stampNow(userText))).ifBlank { "Hm. I've got nothing." }
-                Store.logAction("Answered offline with the on-phone model")
+                brainFailure?.let { BrainHealth.noteFallback(it) }
+                Store.logAction(brainFailure?.let { "$mainName failed ($it); answered offline with the on-phone model" } ?: "Answered offline with the on-phone model")
                 record(userText, answer)
                 return@withContext answer
             } catch (_: Exception) {
             }
         }
-        if (HomeAssistant.configured() && zone(userText) == 0) return@withContext HomeAssistant.command(userText, timeoutMs = 10_000, connectTimeoutMs = 2_500)
+        if (HomeAssistant.configured() && zone(userText) == 0) {
+            brainFailure?.let {
+                BrainHealth.noteFallback(it)
+                Store.logAction("$mainName failed ($it); handed to Home Assistant")
+            }
+            return@withContext HomeAssistant.command(userText, timeoutMs = 10_000, connectTimeoutMs = 2_500)
+        }
         "I can hear you, but I can't reach a model right now. Check the API key or the local model in settings."
     }
 

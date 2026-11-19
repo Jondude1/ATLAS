@@ -333,15 +333,27 @@ object Hermes {
         ""
     }
 
-    /** Blocking; agent runs can take minutes. Throws on failure. */
-    fun ask(task: String): String {
+    /** OpenAI chat body: system first (when given), then the (role, content) pairs. */
+    internal fun requestBody(system: String?, messages: List<Pair<String, String>>, model: String = Prefs.hermesModel): String {
+        val arr = JSONArray()
+        if (system != null) arr.put(JSONObject().put("role", "system").put("content", system))
+        messages.forEach { (role, content) -> arr.put(JSONObject().put("role", role).put("content", content)) }
+        return JSONObject().put("model", model.trim().ifBlank { "hermes-agent" }).put("messages", arr).toString()
+    }
+
+    private fun post(body: String, timeoutMs: Int, connectTimeoutMs: Int?): String {
         val headers = if (Prefs.hermesKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer ${Prefs.hermesKey.trim()}")
-        val body = JSONObject()
-            .put("model", Prefs.hermesModel.trim().ifBlank { "hermes-agent" })
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", task)))
-            .toString()
-        val (code, text) = Net.postJson(Prefs.hermesUrl.trim().trimEnd('/') + "/chat/completions", headers, body, 240_000)
+        val url = Prefs.hermesUrl.trim().trimEnd('/') + "/chat/completions"
+        val (code, text) = if (connectTimeoutMs == null) Net.postJson(url, headers, body, timeoutMs)
+        else Net.postJson(url, headers, body, timeoutMs, connectTimeoutMs)
         if (code !in 200..299) throw RuntimeException("Hermes answered $code")
         return parseReply(text).ifBlank { throw RuntimeException("Hermes sent back nothing") }
     }
+
+    /** Blocking; agent runs can take minutes. Throws on failure. */
+    fun ask(task: String): String = post(requestBody(null, listOf("user" to task)), 240_000, null)
+
+    /** Conversation tier, same contract as Local.chat: blocking, throws on failure, returns the trimmed reply. */
+    fun chat(system: String, messages: List<Pair<String, String>>, timeoutMs: Int = 60_000, connectTimeoutMs: Int = 3_000): String =
+        post(requestBody(system, messages), timeoutMs, connectTimeoutMs)
 }
