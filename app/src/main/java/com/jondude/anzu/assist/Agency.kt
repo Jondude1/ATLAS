@@ -53,7 +53,8 @@ object StandingOrders {
         load().filter { now - it.lastFired > cooldownMs && matches(it.trigger, event) }
 
     fun onEvent(event: String, source: String) {
-        if (source == "order" || event.isBlank()) return
+        // "proactive" lines come from hub triggers; they must never launch tool-using orders.
+        if (source == "order" || source == "proactive" || event.isBlank()) return
         val ctx = Brain.appContext ?: return
         val hits = due(event)
         if (hits.isEmpty()) return

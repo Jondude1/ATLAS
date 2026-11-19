@@ -514,6 +514,10 @@ class GlassesService : Service() {
                 }
             }
         }
+        // Proactive triggers ride the hub poll's cadence; the engine does its own guardrails, logging and acking.
+        if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
+            scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Proactive.pollOnce(this@GlassesService) }
+        }
         // Co-pilot works through whatever is playing audio, the car included, so it runs before the "worn" check.
         when (val c = com.jondude.anzu.assist.CoPilot.update(com.jondude.anzu.assist.CoPilot.detect(this))) {
             is com.jondude.anzu.assist.CoPilot.Change.Started -> if (System.currentTimeMillis() >= Prefs.quietUntil) {

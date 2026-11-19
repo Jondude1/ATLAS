@@ -117,6 +117,57 @@ object Hub {
         }
     }
 
+    /** A pending trigger from the hub's registry (Life OS Phase 3). [dedupeKey] groups repeats of the same event. */
+    data class Trigger(
+        val id: Long, val source: String, val kind: String, val summary: String,
+        val payload: JSONObject, val createdAt: String, val dedupeKey: String
+    )
+
+    /** The hub's /atlas/triggers payload. A malformed entry is skipped rather than failing the batch; a bad body is an empty list. */
+    fun parseTriggers(body: String): List<Trigger> = try {
+        val arr = JSONObject(body).optJSONArray("triggers") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
+            try {
+                val o = arr.getJSONObject(i)
+                if (!o.has("id")) return@mapNotNull null
+                val kind = o.optString("kind").trim()
+                if (kind.isBlank()) return@mapNotNull null
+                val source = o.optString("source").trim()
+                Trigger(
+                    o.getLong("id"), source, kind, o.optString("summary").trim(),
+                    o.optJSONObject("payload") ?: JSONObject(), o.optString("created_at"),
+                    o.optString("dedupe_key").trim().ifBlank { "$source:$kind" }
+                )
+            } catch (e: Exception) {
+                null
+            }
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /** Blocking. Triggers the hub is holding for a decision; empty if the hub can't be reached. */
+    fun pendingTriggers(): List<Trigger> {
+        if (!configured()) return emptyList()
+        return try {
+            val (code, body) = Net.get(base() + "/atlas/triggers?status=pending", auth(), 6_000, connectTimeoutMs = 2_000)
+            needsToken = code == 401 || code == 403
+            if (code in 200..299) parseTriggers(body) else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Blocking. Records what was decided about a trigger (decision: fired, suppressed or gated). Silent on failure. */
+    fun ackTrigger(id: Long, decision: String, reason: String, action: String) {
+        if (!configured()) return
+        try {
+            val o = JSONObject().put("id", id).put("decision", decision).put("reason", reason).put("action", action)
+            Net.postJson(base() + "/atlas/triggers/ack", auth(), o.toString(), 6_000)
+        } catch (_: Exception) {
+        }
+    }
+
     /** Blocking. The local model answers from everything reported; null if unavailable. */
     fun ask(question: String): String? {
         if (!configured()) return null
