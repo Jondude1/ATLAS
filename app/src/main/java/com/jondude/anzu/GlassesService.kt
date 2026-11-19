@@ -518,6 +518,10 @@ class GlassesService : Service() {
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
             scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Proactive.pollOnce(this@GlassesService) }
         }
+        // Producers register the triggers that poll picks up, on the same cadence.
+        if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
+            scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Producers.runOnce(this@GlassesService) }
+        }
         // Co-pilot works through whatever is playing audio, the car included, so it runs before the "worn" check.
         when (val c = com.jondude.anzu.assist.CoPilot.update(com.jondude.anzu.assist.CoPilot.detect(this))) {
             is com.jondude.anzu.assist.CoPilot.Change.Started -> if (System.currentTimeMillis() >= Prefs.quietUntil) {

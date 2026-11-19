@@ -123,7 +123,7 @@ object Hub {
         val payload: JSONObject, val createdAt: String, val dedupeKey: String
     )
 
-    /** The hub's /atlas/triggers payload. A malformed entry is skipped rather than failing the batch; a bad body is an empty list. */
+    /** The hub's /atlas/proactive-triggers payload. A malformed entry is skipped rather than failing the batch; a bad body is an empty list. */
     fun parseTriggers(body: String): List<Trigger> = try {
         val arr = JSONObject(body).optJSONArray("triggers") ?: JSONArray()
         (0 until arr.length()).mapNotNull { i ->
@@ -150,7 +150,7 @@ object Hub {
     fun pendingTriggers(): List<Trigger> {
         if (!configured()) return emptyList()
         return try {
-            val (code, body) = Net.get(base() + "/atlas/triggers?status=pending", auth(), 6_000, connectTimeoutMs = 2_000)
+            val (code, body) = Net.get(base() + "/atlas/proactive-triggers?status=pending", auth(), 6_000, connectTimeoutMs = 2_000)
             needsToken = code == 401 || code == 403
             if (code in 200..299) parseTriggers(body) else emptyList()
         } catch (e: Exception) {
@@ -163,8 +163,22 @@ object Hub {
         if (!configured()) return
         try {
             val o = JSONObject().put("id", id).put("decision", decision).put("reason", reason).put("action", action)
-            Net.postJson(base() + "/atlas/triggers/ack", auth(), o.toString(), 6_000)
+            Net.postJson(base() + "/atlas/proactive-triggers/ack", auth(), o.toString(), 6_000)
         } catch (_: Exception) {
+        }
+    }
+
+    /** Blocking. Registers a trigger on the hub (the hub dedupes on [dedupeKey] for 24h). True once the hub has it; false on any failure. */
+    fun postTrigger(source: String, kind: String, dedupeKey: String, summary: String, payload: JSONObject): Boolean {
+        if (!configured()) return false
+        return try {
+            val o = JSONObject().put("source", source).put("kind", kind).put("dedupe_key", dedupeKey)
+                .put("summary", summary).put("payload", payload)
+            val (code, _) = Net.postJson(base() + "/atlas/proactive-triggers", auth(), o.toString(), 6_000, connectTimeoutMs = 2_000)
+            needsToken = code == 401 || code == 403
+            code in 200..299
+        } catch (e: Exception) {
+            false
         }
     }
 

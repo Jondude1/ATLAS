@@ -301,19 +301,90 @@ def status():
     }
 
 
-@app.get("/atlas/hermes-config", dependencies=[Depends(require_token)])
-def hermes_config():
-    """Hermes (Athena) API endpoint + key for the app primary-brain tier.
 
-    Served only to hub-token holders (the app) so an install can provision
-    itself without the owner typing a 64-char key. The key lives in
-    hermes_config.json beside this file (mode 600, kept out of git).
-    """
-    try:
-        return json.loads((Path(__file__).parent / "hermes_config.json").read_text())
-    except Exception:
-        raise HTTPException(status_code=503, detail="hermes config not provisioned on the hub")
+# ---------------------------------------------------------------------------
+# Proactive trigger registry (Life OS Phase 3). Producers register structured
+# events; the app fetches the pending ones, decides under its own guardrails,
+# and acks the decision back. Decided rows are kept as the audit trail.
+TRIGGER_TTL_DEFAULT_MS = 2 * 60 * 60 * 1000
+TRIGGER_DEDUPE_MS = 24 * 60 * 60 * 1000
 
+
+def _trigger_public(r) -> dict:
+    from datetime import datetime, timezone
+
+    return {
+        "id": r["id"],
+        "source": r["source"],
+        "kind": r["kind"],
+        "summary": r["summary"],
+        "payload": json.loads(r["payload"] or "{}"),
+        "dedupe_key": r["dedupe_key"],
+        "created_at": datetime.fromtimestamp(r["created_at"] / 1000, timezone.utc).isoformat(),
+    }
+
+
+@app.post("/atlas/proactive-triggers", dependencies=[Depends(require_token)])
+def register_trigger(body: dict):
+    source = str(body.get("source", "")).strip()
+    kind = str(body.get("kind", "")).strip()
+    summary = str(body.get("summary", "")).strip()
+    if not source or not kind or not summary:
+        raise HTTPException(status_code=400, detail="source, kind and summary are required")
+    dedupe_key = str(body.get("dedupe_key", "")).strip() or f"{source}:{kind}"
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    now = _now_ms()
+    exp = body.get("expires_at_ms")
+    expires_at = int(exp) if isinstance(exp, (int, float)) and exp > now else now + TRIGGER_TTL_DEFAULT_MS
+    with hub_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM triggers WHERE dedupe_key = ? AND created_at > ? AND status IN ('pending', 'fired', 'gated') ORDER BY id DESC LIMIT 1",
+            (dedupe_key, now - TRIGGER_DEDUPE_MS),
+        ).fetchone()
+        if row:
+            return {"id": row["id"], "deduped": True}
+        cur = conn.execute(
+            "INSERT INTO triggers (source, kind, dedupe_key, summary, payload, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (source, kind, dedupe_key, summary[:500], json.dumps(payload)[:4000], now, expires_at),
+        )
+        conn.commit()
+        return {"id": cur.lastrowid, "deduped": False}
+
+
+@app.get("/atlas/proactive-triggers", dependencies=[Depends(require_token)])
+def list_proactive_triggers(status: str = "pending"):
+    now = _now_ms()
+    with hub_db() as conn:
+        if status == "pending":
+            conn.execute("UPDATE triggers SET status = 'expired' WHERE status = 'pending' AND expires_at <= ?", (now,))
+            conn.commit()
+            rows = conn.execute("SELECT * FROM triggers WHERE status = 'pending' ORDER BY id ASC LIMIT 50").fetchall()
+            return {"triggers": [_trigger_public(r) for r in rows]}
+        rows = conn.execute("SELECT * FROM triggers WHERE status != 'pending' ORDER BY id DESC LIMIT 50").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(r["payload"] or "{}")
+            out.append(d)
+        return {"triggers": out}
+
+
+@app.post("/atlas/proactive-triggers/ack", dependencies=[Depends(require_token)])
+def ack_trigger(body: dict):
+    decision = str(body.get("decision", "")).strip()
+    if decision not in ("fired", "suppressed", "gated"):
+        raise HTTPException(status_code=400, detail="decision must be fired, suppressed or gated")
+    with hub_db() as conn:
+        cur = conn.execute(
+            "UPDATE triggers SET status = ?, decision_reason = ?, action = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
+            (decision, str(body.get("reason", ""))[:500], str(body.get("action", ""))[:100], _now_ms(), body.get("id")),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="no pending trigger with that id")
+    return {"ok": True}
 
 _whisper = None
 
@@ -480,6 +551,24 @@ def init_hub_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 weight REAL NOT NULL,
                 logged_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                dedupe_key TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                decision_reason TEXT,
+                action TEXT,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                decided_at INTEGER
             )
             """
         )
