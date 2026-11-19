@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.jondude.anzu.Prefs
+import com.jondude.anzu.Store
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -58,6 +59,52 @@ object Hub {
         } catch (e: Exception) {
             cached
         }
+    }
+
+    data class HermesConfig(val url: String, val key: String, val model: String)
+
+    /** The hub's /atlas/hermes-config payload; null when malformed or when url or key is blank (not provisioned). */
+    fun parseHermesConfig(body: String): HermesConfig? = try {
+        val o = JSONObject(body)
+        val url = o.optString("url").trim()
+        val key = o.optString("key").trim()
+        if (url.isBlank() || key.isBlank()) null
+        else HermesConfig(url, key, o.optString("model").trim().ifBlank { "hermes-agent" })
+    } catch (e: Exception) {
+        null
+    }
+
+    private const val PROVISION_RETRY_MS = 6 * 60 * 60 * 1000L
+
+    /** True (and stamps the attempt) when Hermes still needs its config, the hub is set up, and no attempt ran in the last 6 hours. */
+    @Synchronized
+    private fun claimProvisionAttempt(): Boolean {
+        if (Hermes.configured() || !configured() || Prefs.hubToken.isBlank()) return false
+        val now = System.currentTimeMillis()
+        if (now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
+        Prefs.hermesProvisionTriedAt = now
+        return true
+    }
+
+    /** Blocking, silent on any failure. Fetches Hermes' endpoint and key from the hub when they aren't set yet. */
+    fun provisionHermesNow() {
+        try {
+            if (!claimProvisionAttempt()) return
+            val (code, body) = Net.get(base() + "/atlas/hermes-config", auth(), 5_000, connectTimeoutMs = 2_000)
+            if (code !in 200..299) return
+            val cfg = parseHermesConfig(body) ?: return
+            Prefs.hermesUrl = cfg.url
+            Prefs.hermesKey = cfg.key
+            Prefs.hermesModel = cfg.model
+            Store.logAction("Hermes provisioned from the hub")
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Background version of [provisionHermesNow]; a cheap no-op when already configured or tried recently. */
+    fun provisionHermesIfNeeded() {
+        if (Hermes.configured()) return
+        Atlas.scope.launch(Dispatchers.IO) { provisionHermesNow() }
     }
 
     /** Blocking. Marks urgent items as told so they aren't announced twice. */

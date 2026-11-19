@@ -1562,6 +1562,8 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         var brainFailure: String? = null
         // Primary brain: Hermes (Jon's agent on Athena, running on his Claude subscription). Non-streaming, no tool-loop.
         // On failure it falls through to the Anthropic path below, and whichever tier answers notes the drop.
+        // First conversation on a fresh install: pick up Hermes' config from the hub (throttled, silent on failure).
+        if (!Hermes.configured()) Hub.provisionHermesNow()
         val hermesPrimary = Hermes.configured() && !OnDevice.preferred(ctx)
         if (hermesPrimary) {
             try {

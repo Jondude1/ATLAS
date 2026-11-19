@@ -19,6 +19,7 @@ class App : Application() {
         Store.init(this)
         Speaker.init(this)
         com.jondude.anzu.assist.Brain.appContext = this
+        com.jondude.anzu.assist.Hub.provisionHermesIfNeeded()
     }
 }
 
@@ -234,6 +235,7 @@ object Prefs {
     var hermesUrl by StrPref("hermesUrl", "")
     var hermesKey by StrPref("hermesKey", "")
     var hermesModel by StrPref("hermesModel", "hermes-agent")
+    var hermesProvisionTriedAt by LongPref("hermesProvisionTriedAt", 0L)
     var buddieFastLink by BoolPref("buddieFastLink", false)
     var buddieCompressedFirst by BoolPref("buddieCompressedFirst", false)
     var commuteAlerts by BoolPref("commuteAlerts", true)
