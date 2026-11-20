@@ -194,7 +194,10 @@ object Proactive {
             } catch (e: Exception) {
                 d = Decision(Act.SUPPRESS, "", "delivery failed")
             }
-            Act.NOTIFY, Act.GATE -> if (notify(ctx, t, d)) notifyAt.add(now) else d = Decision(Act.SUPPRESS, "", "delivery failed")
+            Act.NOTIFY, Act.GATE -> if (notify(ctx, t, d)) {
+                notifyAt.add(now)
+                if (d.act == Act.NOTIFY) putUpFrigateTile(ctx, t, now)
+            } else d = Decision(Act.SUPPRESS, "", "delivery failed")
             Act.SUPPRESS -> {}
         }
         seen[t.dedupeKey] = now
@@ -214,6 +217,25 @@ object Proactive {
         }
         try {
             Hub.ackTrigger(t.id, decision, d.reason, action)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * The put-up that rides a Frigate person notification (v1.2.18): the room's camera
+     * tile goes up alongside the notification, under the same manners as every other
+     * proactive act — it only happens here because [enforce] already passed the trigger
+     * (dedupe, caps, gating), and quiet hours suppress the tile (never the notification).
+     * An unresolvable camera skips the tile silently; the notification has already fired.
+     */
+    private fun putUpFrigateTile(ctx: Context, t: Hub.Trigger, now: Long) {
+        if (t.source != "frigate" || t.kind != "person_seen") return
+        if (quietNow(now)) return
+        val room = t.payload.optString("camera")
+        if (room.isBlank()) return
+        try {
+            val cam = com.jondude.anzu.overlay.TileManager.cameraForRoom(room) ?: return
+            com.jondude.anzu.overlay.TileManager.putUpCamera(ctx, cam)
         } catch (_: Exception) {
         }
     }

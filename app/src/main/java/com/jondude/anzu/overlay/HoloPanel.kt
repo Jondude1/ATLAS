@@ -15,7 +15,7 @@ object Holo {
     const val CYAN_DIM = "#9900E5FF"
     const val CYAN_FAINT = "#3300E5FF"
     const val FILL = "#E0031A24"
-    const val ACCENT = "#FF5C00"
+    // The old orange ACCENT is gone (v1.2.18): the overlay speaks cyan only, tiles included.
 
     /** Uppercase, spaced readout text: "listening" -> "LISTENING". */
     fun tag(s: String) = s.trim().uppercase()

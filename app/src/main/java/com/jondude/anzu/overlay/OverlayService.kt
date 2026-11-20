@@ -33,11 +33,14 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.graphics.Bitmap
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.jondude.anzu.Earcons
+import com.jondude.anzu.R
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.GlassesService
 import com.jondude.anzu.Prefs
@@ -96,6 +99,18 @@ class OverlayService : Service() {
     private var powerText: TextView? = null
     private var quietChip: TextView? = null
     private var card: View? = null
+
+    // ---- Put-up tiles (v1.2.18): floating cyan-glass windows over whatever app is open ----
+    private val tileViews = LinkedHashMap<String, View>()
+    private val tileHeaders = HashMap<String, TextView>()
+    private val tileImages = HashMap<String, ImageView>()
+    private val tileBodies = HashMap<String, LinearLayout>()
+    private val tileCloses = HashMap<String, TextView>()
+    private val tileBitmaps = HashMap<String, Bitmap>()
+    private var tileChip: View? = null
+    private var expandedTileId: String? = null
+    private var tileTimerOn = false
+    private val tileTick = Runnable { refreshTileSnapshots() }
     private var ambient = false
     private var sensors: android.hardware.SensorManager? = null
     private var idLine: TextView? = null
@@ -181,6 +196,7 @@ class OverlayService : Service() {
         isRunning = true
         instance = this
         clearError(this)
+        renderTiles()
         crumb(this, "running")
     }
 
@@ -207,6 +223,11 @@ class OverlayService : Service() {
         removeHighlight()
         removeBubble()
         removeCard()
+        tileTimerOn = false
+        tileViews.values.forEach { try { wm.removeView(it) } catch (_: Throwable) {} }
+        tileViews.clear()
+        tileChip?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        tileChip = null
         collapse(save = false)
         orb?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         orb = null
@@ -837,6 +858,256 @@ class OverlayService : Service() {
         }
     }
 
+    // ---------------------------------------------------------------- put-up tiles (v1.2.18)
+
+    /** The tile glass: near-black translucent, a 1dp cyan border, softly rounded (mockups D3/D5/D2). */
+    private fun tileGlass(): GradientDrawable = GradientDrawable().apply {
+        setColor(Color.argb(232, 5, 14, 18))
+        cornerRadius = dp(14).toFloat()
+        setStroke(dp(1), Color.parseColor(Holo.CYAN))
+    }
+
+    private fun rajdhani(semibold: Boolean): Typeface = try {
+        resources.getFont(if (semibold) R.font.rajdhani_semibold else R.font.rajdhani_medium)
+    } catch (_: Throwable) {
+        Typeface.DEFAULT
+    }
+
+    /** Reconcile the tile windows with TileManager's stack: at most 4 tiles + the chip = 5 windows. Main thread. */
+    fun renderTiles() {
+        try {
+            val st = TileManager.state()
+            if (expandedTileId != null && st.visible.none { it.id == expandedTileId }) expandedTileId = null
+            (tileViews.keys - st.visible.map { it.id }.toSet()).toList().forEach { id ->
+                tileViews.remove(id)?.let { v -> try { wm.removeView(v) } catch (_: Throwable) {} }
+                tileHeaders.remove(id); tileImages.remove(id); tileBodies.remove(id); tileCloses.remove(id)
+            }
+            st.visible.forEachIndexed { i, tile ->
+                val expanded = tile.id == expandedTileId
+                val p = if (expanded) TileLayout.expandedPlacement()
+                else TileLayout.placement(i, st.visible.size, st.mode, tile.kind)
+                val w = (p.wFrac * screenW).toInt()
+                val existing = tileViews[tile.id]
+                val view: View
+                val lp: WindowManager.LayoutParams
+                if (existing == null) {
+                    view = buildTileView(tile)
+                    lp = WindowManager.LayoutParams(
+                        w, WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        PixelFormat.TRANSLUCENT
+                    ).apply { gravity = Gravity.TOP or Gravity.START }
+                    tileViews[tile.id] = view
+                    updateTileView(tile, expanded, w)
+                    view.measure(
+                        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                    )
+                    lp.x = (p.xFrac * screenW).toInt().coerceIn(0, (screenW - w).coerceAtLeast(0))
+                    lp.y = tileY(p, view.measuredHeight)
+                    wm.addView(view, lp)
+                } else {
+                    view = existing
+                    lp = view.layoutParams as WindowManager.LayoutParams
+                    updateTileView(tile, expanded, w)
+                    if (lp.width != w) lp.width = w
+                    view.measure(
+                        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                    )
+                    lp.x = (p.xFrac * screenW).toInt().coerceIn(0, (screenW - w).coerceAtLeast(0))
+                    lp.y = tileY(p, view.measuredHeight)
+                    try { wm.updateViewLayout(view, lp) } catch (_: Throwable) {}
+                }
+                view.alpha = if (expandedTileId != null && !expanded) 0.35f else 1f
+            }
+            renderTileChip(st)
+            syncTileTimer()
+        } catch (t: Throwable) {
+            crumb(this, "tiles failed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun tileY(p: TileLayout.Placement, h: Int): Int =
+        if (p.fromBottom) (screenH - navBarH() - h - (p.yFrac * screenH).toInt()).coerceAtLeast(minY())
+        else (p.yFrac * screenH).toInt().coerceIn(minY(), (screenH - navBarH() - h).coerceAtLeast(minY()))
+
+    private fun buildTileView(tile: OverlayTile): View {
+        val ctx = this
+        val root = FrameLayout(ctx).apply { background = tileGlass() }
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(9), dp(12), dp(11))
+        }
+        root.addView(col)
+        val headRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val header = TextView(ctx).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            typeface = rajdhani(true)
+            letterSpacing = 0.14f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        headRow.addView(header, LinearLayout.LayoutParams(0, -2, 1f))
+        val close = TextView(ctx).apply {
+            text = "✕"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            setPadding(dp(8), 0, dp(2), 0)
+            visibility = View.GONE
+            setOnClickListener { expandedTileId = null; renderTiles() }
+        }
+        headRow.addView(close)
+        col.addView(headRow)
+        val img = ImageView(ctx).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(Color.parseColor("#0A1F29"))
+            visibility = View.GONE
+        }
+        col.addView(img, LinearLayout.LayoutParams(-1, dp(90)).apply { topMargin = dp(8) })
+        val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(body, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        tileHeaders[tile.id] = header
+        tileImages[tile.id] = img
+        tileBodies[tile.id] = body
+        tileCloses[tile.id] = close
+        root.setOnClickListener {
+            expandedTileId = if (expandedTileId == tile.id) null else tile.id
+            renderTiles()
+        }
+        return root
+    }
+
+    /** Fill a tile window's contents: header (with its honesty label), the camera still at 16:9, the text lines. */
+    private fun updateTileView(tile: OverlayTile, expanded: Boolean, widthPx: Int) {
+        tileHeaders[tile.id]?.text = tile.header()
+        tileCloses[tile.id]?.visibility = if (expanded) View.VISIBLE else View.GONE
+        val hasImage = tile.kind == TileKind.CAMERA && !tile.imageKey.isNullOrBlank()
+        tileImages[tile.id]?.let { img ->
+            if (hasImage) {
+                img.visibility = View.VISIBLE
+                val w = if (widthPx > 0) widthPx - dp(24) else dp(160)
+                (img.layoutParams as? LinearLayout.LayoutParams)?.let { it.height = w * 9 / 16 }
+                tileBitmaps[tile.imageKey!!]?.let { img.setImageBitmap(it) }
+            } else {
+                img.visibility = View.GONE
+            }
+        }
+        val body = tileBodies[tile.id] ?: return
+        body.removeAllViews()
+        val ctx = this
+        for (line in tile.lines.take(if (expanded) 12 else 6)) {
+            body.addView(TextView(ctx).apply {
+                text = line
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextColor(Color.parseColor("#E6FBFF"))
+                typeface = rajdhani(false)
+                setPadding(0, dp(2), 0, 0)
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+    }
+
+    /** The caption chip (D3/D2): what Atlas is showing, with a ✕ that takes everything down. One extra window. */
+    private fun renderTileChip(st: TileStack.State) {
+        tileChip?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
+        tileChip = null
+        val text = TileLayout.chipText(st) ?: return
+        val ctx = this
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = tileGlass()
+            setPadding(dp(12), dp(6), dp(8), dp(6))
+        }
+        row.addView(TextView(ctx).apply {
+            this.text = text
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            typeface = rajdhani(true)
+            letterSpacing = 0.12f
+        })
+        row.addView(TextView(ctx).apply {
+            this.text = "✕"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            setPadding(dp(9), 0, dp(4), 0)
+            setOnClickListener { TileManager.clearAll() }
+        })
+        row.measure(
+            View.MeasureSpec.makeMeasureSpec(screenW, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val lp = WindowManager.LayoutParams(
+            row.measuredWidth, row.measuredHeight,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = minY() + dp(8)
+        }
+        wm.addView(row, lp)
+        tileChip = row
+    }
+
+    /** Keep the 10-second snapshot loop alive exactly while a camera tile is on screen — never longer. */
+    private fun syncTileTimer() {
+        val hasCam = TileManager.state().visible.any { it.kind == TileKind.CAMERA && !it.imageKey.isNullOrBlank() }
+        if (hasCam && !tileTimerOn) {
+            tileTimerOn = true
+            refreshTileSnapshots()
+        } else if (!hasCam && tileTimerOn) {
+            tileTimerOn = false
+            main.removeCallbacks(tileTick)
+        }
+    }
+
+    /**
+     * Fetch a fresh still for every camera tile up, stamp its header with the fetch time
+     * ("SNAPSHOT 4:21 PM" — stills, never "live"), and repaint. Re-arms itself every
+     * 10 s only while [tileTimerOn]; dismissing the last camera tile stops the loop.
+     */
+    private fun refreshTileSnapshots() {
+        if (!tileTimerOn) return
+        val cams = TileManager.state().visible.filter { it.kind == TileKind.CAMERA && !it.imageKey.isNullOrBlank() }
+        if (cams.isEmpty()) {
+            tileTimerOn = false
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            var changed = false
+            for (tile in cams) {
+                val bmp = try {
+                    com.jondude.anzu.assist.HomeAssistant.cameraSnapshot(tile.imageKey!!)
+                } catch (_: Throwable) {
+                    null
+                }
+                if (bmp != null) {
+                    tileBitmaps[tile.imageKey!!] = bmp
+                    val label = "SNAPSHOT " + java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date())
+                    TileManager.noteSnapshot(tile.id, label, System.currentTimeMillis())
+                    changed = true
+                }
+            }
+            if (changed) main.post { refreshTileContents() }
+        }
+        main.postDelayed(tileTick, 10_000)
+    }
+
+    /** Repaint headers + stills of the tile windows already up (the snapshot refresh path). Main thread. */
+    private fun refreshTileContents() {
+        for (tile in TileManager.state().visible) {
+            tileHeaders[tile.id]?.text = tile.header()
+            val key = tile.imageKey
+            if (key != null) tileBitmaps[key]?.let { bmp -> tileImages[tile.id]?.setImageBitmap(bmp) }
+        }
+    }
+
     // ---------------------------------------------------------------- show & point
 
     private val finishPoint = Runnable { endPoint() }
@@ -1101,7 +1372,7 @@ class OverlayService : Service() {
         // Live status of anything handed to Hermes, Helios or research; empty when nothing is running.
         val jl = TextView(ctx).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f)
-            setTextColor(Color.parseColor(Holo.ACCENT))
+            setTextColor(Color.parseColor(Holo.CYAN))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
             letterSpacing = 0.08f
             maxLines = 2
@@ -1152,8 +1423,8 @@ class OverlayService : Service() {
             setEnabled(ctx, false)
             stopSelf()
         }.apply {
-            setTextColor(Color.parseColor(Holo.ACCENT))
-            (background as GradientDrawable).setStroke(dp(1), Color.parseColor(Holo.ACCENT))
+            setTextColor(Color.parseColor(Holo.CYAN_DIM))
+            (background as GradientDrawable).setStroke(dp(1), Color.parseColor(Holo.CYAN_DIM))
         }
         col.addView(row, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
         // Second row: size and hide, so four chips never overflow the 240dp panel.
@@ -1567,6 +1838,12 @@ class OverlayService : Service() {
         fun card(title: String, lines: List<String>) {
             val svc = instance ?: return
             svc.main.post { svc.showCard(title, lines) }
+        }
+
+        /** Put-up tiles changed (TileManager): re-render them. Safe from any thread; no-op if the overlay isn't running. */
+        fun tilesChanged() {
+            val svc = instance ?: return
+            svc.main.post { svc.renderTiles() }
         }
 
         /** Colour-coded alert: lights the rim and recolours the display (amber warning, red critical). Safe from any thread. */

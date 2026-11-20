@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,11 +20,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.jondude.anzu.Ears
+import com.jondude.anzu.R
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.Prefs
 import com.jondude.anzu.Store
@@ -294,11 +298,18 @@ class AssistActivity : ComponentActivity() {
             val state by Glasses.atlasState.collectAsState()
             val said by Glasses.lastSaid.collectAsState()
             val heard by Glasses.lastHeard.collectAsState()
-            val dark = androidx.compose.foundation.isSystemInDarkTheme()
-            val sheet = if (dark) Color(0xFF161616) else Color(0xFFFFFFFF)
-            val text = if (dark) Color(0xFFFFFFFF) else Color(0xFF000000)
-            val muted = if (dark) Color(0xFF9A9A9A) else Color(0xFF6B6B6B)
-            val accent = if (dark) Color(0xFFFF5C00) else Color(0xFFFF5C00)
+            // The conversation card is a tile now (v1.2.18): the same cyan glass as the
+            // put-up windows — near-black translucent, 1dp cyan border, Rajdhani header.
+            // The orange is gone. What it shows and how it dismisses are unchanged.
+            val sheet = Color(0xE6071116)
+            val text = Color(0xFFFFFFFF)
+            val muted = Color(0xFF9ADFE8)
+            val accent = Color(0xFF22D3EE)
+            val shape = RoundedCornerShape(14.dp)
+            val rajdhani = FontFamily(
+                Font(R.font.rajdhani_medium, FontWeight.Medium),
+                Font(R.font.rajdhani_semibold, FontWeight.SemiBold)
+            )
             Box(
                 Modifier.fillMaxSize().clickable {
                     Speaker.stop()
@@ -308,14 +319,15 @@ class AssistActivity : ComponentActivity() {
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(12.dp)
-                        .background(sheet, RoundedCornerShape(16.dp))
+                        .border(1.dp, accent, shape)
+                        .background(sheet, shape)
                         .padding(horizontal = 22.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val mic by Glasses.inputSource.collectAsState()
                     Text(
-                        "${Prefs.name} · $state" + (if (state == "listening" && mic.isNotBlank()) " · $mic" else ""),
-                        color = accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp
+                        ("${Prefs.name} · $state" + (if (state == "listening" && mic.isNotBlank()) " · $mic" else "")).uppercase(),
+                        color = accent, fontFamily = rajdhani, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 1.5.sp
                     )
                     if (heard.isNotBlank()) Text("You: $heard", color = muted, fontSize = 15.sp)
                     if (said.isNotBlank()) Text(said, color = text, fontSize = 19.sp, fontWeight = FontWeight.Medium)

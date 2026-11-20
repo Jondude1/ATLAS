@@ -3,6 +3,8 @@ package com.jondude.anzu.assist
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.provider.CalendarContract
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.Motion
@@ -12,6 +14,8 @@ import com.jondude.anzu.When
 import com.jondude.anzu.Prefs
 import com.jondude.anzu.Speaker
 import com.jondude.anzu.Store
+import com.jondude.anzu.overlay.HoloCards
+import com.jondude.anzu.overlay.TileManager
 import com.jondude.anzu.has
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -152,6 +156,36 @@ object HomeAssistant {
     fun states(): JSONArray? = try {
         val (code, body) = Net.get(base() + "/api/states", auth(), 15_000)
         if (code in 200..299) JSONArray(body) else null
+    } catch (e: Exception) {
+        null
+    }
+
+    /** One camera Home Assistant reports: its entity id and the name Jon knows it by. */
+    data class HaCamera(val entityId: String, val name: String)
+
+    /** Every camera.* entity HA reports, named by friendly name. Empty when HA is unset or unreachable. Blocking. */
+    fun cameras(): List<HaCamera> {
+        if (!configured()) return emptyList()
+        val arr = states() ?: return emptyList()
+        val out = ArrayList<HaCamera>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("entity_id")
+            if (!id.startsWith("camera.")) continue
+            val name = o.optJSONObject("attributes")?.optString("friendly_name")?.trim().orEmpty()
+                .ifBlank { id.substringAfter('.').replace('_', ' ').replaceFirstChar { it.uppercase() } }
+            out.add(HaCamera(id, name))
+        }
+        return out
+    }
+
+    /**
+     * A still from one camera via HA's camera proxy. Blocking; null on any failure.
+     * These are refreshed snapshots, and the tile layer labels them as such — never "live".
+     */
+    fun cameraSnapshot(entityId: String): Bitmap? = try {
+        val (code, bytes) = Net.requestBytes("GET", base() + "/api/camera_proxy/" + entityId, auth(), null, 10_000)
+        if (code in 200..299 && bytes.isNotEmpty()) BitmapFactory.decodeByteArray(bytes, 0, bytes.size) else null
     } catch (e: Exception) {
         null
     }
@@ -1508,6 +1542,76 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         }
     }
 
+    /**
+     * The "put it up" asks (v1.2.18): a matched show-ask becomes an overlay tile and a
+     * short spoken confirmation; anything else returns null and the ask flows to the
+     * model exactly as before. Blocking (HA / hub fetches) — reply() runs on IO.
+     * Only real data is ever put up: a missing source gets an honest tile or line.
+     */
+    private fun putUpAsk(ctx: Context, userText: String): String? {
+        if (!PutUpIntents.mightMatch(userText)) return null
+        val cams = HomeAssistant.cameras()
+        return when (val r = PutUpIntents.match(userText, cams.map { it.name })) {
+            is PutUpIntents.Result.Camera -> {
+                if (cams.isEmpty()) {
+                    TileManager.putUpCamerasNotSetUp(ctx)
+                    "The cameras aren't set up yet — Home Assistant isn't connected, or it reports no cameras."
+                } else {
+                    val idx = PutUpIntents.resolveCamera(r.query, cams)
+                    when {
+                        idx >= 0 -> {
+                            TileManager.putUpCamera(ctx, cams[idx])
+                            "${cams[idx].name} is up."
+                        }
+                        r.query.isBlank() -> {
+                            cams.forEach { TileManager.putUpCamera(ctx, it) }
+                            "Cameras are up."
+                        }
+                        else -> "I don't have a camera matching that."
+                    }
+                }
+            }
+            PutUpIntents.Result.CamerasAll -> {
+                if (cams.isEmpty()) {
+                    TileManager.putUpCamerasNotSetUp(ctx)
+                    "The cameras aren't set up yet — Home Assistant isn't connected, or it reports no cameras."
+                } else {
+                    cams.forEach { TileManager.putUpCamera(ctx, it) }
+                    "Cameras are up."
+                }
+            }
+            PutUpIntents.Result.Brief -> {
+                val b = Hub.brief(0)
+                if (b == null) {
+                    "I can't reach the hub on Obelisk right now, so I don't have a brief to put up."
+                } else {
+                    val lines = b.urgent.map { "${it.app}: ${it.title}" } + HoloCards.lines(b.text, 6)
+                    TileManager.putUpList(ctx, "Brief", lines.ifEmpty { listOf("Nothing in the brief right now.") })
+                    "Your brief is up."
+                }
+            }
+            PutUpIntents.Result.House -> {
+                if (!HomeAssistant.configured()) {
+                    "Home Assistant isn't set up in settings, so there's no house to show."
+                } else {
+                    TileManager.putUpData(ctx, "House", HoloCards.lines(HomeAssistant.summary(), 6))
+                    "The house is up."
+                }
+            }
+            PutUpIntents.Result.NextEvent -> {
+                val events = todayEvents(ctx)
+                if (events.isEmpty()) {
+                    TileManager.putUpData(ctx, "Next Up", listOf("Nothing else today."))
+                    "Nothing else on the calendar today."
+                } else {
+                    TileManager.putUpData(ctx, "Next Up", events)
+                    "Next up: ${events.first()}."
+                }
+            }
+            PutUpIntents.Result.None -> null
+        }
+    }
+
     /** Jon said (or typed) something; Atlas answers. */
     suspend fun reply(
         ctx: Context, said: String, pipe: SpeechPipe? = null, confirm: suspend (String) -> Boolean = { false }
@@ -1551,6 +1655,12 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
             if (b != null && b.urgent.isNotEmpty()) Hub.ack(b.urgent.map { it.id })
             record(userText, text)
             return@withContext text
+        }
+        // "Put it up": show-asks become overlay tiles (v1.2.18), matched before any model call.
+        // Returns the line to speak, or null when the ask isn't a put-up and should flow on.
+        putUpAsk(ctx, userText)?.let { said ->
+            record(userText, said)
+            return@withContext said
         }
         try {
             Mcp.refresh()
