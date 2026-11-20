@@ -76,11 +76,15 @@ object Hub {
 
     private const val PROVISION_RETRY_MS = 6 * 60 * 60 * 1000L
 
-    /** True (and stamps the attempt) when Hermes still needs its config, the hub is set up, and no attempt ran in the last 6 hours. */
+    /**
+     * True (and stamps the attempt) when Hermes still needs its KEY, the hub is set up,
+     * and no attempt ran in the last 6 hours. The gate is the key, not Hermes.configured():
+     * the Hermes URL is hardwired now (Prefs.hermesUrl defaults to HERMES_URL), so
+     * "configured" is always true and would starve provisioning forever.
+     */
     @Synchronized
-    private fun claimProvisionAttempt(): Boolean {
-        if (Hermes.configured() || !configured() || Prefs.hubToken.isBlank()) return false
-        val now = System.currentTimeMillis()
+    internal fun claimProvisionAttempt(now: Long = System.currentTimeMillis()): Boolean {
+        if (Prefs.hermesKey.isNotBlank() || !configured() || Prefs.hubToken.isBlank()) return false
         if (now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
         Prefs.hermesProvisionTriedAt = now
         return true
@@ -101,9 +105,9 @@ object Hub {
         }
     }
 
-    /** Background version of [provisionHermesNow]; a cheap no-op when already configured or tried recently. */
+    /** Background version of [provisionHermesNow]; a cheap no-op once the key has landed or when tried recently. */
     fun provisionHermesIfNeeded() {
-        if (Hermes.configured()) return
+        if (Prefs.hermesKey.isNotBlank()) return
         Atlas.scope.launch(Dispatchers.IO) { provisionHermesNow() }
     }
 

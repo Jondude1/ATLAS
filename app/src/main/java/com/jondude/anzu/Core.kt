@@ -64,6 +64,8 @@ const val KOKORO_TTS = "http://100.65.202.81:8880/v1"
 const val CHATTERBOX_TTS = "http://100.65.202.81:8881/v1"
 /** Helios relay MCP on Athena (hardwired, spec A6). */
 const val HELIOS_RELAY = "http://100.67.98.121:8095/mcp"
+/** Hermes on Athena (hardwired, 2026-11-20: Jon put this phone on Tailscale for exactly this). Address + model are built in; the KEY is not — it is provisioned from the hub's token-protected /atlas/hermes-config. */
+const val HERMES_URL = "http://100.67.98.121:8642/v1"
 
 /** MagicDNS names → tailnet IPs, so an address typed or saved by name still works when the name won't resolve. */
 val TAILNET = mapOf(
@@ -174,6 +176,16 @@ object Prefs {
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
             e.apply()
         }
+        if (!sp.getBoolean("hardwireHermesV1", false)) {
+            // Hermes is hardwired (2026-11-20): force the built-in Athena tailnet address on
+            // every install, including ones that saved a blank or typed URL. The model is
+            // only filled when blank (the hub payload names the same model anyway); the key
+            // is never touched here — it comes from the hub, never from source.
+            val e = sp.edit().putBoolean("hardwireHermesV1", true)
+            e.putString("hermesUrl", HERMES_URL)
+            if (sp.getString("hermesModel", "").isNullOrBlank()) e.putString("hermesModel", "hermes-agent")
+            e.apply()
+        }
     }
 
     val KNOWN_MODELS = listOf("claude-sonnet-5-5", "claude-sonnet-4-5", "claude-haiku-4-5")
@@ -232,7 +244,7 @@ object Prefs {
     var wakeWord by BoolPref("wakeWord", true)
     var callNotes by BoolPref("callNotes", false)
     var vaultUri by StrPref("vaultUri", "")
-    var hermesUrl by StrPref("hermesUrl", "")
+    var hermesUrl by StrPref("hermesUrl", HERMES_URL)
     var hermesKey by StrPref("hermesKey", "")
     var hermesModel by StrPref("hermesModel", "hermes-agent")
     var hermesProvisionTriedAt by LongPref("hermesProvisionTriedAt", 0L)

@@ -1800,10 +1800,17 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
         }
 
         Section("Hermes and your vault") {
-            Text("${Prefs.name} hands bigger, tool-heavy jobs to Hermes through the hub on Obelisk, then reports back. A direct Hermes address is only needed if you're not using the hub.", color = Muted, fontSize = 13.sp)
-            PrefField("Hermes API address (ends in /v1)", Prefs.hermesUrl) { Prefs.hermesUrl = it.trim() }
-            PrefField("Hermes API key (if it needs one)", Prefs.hermesKey, secret = true) { Prefs.hermesKey = it.trim() }
-            PrefField("Model name to send", Prefs.hermesModel) { Prefs.hermesModel = it.trim() }
+            Text("${Prefs.name} hands bigger, tool-heavy jobs to Hermes through the hub on Obelisk, then reports back.", color = Muted, fontSize = 13.sp)
+            // Hardwired 2026-11-20: address and model are built in, not editable — an edit
+            // here could only break the tailnet hardwiring. The key is never typed either;
+            // the hub provisions it (Settings → Obelisk and local models → Hub token).
+            Text("Hermes: built in — Athena via Tailscale (${HERMES_URL.removePrefix("http://")})", color = Cream, fontSize = 15.sp)
+            Text("Model: ${Prefs.hermesModel} (built in)", color = Muted, fontSize = 13.sp)
+            Text(
+                if (Prefs.hermesKey.isBlank()) "Hermes key: not provisioned yet — it arrives from the hub once the hub token is in."
+                else "Hermes key: provisioned from the hub.",
+                color = Muted, fontSize = 13.sp
+            )
             var vault by remember { mutableStateOf(Prefs.vaultUri) }
             val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
                 if (uri != null) {

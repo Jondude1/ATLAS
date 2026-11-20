@@ -256,6 +256,21 @@ object Ears {
     /** Earcons are Atlas's body language, soft enough for all-day wear. See [Earcons]. */
     fun earcon(kind: String) = Earcons.play(kind)
 
+    /** The recognizer of the live one-shot session, so a hold-to-talk UI can end it on release. */
+    @Volatile
+    private var activeSr: SpeechRecognizer? = null
+
+    /**
+     * Ends the current recognition session and lets it deliver whatever it has heard —
+     * the "release sends" half of push-to-talk. No-op when nothing is listening.
+     */
+    fun stopListening() {
+        try {
+            activeSr?.stopListening()
+        } catch (_: Exception) {
+        }
+    }
+
     /** Returns what was heard, or null on silence / failure. */
     suspend fun listen(ctx: Context): Heard? = withContext(Dispatchers.Main) {
         val app = ctx.applicationContext
@@ -335,11 +350,13 @@ object Ears {
         val sr = if (onDevice && SpeechRecognizer.isOnDeviceRecognitionAvailable(app)) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(app)
         } else SpeechRecognizer.createSpeechRecognizer(app)
+        activeSr = sr
         var finished = false
         var peak = -10f
         fun finish(v: Heard?) {
             if (finished) return
             finished = true
+            if (activeSr === sr) activeSr = null
             try {
                 sr.destroy()
             } catch (_: Exception) {
@@ -382,6 +399,7 @@ object Ears {
             Handler(Looper.getMainLooper()).post {
                 if (!finished) {
                     finished = true
+                    if (activeSr === sr) activeSr = null
                     try {
                         sr.cancel()
                         sr.destroy()

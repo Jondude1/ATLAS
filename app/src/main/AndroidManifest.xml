@@ -66,6 +66,19 @@
             </intent-filter>
         </activity>
 
+        <!-- The Atlas AI Launcher: holds the HOME role on the dedicated Atlas phone. -->
+        <activity
+            android:name=".launcher.LauncherActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- Launched by the glasses' voice-assistant gesture -->
         <activity
             android:name=".overlay.ArActivity"
