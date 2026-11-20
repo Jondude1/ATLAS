@@ -132,6 +132,37 @@ class LauncherLogicTest {
     }
 
     @Test
+    fun wakeLabelStates() {
+        // Wake word off wins over everything.
+        assertEquals("OFF", LauncherLogic.wakeLabel(false, false, "off", 2))
+        assertEquals("OFF", LauncherLogic.wakeLabel(false, true, "listening · phone mic", 2))
+        // On but no mic permission: it can never hear, whatever the listener says.
+        assertEquals("NO MIC PERMISSION", LauncherLogic.wakeLabel(true, false, "off", 2))
+        assertEquals("NO MIC PERMISSION", LauncherLogic.wakeLabel(true, false, "listening · phone mic", 2))
+        // Listening on the phone mic earns the full label; other routes are just LISTENING.
+        assertEquals("LISTENING · PHONE MIC", LauncherLogic.wakeLabel(true, true, "listening · phone mic", 2))
+        assertEquals("LISTENING", LauncherLogic.wakeLabel(true, true, "listening · buds", 0))
+        // Enabled and permitted but not currently listening (music, call, quiet): PAUSED.
+        assertEquals("PAUSED", LauncherLogic.wakeLabel(true, true, "paused: music playing", 2))
+        assertEquals("PAUSED", LauncherLogic.wakeLabel(true, true, "off", 2))
+    }
+
+    @Test
+    fun responseNeedsReadingOnlyWhenSuppressedAndUnread() {
+        val full = "Your brief is ready, and the door sensor reported the garage open."
+        // Speech withheld by the headphones gate + not yet opened: needs reading.
+        assertTrue(LauncherLogic.responseNeedsReading(full, speechSuppressed = true, readText = ""))
+        // Already opened (readText is this exact response): stops asking.
+        assertFalse(LauncherLogic.responseNeedsReading(full, speechSuppressed = true, readText = full))
+        // Spoken aloud: never needs reading, even if never opened.
+        assertFalse(LauncherLogic.responseNeedsReading(full, speechSuppressed = false, readText = ""))
+        // Nothing to read: no affordance for an empty response.
+        assertFalse(LauncherLogic.responseNeedsReading("", speechSuppressed = true, readText = ""))
+        // A newer suppressed response after an older one was read: asks again.
+        assertTrue(LauncherLogic.responseNeedsReading("A newer reply.", speechSuppressed = true, readText = full))
+    }
+
+    @Test
     fun staleTextAfterFiveMinutes() {
         assertNull(LauncherLogic.staleText(0))
         assertNull(LauncherLogic.staleText(4 * 60_000L))

@@ -1716,6 +1716,11 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
                 "Right now: $wakeNow." + if (Prefs.lastWake > 0) " Last woke ${timeAgo(Prefs.lastWake)} through ${Prefs.lastWakeSource}." else "",
                 color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
             )
+            ToggleRow(
+                "Spoken responses: headphones only",
+                "Atlas speaks out loud only while earphones or headphones are connected. Without them, replies stay on screen in full and announcements wait in the held digest instead of being spoken to the room.",
+                Prefs.headphonesOnlySpeech
+            ) { Prefs.headphonesOnlySpeech = it }
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)

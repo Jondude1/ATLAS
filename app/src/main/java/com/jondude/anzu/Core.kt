@@ -176,6 +176,15 @@ object Prefs {
             if (sp.getString("name", null) == "Corin") e.putString("name", "Atlas")
             e.apply()
         }
+        if (!sp.getBoolean("launcherMicV1", false)) {
+            // v1.2.17 (Jon, 2026-11-20): "it needs to listen in the phone" — on the Atlas
+            // launcher phone the wake word and the voice loop use the phone's own mics.
+            // Fires exactly once; a mic source Jon later picks in Settings is his and
+            // survives every later init.
+            val e = sp.edit().putBoolean("launcherMicV1", true)
+            e.putInt("micSource", 2)
+            e.apply()
+        }
         if (!sp.getBoolean("hardwireHermesV1", false)) {
             // Hermes is hardwired (2026-11-20): force the built-in Athena tailnet address on
             // every install, including ones that saved a blank or typed URL. The model is
@@ -278,6 +287,10 @@ object Prefs {
     var micSource by IntPref("micSource", 0)
     /** Hands-free "Atlas" through a headset or the phone (WakeListener). On by default. */
     var wakeListen by BoolPref("wakeListen", true)
+    /** Jon's rule (v1.2.17): spoken responses only while earphones/headphones are connected. On by default. */
+    var headphonesOnlySpeech by BoolPref("headphonesOnlySpeech", true)
+    /** The launcher has asked for the microphone once (for the wake word); never nag again after that. */
+    var wakeMicPrompted by BoolPref("wakeMicPromptedV1", false)
     // Context Discretion
     var guestsUntil by LongPref("guestsUntil", 0L)
     var bedtimeHour by IntPref("bedtimeHour", 23)

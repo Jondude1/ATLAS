@@ -265,7 +265,14 @@ object Atlas {
                     // Nothing worn: hand off to a house speaker if one is set up.
                     val handedOff = !Glasses.connected.value && Prefs.houseSpeaker &&
                         kotlinx.coroutines.withContext(Dispatchers.IO) { HomeAssistant.say(said) }
-                    if (!handedOff) Speaker.say(said)
+                    if (!handedOff) {
+                        // Headphones-only rule (v1.2.17): with nothing in his ears, speech
+                        // would go to the room and leave no trace beyond lastSaid — hold
+                        // the line for the "What did I miss?" digest instead. (polite()
+                        // already holds its non-urgent lines the same way; announce is
+                        // the direct path, so it gets the same treatment here.)
+                        if (Speaker.maySpeakNow()) Speaker.say(said) else Glasses.hold(said)
+                    }
                 } finally {
                     speakingSource = ""
                     Glasses.atlasState.value = "idle"

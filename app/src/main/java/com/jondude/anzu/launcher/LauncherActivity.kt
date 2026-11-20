@@ -12,7 +12,9 @@ import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -84,11 +86,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.core.view.WindowInsetsControllerCompat
 import com.jondude.anzu.Ears
 import com.jondude.anzu.Glasses
 import com.jondude.anzu.GlassesService
 import com.jondude.anzu.MainActivity
 import com.jondude.anzu.Prefs
+import com.jondude.anzu.Speaker
+import com.jondude.anzu.WakeListener
 import com.jondude.anzu.R
 import com.jondude.anzu.Store
 import com.jondude.anzu.assist.Atlas
@@ -98,6 +103,7 @@ import com.jondude.anzu.assist.HomeAssistant
 import com.jondude.anzu.assist.Hub
 import com.jondude.anzu.assist.Local
 import com.jondude.anzu.assist.OnDevice
+import com.jondude.anzu.assist.Spoken
 import com.jondude.anzu.assist.Timers
 import com.jondude.anzu.firstSentence
 import com.jondude.anzu.has
@@ -177,6 +183,19 @@ class LauncherActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Full-bleed black like the mockups: the launcher owns its window chrome.
+        // Scoped to this activity only — the rest of the app keeps its own styling.
+        window.statusBarColor = android.graphics.Color.BLACK
+        window.navigationBarColor = android.graphics.Color.BLACK
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+        // The wake word runs from the start on this phone (v1.2.17). start() is
+        // idempotent; GlassesService/OverlayService call it too. The listener itself
+        // still gates on the mic permission + micArmed (set by the service start on
+        // resume below), so this is safe before either lands.
+        WakeListener.start(this)
         OverlayService.ensureRunning(this)
         setContent {
             MaterialTheme(colorScheme = hudColors(), typography = hudTypography()) {
@@ -189,6 +208,7 @@ class LauncherActivity : ComponentActivity() {
         super.onResume()
         resumes.intValue++
         GlassesService.start(this, true)
+        WakeListener.start(this)
     }
 }
 
@@ -240,6 +260,16 @@ fun LauncherHome(resumes: Int) {
     val micLevel by Glasses.micLevel.collectAsState()
     val heldItems by Glasses.heldItems.collectAsState()
     val heldCount by Glasses.heldCount.collectAsState()
+    val wakeState by WakeListener.state.collectAsState()
+
+    // ---- wake word mic permission (v1.2.17): asked once, from the setup card ----
+    var micGranted by remember { mutableStateOf(ctx.has(Manifest.permission.RECORD_AUDIO)) }
+    var micPrompted by remember { mutableStateOf(Prefs.wakeMicPrompted) }
+    val micRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        micGranted = granted
+        if (granted) WakeListener.start(appCtx)
+    }
+    val wakeText = LauncherLogic.wakeLabel(Prefs.wakeListen, micGranted, wakeState, Prefs.micSource)
 
     // ---- live data, refreshed once a minute while the launcher is up (Home's cadence) ----
     var hubUp by remember { mutableStateOf<Boolean?>(null) }
@@ -264,6 +294,7 @@ fun LauncherHome(resumes: Int) {
             transport = transportLabel(ctx)
             nowMs = System.currentTimeMillis()
             calendarGranted = ctx.has(Manifest.permission.READ_CALENDAR)
+            micGranted = ctx.has(Manifest.permission.RECORD_AUDIO)
             nextUp = withContext(Dispatchers.IO) { Brain.todayEvents(ctx) }
             val brief = withContext(Dispatchers.IO) { Hub.brief() }
             if (brief != null) {
@@ -412,6 +443,18 @@ fun LauncherHome(resumes: Int) {
         if (showDrawer) showDrawer = false else showDetail = false
     }
 
+    // ---- the full last response, readable on screen (Jon, v1.2.17) ----
+    // Speech-only-on-earphones means an unspoken reply must be fully readable here.
+    // Spoken.lastFull is the untruncated text of the last reply; lastSaid carries the
+    // same full text for lines that arrived outside the reply path. Neither is ever
+    // truncated in the detail view — only the home preview line shortens.
+    val fullResponse = Spoken.lastFull.ifBlank { lastSaid }
+    var readResponse by remember { mutableStateOf("") }
+    val unreadResponse = LauncherLogic.responseNeedsReading(fullResponse, Speaker.lastSaySuppressed, readResponse)
+    LaunchedEffect(showDetail) {
+        if (showDetail) readResponse = fullResponse
+    }
+
     val tier = LauncherLogic.brainTierLabel(
         hermesReady = Hermes.configured() && Prefs.hermesKey.isNotBlank(),
         onDevicePreferred = OnDevice.preferred(ctx),
@@ -504,6 +547,13 @@ fun LauncherHome(resumes: Int) {
                 )
             }
             Spacer(Modifier.height(26.dp))
+            if (fullResponse.isNotBlank()) {
+                // The whole reply, untruncated and scrollable with the page — this is
+                // where Jon reads what the headphones-only rule kept him from hearing.
+                DetailRow("LAST RESPONSE") {
+                    Text(fullResponse, color = Hud.Text, fontSize = 16.sp, lineHeight = 23.sp)
+                }
+            }
             DetailRow("NEXT UP") {
                 when {
                     !calendarGranted -> Text("Calendar permission not granted.", color = Hud.Muted, fontSize = 16.sp)
@@ -535,6 +585,7 @@ fun LauncherHome(resumes: Int) {
             }
             DetailRow("SYSTEM") {
                 DiagLine("BRAIN", tier)
+                DiagLine("WAKE", wakeText)
                 DiagLine("HUB", LauncherLogic.hubLabel(hubUp))
                 DiagLine("LINK", LauncherLogic.linkLabel(LauncherLogic.linkState(hubUp, hermesUp)) + " · " + transport)
                 DiagLine("POWER", (if (phoneBattery >= 0) "$phoneBattery%" else "unknown") + if (charging) " · charging" else "")
@@ -587,6 +638,14 @@ fun LauncherHome(resumes: Int) {
                     "HERMES_DOWN" -> "HERMES DOWN"
                     "CHECKING" -> "…"
                     else -> transport
+                }
+            )
+            // Compact form for the strip; the full label is on the C4 SYSTEM rows.
+            TinyDiag(
+                "WAKE", when (wakeText) {
+                    "LISTENING · PHONE MIC" -> "LISTENING"
+                    "NO MIC PERMISSION" -> "NO MIC"
+                    else -> wakeText
                 }
             )
         }
@@ -649,8 +708,20 @@ fun LauncherHome(resumes: Int) {
             }
             Text(
                 stateLine, color = Hud.Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                lineHeight = 18.sp, modifier = Modifier.fillMaxWidth().padding(top = 12.dp, start = 12.dp, end = 12.dp)
+                lineHeight = 18.sp,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp, start = 12.dp, end = 12.dp)
+                    .then(if (lastSaid.isNotBlank()) Modifier.clickable { showDetail = true } else Modifier)
             )
+            if (unreadResponse) {
+                // The reply was never spoken (no earphones): make the unread full text
+                // unmissable until it's opened. One quiet cyan line, house style.
+                Text(
+                    "TAP TO READ FULL RESPONSE", color = Hud.Ring, fontFamily = HudFont,
+                    fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.8.sp,
+                    modifier = Modifier.clickable { showDetail = true }
+                        .padding(top = 8.dp, start = 16.dp, end = 16.dp, bottom = 2.dp)
+                )
+            }
             // Quiet quick actions (brief scope), text-weight only so the screen stays C1-quiet.
             Row(
                 Modifier.padding(top = 10.dp),
@@ -752,6 +823,25 @@ fun LauncherHome(resumes: Int) {
                 )
             }
         }
+        // Wake word needs the microphone once (v1.2.17). Asked exactly once: after a
+        // denial this card never comes back — only the WAKE diagnostics line remains.
+        if (Prefs.wakeListen && !micGranted && !micPrompted) {
+            Spacer(Modifier.height(18.dp))
+            DetailRow("SETUP · MICROPHONE") {
+                Text(
+                    "Atlas listens for its name through this phone's microphone — nothing leaves the phone until it hears it. Android needs your OK once.",
+                    color = Hud.Text, fontSize = 15.sp, lineHeight = 21.sp
+                )
+                Text(
+                    "GRANT MICROPHONE", color = Hud.Ring, fontFamily = HudFont, fontWeight = FontWeight.Bold, letterSpacing = 2.sp,
+                    modifier = Modifier.clickable {
+                        Prefs.wakeMicPrompted = true
+                        micPrompted = true
+                        micRequest.launch(Manifest.permission.RECORD_AUDIO)
+                    }.padding(top = 10.dp)
+                )
+            }
+        }
         Spacer(Modifier.height(20.dp))
     }
 
@@ -810,9 +900,15 @@ fun LauncherHome(resumes: Int) {
             containerColor = Hud.TitaniumDark, titleContentColor = Hud.Text, textContentColor = Hud.Text,
             title = { Text("WHAT DID I MISS?", fontFamily = HudFont, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Every held line, in full, scrollable: held lines are stored whole
+                // (Glasses.hold never truncates), and an announcement Jon couldn't hear
+                // must be readable end to end here — no silent 8-item cap.
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     if (heldItems.isEmpty()) Text("Nothing was held back.", color = Hud.Muted, fontSize = 16.sp)
-                    else heldItems.takeLast(8).reversed().forEach { line ->
+                    else heldItems.reversed().forEach { line ->
                         Text(line, color = Hud.Text, fontSize = 15.sp, lineHeight = 20.sp)
                     }
                 }
@@ -941,7 +1037,7 @@ private fun fibonacciSphere(n: Int): List<SpherePoint> {
 }
 
 /**
- * The living sphere itself (C1): ~180 cyan points on a sphere, drifting slowly around
+ * The living sphere itself (C1): ~260 cyan points on a sphere, drifting slowly around
  * the Y axis, front points brighter and larger than back points. Drawn in Compose
  * rather than reusing the overlay's ParticleOrbView because that view mixes orange
  * points into its field — this palette is cyan-only. While listening the sphere
@@ -950,7 +1046,7 @@ private fun fibonacciSphere(n: Int): List<SpherePoint> {
  */
 @Composable
 private fun PointSphere(state: String, animate: Boolean, micLevel: Float, modifier: Modifier = Modifier) {
-    val points = remember { fibonacciSphere(180) }
+    val points = remember { fibonacciSphere(260) }
     val transition = rememberInfiniteTransition(label = "sphere-drift")
     val rotLive by transition.animateFloat(
         0f, (2 * Math.PI).toFloat(), infiniteRepeatable(tween(46_000, easing = LinearEasing), RepeatMode.Restart), label = "drift"
@@ -963,7 +1059,7 @@ private fun PointSphere(state: String, animate: Boolean, micLevel: Float, modifi
     val sinT = sin(tilt.toDouble()).toFloat()
     Canvas(modifier) {
         val c = center
-        val base = size.minDimension / 2 * 0.94f
+        val base = size.minDimension / 2 * 0.97f
         val swell = if (state == "listening") 1f + micLevel * 0.05f else 1f
         val r = base * swell
         // Rotate every point (Y drift, then a fixed X tilt), then paint back-to-front.
@@ -980,7 +1076,7 @@ private fun PointSphere(state: String, animate: Boolean, micLevel: Float, modifi
             val col = androidx.compose.ui.graphics.lerp(Hud.Blue, Hud.Ring, 0.35f + 0.65f * depth)
             drawCircle(
                 col.copy(alpha = 0.18f + 0.82f * depth),
-                0.4.dp.toPx() + (0.7f + 1.5f * depth).dp.toPx() / 2f,
+                (0.7f + 1.3f * depth).dp.toPx(),
                 pos
             )
         }
@@ -1039,7 +1135,7 @@ private fun SphereStage(
             }
         }
         Box(
-            Modifier.size(196.dp).clip(CircleShape)
+            Modifier.size(216.dp).clip(CircleShape)
                 .semantics { contentDescription = "Hold to talk to Atlas" }
                 .pointerInput(Unit) {
                     detectTapGestures(onPress = {

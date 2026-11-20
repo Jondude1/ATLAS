@@ -28,6 +28,30 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
+/**
+ * Which audio outputs count as "in his ears only" for the headphones-only speech rule
+ * (Jon, v1.2.17). The AudioDeviceInfo type codes are pinned as plain ints so the set is
+ * exact and testable without the framework: 3 wired headset, 4 wired headphones,
+ * 7 Bluetooth SCO, 8 Bluetooth A2DP, 22 USB headset, 26 BLE headset. The phone speaker,
+ * the earpiece and anything else do NOT count — speech there is spoken to the room.
+ */
+object SpeakerGate {
+    const val WIRED_HEADSET = 3
+    const val WIRED_HEADPHONES = 4
+    const val BT_SCO = 7
+    const val BT_A2DP = 8
+    const val USB_HEADSET = 22
+    const val BLE_HEADSET = 26
+
+    val PERSONAL_TYPES: Set<Int> = setOf(WIRED_HEADSET, WIRED_HEADPHONES, BT_SCO, BT_A2DP, USB_HEADSET, BLE_HEADSET)
+
+    fun hasPersonal(outputTypes: Collection<Int>): Boolean = outputTypes.any { it in PERSONAL_TYPES }
+
+    /** With the rule on, speech needs a personal listening device connected; off, Atlas speaks anywhere. */
+    fun maySpeak(outputTypes: Collection<Int>, headphonesOnly: Boolean): Boolean =
+        !headphonesOnly || hasPersonal(outputTypes)
+}
+
 /** Atlas's voice: text-to-speech that suspends until the line is finished. */
 object Speaker : TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -41,6 +65,15 @@ object Speaker : TextToSpeech.OnInitListener {
     /** Why the last premium-voice attempt fell back to the phone voice, for the settings screen. */
     @Volatile
     var lastCloudError = ""
+
+    /**
+     * True when the most recent say() was withheld by the headphones-only gate: the
+     * text landed on screen in full (lastSaid / Spoken.lastFull) but was never spoken.
+     * The launcher uses this to offer the full response for reading until it's opened.
+     */
+    @Volatile
+    var lastSaySuppressed: Boolean = false
+        private set
 
     /** -1 (left) .. 1 (right): the voice leans toward the side of the screen the hologram is on. */
     @Volatile
@@ -56,12 +89,37 @@ object Speaker : TextToSpeech.OnInitListener {
             .setAudioAttributes(attrs)
             .build()
 
+    @Volatile
+    private var deviceWatch = false
+
     fun init(c: Context) {
         appCtx = c.applicationContext
         am = appCtx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (!deviceWatch) {
+            deviceWatch = true
+            try {
+                am.registerAudioDeviceCallback(object : android.media.AudioDeviceCallback() {
+                    override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                        // The last earphone/headphone went away mid-line: stop talking out loud.
+                        if (removedDevices.any { it.type in SpeakerGate.PERSONAL_TYPES } && !maySpeakNow()) stop()
+                    }
+                }, null)
+            } catch (_: Exception) {
+            }
+        }
         val engine = Prefs.ttsEngine
         tts = if (engine.isBlank()) TextToSpeech(appCtx, this) else TextToSpeech(appCtx, this, engine)
     }
+
+    /** The output device types connected right now — read at speak time, since devices come and go mid-conversation. */
+    fun outputTypes(): Set<Int> = try {
+        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }.toSet()
+    } catch (_: Exception) {
+        emptySet()
+    }
+
+    /** Whether a line may be spoken out loud right now, under Jon's headphones-only rule. */
+    fun maySpeakNow(): Boolean = SpeakerGate.maySpeak(outputTypes(), Prefs.headphonesOnlySpeech)
 
     /** Re-create the speech engine after the engine choice changes. */
     fun restart() {
@@ -201,6 +259,15 @@ object Speaker : TextToSpeech.OnInitListener {
         Glasses.lastSaid.value = text // shown on screen in full, even if the speech engine is unavailable
         com.jondude.anzu.assist.Spoken.lastFull = text
         @Suppress("NAME_SHADOWING") val text = com.jondude.anzu.assist.Spoken.forEar(text, conversation)
+        // Headphones-only rule (v1.2.17): with nothing in his ears the line is not spoken
+        // to the room. lastSaid/Spoken.lastFull above are already set, so the reply still
+        // lands on screen in full — only the voice is withheld. The launcher reads
+        // lastSaySuppressed to offer the full text until Jon has opened it.
+        if (!maySpeakNow()) {
+            lastSaySuppressed = true
+            return
+        }
+        lastSaySuppressed = false
         if (Prefs.voiceProvider != 0 && sayCloud(text, volume)) return
         val t = tts ?: return
         var waited = 0

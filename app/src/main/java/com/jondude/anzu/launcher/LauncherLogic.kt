@@ -96,6 +96,32 @@ object LauncherLogic {
         }
     }
 
+    /**
+     * The WAKE diagnostics label (v1.2.17). The wake word being switched on is not the
+     * same as it listening: without the microphone permission it can never hear, and the
+     * listener itself pauses for music, calls and quiet time — those read as PAUSED.
+     * Only the phone-mic route (micSource 2) earns the full "LISTENING · PHONE MIC";
+     * any other live route is just LISTENING. [listenerState] is WakeListener's own
+     * status line ("listening · …", "paused: …", "off", …).
+     */
+    fun wakeLabel(enabled: Boolean, micGranted: Boolean, listenerState: String, micSource: Int): String = when {
+        !enabled -> "OFF"
+        !micGranted -> "NO MIC PERMISSION"
+        listenerState.startsWith("listening") && micSource == 2 -> "LISTENING · PHONE MIC"
+        listenerState.startsWith("listening") -> "LISTENING"
+        else -> "PAUSED"
+    }
+
+    /**
+     * Whether the latest response still needs Jon's eyes (Jon, v1.2.17): its speech was
+     * withheld by the headphones-only gate, so the short home line is all he has seen —
+     * the full text stays on offer until he opens it. [readText] is the full text he
+     * last opened in the detail view. A response that was spoken aloud never needs
+     * reading, and one he already opened stops asking.
+     */
+    fun responseNeedsReading(fullText: String, speechSuppressed: Boolean, readText: String): Boolean =
+        speechSuppressed && fullText.isNotBlank() && fullText != readText
+
     /** Hub reachability line: null while the first check is still running. */
     fun hubLabel(hubUp: Boolean?): String = when (hubUp) {
         true -> "Hub · connected"
