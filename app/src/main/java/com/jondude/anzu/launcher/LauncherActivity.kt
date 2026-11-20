@@ -135,27 +135,7 @@ import kotlin.math.sin
  * are labeled, never fabricated. Drawer: swipe-up or the chevron, all launchable apps
  * via PackageManager, with search.
  */
-private object Hud {
-    val Ground = Color(0xFF000000)           // matte black (C1)
-    val TitaniumDark = Color(0xFF14181D)     // brushed titanium, low end (C4)
-    val TitaniumLight = Color(0xFF2B333B)    // brushed titanium, high end (C4)
-    val Glass = Color(0x2EFFFFFF)            // frosted row fill (C4: white glass on titanium)
-    val Pill = Color(0xFF1C1C1E)              // the Ask Atlas pill (C1)
-    val Ring = Color(0xFF3FE3E0)             // the one ring: teal-cyan
-    val Cyan = Color(0xFF46D8FF)
-    val Blue = Color(0xFF2E7CF6)
-    val Pale = Color(0xFF9ADFE8)              // quiet status lines (C1)
-    val Text = Color(0xFFFFFFFF)
-    val Muted = Color(0xFF8A97A0)
-    val Hairline = Color(0xFF2A7F8C)
-}
-
-private val HudFont = FontFamily(
-    Font(R.font.rajdhani_regular, FontWeight.Normal),
-    Font(R.font.rajdhani_medium, FontWeight.Medium),
-    Font(R.font.rajdhani_semibold, FontWeight.SemiBold),
-    Font(R.font.rajdhani_bold, FontWeight.Bold)
-)
+// Hud palette + HudFont live in Orb.kt (shared with the lock-screen orb, v1.2.19).
 
 private fun hudColors() = darkColorScheme(
     primary = Hud.Cyan, onPrimary = Color(0xFF02141C),
@@ -1016,68 +996,6 @@ private fun Waveform(micLevel: Float, animate: Boolean) {
             drawLine(
                 Hud.Ring, Offset(i * bw + bw / 2, mid - h / 2), Offset(i * bw + bw / 2, mid + h / 2),
                 strokeWidth = 2.dp.toPx()
-            )
-        }
-    }
-}
-
-/** A point on the unit sphere (Fibonacci distribution, so the field is even). */
-private class SpherePoint(val x: Float, val y: Float, val z: Float)
-
-private fun fibonacciSphere(n: Int): List<SpherePoint> {
-    val out = ArrayList<SpherePoint>(n)
-    val golden = Math.PI * (3.0 - kotlin.math.sqrt(5.0))
-    for (i in 0 until n) {
-        val y = 1.0 - (i.toDouble() / (n - 1)) * 2.0
-        val rad = kotlin.math.sqrt((1.0 - y * y).coerceAtLeast(0.0))
-        val theta = golden * i
-        out.add(SpherePoint((cos(theta) * rad).toFloat(), y.toFloat(), (sin(theta) * rad).toFloat()))
-    }
-    return out
-}
-
-/**
- * The living sphere itself (C1): ~260 cyan points on a sphere, drifting slowly around
- * the Y axis, front points brighter and larger than back points. Drawn in Compose
- * rather than reusing the overlay's ParticleOrbView because that view mixes orange
- * points into its field — this palette is cyan-only. While listening the sphere
- * swells slightly with the live mic level. Frozen (rotation held at 0) when the
- * battery rule pauses animation.
- */
-@Composable
-private fun PointSphere(state: String, animate: Boolean, micLevel: Float, modifier: Modifier = Modifier) {
-    val points = remember { fibonacciSphere(260) }
-    val transition = rememberInfiniteTransition(label = "sphere-drift")
-    val rotLive by transition.animateFloat(
-        0f, (2 * Math.PI).toFloat(), infiniteRepeatable(tween(46_000, easing = LinearEasing), RepeatMode.Restart), label = "drift"
-    )
-    val rot = if (animate) rotLive else 0f
-    val cosR = cos(rot.toDouble()).toFloat()
-    val sinR = sin(rot.toDouble()).toFloat()
-    val tilt = 0.42f
-    val cosT = cos(tilt.toDouble()).toFloat()
-    val sinT = sin(tilt.toDouble()).toFloat()
-    Canvas(modifier) {
-        val c = center
-        val base = size.minDimension / 2 * 0.97f
-        val swell = if (state == "listening") 1f + micLevel * 0.05f else 1f
-        val r = base * swell
-        // Rotate every point (Y drift, then a fixed X tilt), then paint back-to-front.
-        val rotated = points.map { p ->
-            val x1 = p.x * cosR + p.z * sinR
-            val z1 = -p.x * sinR + p.z * cosR
-            val y2 = p.y * cosT - z1 * sinT
-            val z2 = p.y * sinT + z1 * cosT
-            Triple(x1, y2, z2)
-        }.sortedBy { it.third }
-        rotated.forEach { (x, y, z) ->
-            val depth = ((z + 1f) / 2f).coerceIn(0f, 1f) // 0 back, 1 front
-            val pos = Offset(c.x + x * r, c.y + y * r)
-            val col = androidx.compose.ui.graphics.lerp(Hud.Blue, Hud.Ring, 0.35f + 0.65f * depth)
-            drawCircle(
-                col.copy(alpha = 0.18f + 0.82f * depth),
-                (0.7f + 1.3f * depth).dp.toPx(),
-                pos
             )
         }
     }

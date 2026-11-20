@@ -106,11 +106,16 @@ class OverlayService : Service() {
     private val tileImages = HashMap<String, ImageView>()
     private val tileBodies = HashMap<String, LinearLayout>()
     private val tileCloses = HashMap<String, TextView>()
+    private val tilePins = HashMap<String, TextView>()
     private val tileBitmaps = HashMap<String, Bitmap>()
+    private val tileLastTap = HashMap<String, Long>()
     private var tileChip: View? = null
     private var expandedTileId: String? = null
     private var tileTimerOn = false
     private val tileTick = Runnable { refreshTileSnapshots() }
+    // The Holodeck tile's poll (v1.2.19): re-reads its CAD job while the tile is up.
+    private var holoTimerOn = false
+    private val holoTick = Runnable { pollHolodeckTile() }
     private var ambient = false
     private var sensors: android.hardware.SensorManager? = null
     private var idLine: TextView? = null
@@ -180,6 +185,7 @@ class OverlayService : Service() {
             announceOnline(sp)
             armAmbient()
             try { registerReceiver(unlockReceiver, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)) } catch (_: Throwable) {}
+            try { registerReceiver(screenOnReceiver, android.content.IntentFilter(Intent.ACTION_SCREEN_ON)) } catch (_: Throwable) {}
         observe()
             crumb(this, "observe ok")
             scheduleRoam()
@@ -213,6 +219,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         try { unregisterReceiver(unlockReceiver) } catch (_: Throwable) {}
+        try { unregisterReceiver(screenOnReceiver) } catch (_: Throwable) {}
         WakeListener.stop()
         try { edge?.let { wm.removeView(it) } } catch (_: Throwable) {}
         edge = null
@@ -878,14 +885,30 @@ class OverlayService : Service() {
         try {
             val st = TileManager.state()
             if (expandedTileId != null && st.visible.none { it.id == expandedTileId }) expandedTileId = null
-            (tileViews.keys - st.visible.map { it.id }.toSet()).toList().forEach { id ->
+            // While a tile is grown (v1.2.19 D10 hero), it is the ONLY tile window;
+            // the rest stand behind the chip's "+N". Ungrowing re-derives the layout
+            // from the stack, so the previous arrangement comes back exactly.
+            val grownTile = st.grown
+            val shown = if (grownTile != null) listOf(grownTile) else st.visible
+            (tileViews.keys - shown.map { it.id }.toSet()).toList().forEach { id ->
                 tileViews.remove(id)?.let { v -> try { wm.removeView(v) } catch (_: Throwable) {} }
-                tileHeaders.remove(id); tileImages.remove(id); tileBodies.remove(id); tileCloses.remove(id)
+                tileHeaders.remove(id); tileImages.remove(id); tileBodies.remove(id); tileCloses.remove(id); tilePins.remove(id)
             }
-            st.visible.forEachIndexed { i, tile ->
-                val expanded = tile.id == expandedTileId
-                val p = if (expanded) TileLayout.expandedPlacement()
-                else TileLayout.placement(i, st.visible.size, st.mode, tile.kind)
+            shown.forEach { tile ->
+                val i = st.visible.indexOf(tile)
+                val grown = tile.id == st.grownId
+                val expanded = !grown && tile.id == expandedTileId
+                val p = when {
+                    grown -> TileLayout.heroPlacement()
+                    expanded -> TileLayout.expandedPlacement()
+                    else -> {
+                        val auto = TileLayout.placement(i, st.visible.size, st.mode, tile.kind)
+                        // A dragged tile opens where Jon left it; the layout engine yields.
+                        TileManager.rememberedPosition(tile.id)?.let { (x, y) ->
+                            TileLayout.Placement(x, y, auto.wFrac)
+                        } ?: auto
+                    }
+                }
                 val w = (p.wFrac * screenW).toInt()
                 val existing = tileViews[tile.id]
                 val view: View
@@ -899,7 +922,7 @@ class OverlayService : Service() {
                         PixelFormat.TRANSLUCENT
                     ).apply { gravity = Gravity.TOP or Gravity.START }
                     tileViews[tile.id] = view
-                    updateTileView(tile, expanded, w)
+                    updateTileView(tile, expanded || grown, w)
                     view.measure(
                         View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -910,7 +933,7 @@ class OverlayService : Service() {
                 } else {
                     view = existing
                     lp = view.layoutParams as WindowManager.LayoutParams
-                    updateTileView(tile, expanded, w)
+                    updateTileView(tile, expanded || grown, w)
                     if (lp.width != w) lp.width = w
                     view.measure(
                         View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
@@ -920,7 +943,7 @@ class OverlayService : Service() {
                     lp.y = tileY(p, view.measuredHeight)
                     try { wm.updateViewLayout(view, lp) } catch (_: Throwable) {}
                 }
-                view.alpha = if (expandedTileId != null && !expanded) 0.35f else 1f
+                view.alpha = if (grownTile == null && expandedTileId != null && !expanded) 0.35f else 1f
             }
             renderTileChip(st)
             syncTileTimer()
@@ -954,13 +977,33 @@ class OverlayService : Service() {
             ellipsize = TextUtils.TruncateAt.END
         }
         headRow.addView(header, LinearLayout.LayoutParams(0, -2, 1f))
+        // The pin marker (v1.2.19): a small cyan PIN tag, visible only while pinned.
+        val pin = TextView(ctx).apply {
+            text = "PIN"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f)
+            setTextColor(Color.parseColor(Holo.CYAN))
+            typeface = rajdhani(true)
+            letterSpacing = 0.18f
+            setPadding(dp(5), dp(1), dp(5), dp(1))
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                cornerRadius = dp(6).toFloat()
+                setStroke(dp(1), Color.parseColor(Holo.CYAN))
+            }
+            visibility = View.GONE
+        }
+        headRow.addView(pin)
         val close = TextView(ctx).apply {
             text = "✕"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setTextColor(Color.parseColor(Holo.CYAN))
             setPadding(dp(8), 0, dp(2), 0)
             visibility = View.GONE
-            setOnClickListener { expandedTileId = null; renderTiles() }
+            setOnClickListener {
+                if (TileManager.state().grownId == tile.id) TileManager.shrink()
+                expandedTileId = null
+                renderTiles()
+            }
         }
         headRow.addView(close)
         col.addView(headRow)
@@ -976,9 +1019,86 @@ class OverlayService : Service() {
         tileImages[tile.id] = img
         tileBodies[tile.id] = body
         tileCloses[tile.id] = close
+        tilePins[tile.id] = pin
+        // ---- the interaction layer's touch grammar (v1.2.19) ----
+        // Drag by the header: move the window live; on drop, remember the position
+        // per tile identity so the next put-up opens there.
+        var dragMoved = false
+        var dragStart: FloatArray? = null
+        var dragDownAt = 0L
+        headRow.setOnTouchListener { _, ev ->
+            val lp = root.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    dragMoved = false
+                    dragDownAt = System.currentTimeMillis()
+                    dragStart = floatArrayOf(ev.rawX, ev.rawY, lp.x.toFloat(), lp.y.toFloat())
+                    true // consume: a header touch is a drag, a tap, or a long-press — all handled here
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val start = dragStart ?: return@setOnTouchListener true
+                    val dx = ev.rawX - start[0]
+                    val dy = ev.rawY - start[1]
+                    if (!dragMoved && kotlin.math.abs(dx) + kotlin.math.abs(dy) < dp(6)) return@setOnTouchListener true
+                    dragMoved = true
+                    lp.x = (start[2] + dx).toInt().coerceIn(0, (screenW - root.width).coerceAtLeast(0))
+                    lp.y = (start[3] + dy).toInt().coerceIn(minY(), (screenH - root.height).coerceAtLeast(minY()))
+                    try { wm.updateViewLayout(root, lp) } catch (_: Throwable) {}
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    when {
+                        dragMoved -> TileManager.rememberPosition(tile.id, lp.x.toFloat() / screenW, lp.y.toFloat() / screenH)
+                        System.currentTimeMillis() - dragDownAt >= 500 -> TileManager.togglePin(tile.id) // header long-press
+                        else -> root.performClick() // a plain header tap behaves like a tap anywhere on the tile
+                    }
+                    dragStart = null
+                    true
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> { dragStart = null; true }
+                else -> true
+            }
+        }
+        // Swipe across a deck tile flicks its top card away (v1.2.19, D7).
+        var swipeDown: FloatArray? = null
+        root.setOnTouchListener { _, ev ->
+            val isDeck = TileManager.state().visible.firstOrNull { it.id == tile.id }?.cards?.isNotEmpty() == true
+            if (!isDeck) return@setOnTouchListener false
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { swipeDown = floatArrayOf(ev.rawX, ev.rawY); false }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val s = swipeDown; swipeDown = null
+                    if (s != null && kotlin.math.abs(ev.rawX - s[0]) > dp(56) && kotlin.math.abs(ev.rawX - s[0]) > kotlin.math.abs(ev.rawY - s[1])) {
+                        TileManager.advanceDeck(tile.id)
+                        true
+                    } else false
+                }
+                else -> false
+            }
+        }
         root.setOnClickListener {
-            expandedTileId = if (expandedTileId == tile.id) null else tile.id
-            renderTiles()
+            val now = System.currentTimeMillis()
+            val last = tileLastTap[tile.id] ?: 0L
+            tileLastTap[tile.id] = now
+            val st = TileManager.state()
+            val t = st.visible.firstOrNull { it.id == tile.id }
+            when {
+                // Double-tap grows to the D10 hero.
+                now - last < 350 -> { tileLastTap.remove(tile.id); TileManager.grow(tile.id) }
+                // Tapping the hero restores the layout it grew from.
+                st.grownId == tile.id -> TileManager.shrink()
+                // A deck tile's tap advances the deck (the deck IS its expanded form).
+                t?.cards?.isNotEmpty() == true -> TileManager.advanceDeck(tile.id)
+                else -> {
+                    expandedTileId = if (expandedTileId == tile.id) null else tile.id
+                    renderTiles()
+                }
+            }
+        }
+        // Long-press toggles the pin.
+        root.setOnLongClickListener {
+            TileManager.togglePin(tile.id)
+            true
         }
         return root
     }
@@ -987,6 +1107,8 @@ class OverlayService : Service() {
     private fun updateTileView(tile: OverlayTile, expanded: Boolean, widthPx: Int) {
         tileHeaders[tile.id]?.text = tile.header()
         tileCloses[tile.id]?.visibility = if (expanded) View.VISIBLE else View.GONE
+        tilePins[tile.id]?.visibility =
+            if (TileManager.state().isPinned(tile.id)) View.VISIBLE else View.GONE
         val hasImage = tile.kind == TileKind.CAMERA && !tile.imageKey.isNullOrBlank()
         tileImages[tile.id]?.let { img ->
             if (hasImage) {
@@ -1001,14 +1123,34 @@ class OverlayService : Service() {
         val body = tileBodies[tile.id] ?: return
         body.removeAllViews()
         val ctx = this
-        for (line in tile.lines.take(if (expanded) 12 else 6)) {
+        fun lineRow(text: String, sizeSp: Float, color: Int, semibold: Boolean = false, padTop: Int = 2) {
             body.addView(TextView(ctx).apply {
-                text = line
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                setTextColor(Color.parseColor("#E6FBFF"))
-                typeface = rajdhani(false)
-                setPadding(0, dp(2), 0, 0)
+                this.text = text
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+                setTextColor(color)
+                typeface = rajdhani(semibold)
+                setPadding(0, dp(padTop), 0, 0)
             }, LinearLayout.LayoutParams(-2, -2))
+        }
+        if (tile.cards.isNotEmpty()) {
+            // The fanned deck (v1.2.19, D7): the next two cards peek above the top
+            // card as dim header strips; the counter chip closes the card.
+            val idx = TileManager.deckIndex(tile.id).coerceIn(0, tile.cards.size - 1)
+            for (j in (idx + 1)..minOf(idx + 2, tile.cards.size - 1)) {
+                lineRow("▸ " + tile.cards[j].title.uppercase(), 10f, Color.parseColor("#5E8A94"), semibold = true, padTop = 3)
+            }
+            val card = tile.cards[idx]
+            if (tile.cards.size > 1 && !card.title.equals(tile.title, ignoreCase = true)) {
+                lineRow(card.title.uppercase(), 10f, Color.parseColor(Holo.CYAN), semibold = true, padTop = 4)
+            }
+            for (line in card.lines.take(if (expanded) 12 else 6)) {
+                lineRow(line, 13f, Color.parseColor("#E6FBFF"))
+            }
+            lineRow(BriefDeck.counter(idx, tile.cards.size), 9f, Color.parseColor("#5E8A94"), semibold = true, padTop = 5)
+            return
+        }
+        for (line in tile.lines.take(if (expanded) 12 else 6)) {
+            lineRow(line, 13f, Color.parseColor("#E6FBFF"))
         }
     }
 
@@ -1016,7 +1158,14 @@ class OverlayService : Service() {
     private fun renderTileChip(st: TileStack.State) {
         tileChip?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
         tileChip = null
-        val text = TileLayout.chipText(st) ?: return
+        // Grown (v1.2.19): the chip names the hero and counts what stands behind it
+        // ("+N"); its ✕ restores the layout instead of clearing.
+        val grownTile = st.grown
+        val text = if (grownTile != null) {
+            val hidden = st.total - 1
+            "ATLAS · " + grownTile.title.trim().uppercase() +
+                if (hidden > 0) "  " + TileLayout.collapsedChipText(hidden) else ""
+        } else TileLayout.chipText(st) ?: return
         val ctx = this
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1036,7 +1185,9 @@ class OverlayService : Service() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTextColor(Color.parseColor(Holo.CYAN))
             setPadding(dp(9), 0, dp(4), 0)
-            setOnClickListener { TileManager.clearAll() }
+            setOnClickListener {
+                if (TileManager.state().grownId != null) TileManager.shrink() else TileManager.clearAll()
+            }
         })
         row.measure(
             View.MeasureSpec.makeMeasureSpec(screenW, View.MeasureSpec.AT_MOST),
@@ -1065,6 +1216,22 @@ class OverlayService : Service() {
             tileTimerOn = false
             main.removeCallbacks(tileTick)
         }
+        // The Holodeck poll (v1.2.19) lives exactly as long as its tile does.
+        val holoUp = TileManager.state().visible.any { it.id == com.jondude.anzu.assist.Holodeck.TILE_ID }
+        if (holoUp && !holoTimerOn) {
+            holoTimerOn = true
+            pollHolodeckTile()
+        } else if (!holoUp && holoTimerOn) {
+            holoTimerOn = false
+            main.removeCallbacks(holoTick)
+        }
+    }
+
+    /** Re-read the Holodeck tile's CAD job on the hub; TileManager updates the tile in place on a change. */
+    private fun pollHolodeckTile() {
+        if (!holoTimerOn) return
+        scope.launch(Dispatchers.IO) { TileManager.refreshHolodeckTile() }
+        main.postDelayed(holoTick, 15_000)
     }
 
     /**
@@ -1074,7 +1241,11 @@ class OverlayService : Service() {
      */
     private fun refreshTileSnapshots() {
         if (!tileTimerOn) return
-        val cams = TileManager.state().visible.filter { it.kind == TileKind.CAMERA && !it.imageKey.isNullOrBlank() }
+        // Only tiles actually rendered get refreshed — a camera hidden behind a grown
+        // hero (v1.2.19) is not visible, so it is not polled; the grown camera is.
+        val cams = TileManager.state().visible.filter {
+            it.kind == TileKind.CAMERA && !it.imageKey.isNullOrBlank() && tileViews.containsKey(it.id)
+        }
         if (cams.isEmpty()) {
             tileTimerOn = false
             return
@@ -1653,6 +1824,22 @@ class OverlayService : Service() {
 
     private val unlockReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) { maybeMorning() }
+    }
+
+    /**
+     * The lock-screen orb's trigger (v1.2.19): the screen woke while the device is
+     * locked → put the orb over the keyguard. It never wakes the screen itself (this
+     * fires BECAUSE the screen came on) and never fires unlocked.
+     */
+    private val screenOnReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            try {
+                val km = c.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+                if (com.jondude.anzu.launcher.LockOrb.shouldShow(com.jondude.anzu.Prefs.lockOrb, km.isKeyguardLocked)) {
+                    com.jondude.anzu.launcher.LockOrbActivity.show(c)
+                }
+            } catch (_: Throwable) {}
+        }
     }
 
     /** True when the morning greeting will run at the next unlock — the one condition both the startup announcement and [maybeMorning] check. */

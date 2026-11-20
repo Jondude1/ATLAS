@@ -72,12 +72,25 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- The lock-screen orb (v1.2.19): a showWhenLocked presence over the system
+             keyguard — the dense sphere in the L3 instrument ring, no data, no text.
+             Started by OverlayService's screen-on receiver; never replaces the keyguard. -->
+        <activity
+            android:name=".launcher.LockOrbActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 
         <!-- Launched by the glasses' voice-assistant gesture -->
         <activity

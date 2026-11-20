@@ -1721,6 +1721,16 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
                 "Atlas speaks out loud only while earphones or headphones are connected. Without them, replies stay on screen in full and announcements wait in the held digest instead of being spoken to the room.",
                 Prefs.headphonesOnlySpeech
             ) { Prefs.headphonesOnlySpeech = it }
+            ToggleRow(
+                "Lock screen: Atlas orb",
+                "When the phone wakes while locked, the Atlas orb — the living sphere in its instrument ring — shows over the lock screen. No information is ever shown there, and any touch goes to the normal unlock.",
+                Prefs.lockOrb
+            ) { Prefs.lockOrb = it }
+            Text(
+                "Overlay tiles remember where you drag them. Resetting puts every tile back to its automatic placement.",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
+            SoftButton(onClick = { com.jondude.anzu.overlay.TileManager.resetPositions() }) { Text("Reset tile positions") }
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)

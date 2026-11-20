@@ -22,7 +22,55 @@ object PutUpIntents {
         object Brief : Result
         object House : Result
         object NextEvent : Result
+
+        /** The Holodeck CAD job tile (v1.2.19). */
+        object Holodeck : Result
+
+        /** Several put-ups asked in one breath (v1.2.19): each part resolves to a tile; [unresolved] names what couldn't be put up. */
+        data class Multi(val parts: List<Result>, val unresolved: List<String>) : Result
+
+        // The interaction layer's control phrases (v1.2.19), matched by [matchControl].
+        object Pin : Result
+        object Unpin : Result
+        object Grow : Result
+        object Shrink : Result
+        object ClearAll : Result
+
         object None : Result
+    }
+
+    // ---- control phrases (v1.2.19): commands ABOUT the tiles, not new put-ups ----
+
+    private val clearPhrases = setOf(
+        "clear the screen", "clear screen", "take it all down", "take everything down",
+        "take them all down", "clear everything", "clear all the tiles", "clear the tiles"
+    )
+    private val pinPhrases = setOf("keep that up", "pin that", "pin it", "keep it up", "pin that up")
+    private val unpinPhrases = setOf("unpin that", "unpin it", "let it go", "let that go")
+    private val growPhrases = setOf(
+        "make it bigger", "make that bigger", "make it big", "make this bigger",
+        "grow that", "grow it", "enlarge that", "enlarge it", "make the tile bigger"
+    )
+    private val shrinkPhrases = setOf(
+        "make it smaller", "make that smaller", "shrink that", "shrink it",
+        "make it normal size", "restore that", "restore the layout"
+    )
+
+    /**
+     * A tile-control command ("keep that up", "make it bigger", "clear the screen"),
+     * or null. These are matched BEFORE the put-up matchers: they don't start with a
+     * show verb, and "clear" alone is one of them by Jon's order.
+     */
+    fun matchControl(text: String): Result? {
+        val t = normalize(text)
+        return when {
+            t in clearPhrases || Regex("^clear( the)?( screen| tiles| all)?$").matches(t) -> Result.ClearAll
+            t in pinPhrases -> Result.Pin
+            t in unpinPhrases -> Result.Unpin
+            t in growPhrases -> Result.Grow
+            t in shrinkPhrases -> Result.Shrink
+            else -> null
+        }
     }
 
     private val showVerbs = setOf("show", "put", "bring", "display", "open")
@@ -51,8 +99,45 @@ object PutUpIntents {
     fun mightMatch(text: String): Boolean {
         val t = normalize(text)
         if (t == "whats next" || t == "what is next") return true
+        if (t == "whats my build doing" || t == "what is my build doing") return true
         val first = t.substringBefore(' ')
         return first in showVerbs
+    }
+
+    /** The Holodeck job ask: the word "holodeck" with a show verb, an anchored print/build-job phrase, or "what's my build doing". */
+    private fun isHolodeckAsk(t: String, tokens: List<String>): Boolean {
+        if (t == "whats my build doing" || t == "what is my build doing") return true
+        if ("holodeck" in tokens && tokens.first() in showVerbs) return true
+        return Regex("^(show|put|bring|display|open)( me)?( up)?( the| my)? (print job|build job|build)( up)?$").matches(t)
+    }
+
+    /** Split a one-breath ask on its conjunctions: "put the brief up and the porch" → ["put the brief up", "porch"]. */
+    fun splitAsks(t: String): List<String> =
+        t.split(Regex(" and (the |my )?")).map { it.trim() }.filter { it.isNotBlank() }
+
+    /**
+     * Multi put-up in one breath (v1.2.19): "put the brief up and the porch",
+     * "show the house and my next event", "show the cameras and the holodeck job".
+     * Each segment is matched on its own (later segments get the show verb they dropped);
+     * segments with no real source are returned in [Result.Multi.unresolved] so the
+     * confirmation can NAME them instead of silently dropping them. Null when the ask
+     * has no conjunction or nothing in it resolves (it then flows to the model as before).
+     */
+    fun matchMulti(text: String, cameraNames: List<String>): Result? {
+        val t = normalize(text)
+        if (!t.contains(" and ")) return null
+        val segments = splitAsks(t)
+        if (segments.size < 2) return null
+        val parts = ArrayList<Result>()
+        val unresolved = ArrayList<String>()
+        for (seg in segments) {
+            val r = sequenceOf(seg, "show $seg", "show me $seg")
+                .map { matchSingle(it, cameraNames) }
+                .firstOrNull { it != Result.None }
+            if (r != null) parts += r else unresolved += seg
+        }
+        if (parts.isEmpty()) return null
+        return Result.Multi(parts, unresolved)
     }
 
     /**
@@ -60,7 +145,9 @@ object PutUpIntents {
      * has (empty when Home Assistant is unset) — "show me the front porch" can only match
      * a camera that exists.
      */
-    fun match(text: String, cameraNames: List<String>): Result {
+    fun match(text: String, cameraNames: List<String>): Result = matchSingle(text, cameraNames)
+
+    private fun matchSingle(text: String, cameraNames: List<String>): Result {
         val t = normalize(text)
         if (t.isBlank()) return Result.None
         val tokens = t.split(' ')
@@ -73,6 +160,9 @@ object PutUpIntents {
         if ("house" in tokens && tokens.all { it in houseWords } && tokens.first() in showVerbs) return Result.House
         if (t in setOf("whats next", "what is next", "show me whats next", "show me what is next")) return Result.NextEvent
         if ("next" in tokens && tokens.all { it in nextWords } && tokens.first() in showVerbs) return Result.NextEvent
+
+        // The Holodeck job (v1.2.19), before cameras: no camera phrase contains these words.
+        if (isHolodeckAsk(t, tokens)) return Result.Holodeck
 
         // Cameras. Guards first: weather, photos, settings and the camera app are not put-ups.
         if (cameraGuards.any { g -> tokens.any { it.startsWith(g) } }) return Result.None

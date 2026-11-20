@@ -381,6 +381,63 @@ object Hub {
         }
     }
 
+    // ---- Holodeck CAD jobs (v1.2.19): the same hub routes the Holodeck app uses ----
+
+    /**
+     * One CAD job as GET /atlas/cad-job/{id} reports it. The hub's stages are NAMES
+     * (queued / writing / building / fetching / done / failed) with no x-of-y count —
+     * so no honest percentage can be derived, and the tile shows status words only.
+     */
+    data class CadJob(
+        val jobId: String, val status: String, val stage: String, val prompt: String,
+        val name: String, val error: String, val attempts: Int
+    ) {
+        val active: Boolean get() = status == "queued" || status == "working"
+        val done: Boolean get() = status == "done"
+        val failed: Boolean get() = status == "failed"
+    }
+
+    fun parseCadJob(body: String): CadJob? = try {
+        val o = JSONObject(body)
+        val id = o.optString("job_id").trim()
+        if (id.isBlank()) null
+        else CadJob(
+            id, o.optString("status").trim(), o.optString("stage").trim(),
+            o.optString("prompt").trim(), o.optString("name").trim(),
+            o.optString("error").trim(), o.optInt("attempts")
+        )
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. (http code, job): -1 = hub unreachable, 404 = no such job, 200 = [CadJob]. */
+    fun cadJob(id: String): Pair<Int, CadJob?> {
+        val (code, body) = call("GET", "/atlas/cad-job/$id", null, 8_000)
+        return code to if (code in 200..299) parseCadJob(body) else null
+    }
+
+    /** One library entry: finished Holodeck builds and imported STLs, newest first as the hub sorts them. */
+    data class LibEntry(val id: String, val kind: String, val name: String, val created: Double, val jobId: String?)
+
+    fun parseLibrary(body: String): List<LibEntry> = try {
+        val arr = JSONObject(body).optJSONArray("entries") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            LibEntry(
+                o.optString("id"), o.optString("kind"), o.optString("name"),
+                o.optDouble("created", 0.0), o.optString("job_id").trim().ifBlank { null }
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /** Blocking. (http code, entries): the hub's library — the only job-history surface the hub exposes (there is no cad-job list route). */
+    fun library(): Pair<Int, List<LibEntry>> {
+        val (code, body) = call("GET", "/atlas/library", null, 15_000)
+        return code to if (code in 200..299) parseLibrary(body) else emptyList()
+    }
+
     /** Plain words for a failed hub call. */
     fun failure(code: Int): String = when (code) {
         -1 -> "I can't reach the hub on Obelisk right now."

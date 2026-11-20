@@ -118,4 +118,81 @@ class PutUpIntentsTest {
         assertFalse(PutUpIntents.mightMatch("what's the weather on the front porch"))
         assertFalse(PutUpIntents.mightMatch("tell me a story"))
     }
+
+    // ---- Holodeck (v1.2.19) ----
+
+    @Test
+    fun holodeckPhrases() {
+        assertEquals(PutUpIntents.Result.Holodeck, match("show my print job"))
+        assertEquals(PutUpIntents.Result.Holodeck, match("show the holodeck job"))
+        assertEquals(PutUpIntents.Result.Holodeck, match("what's my build doing"))
+        assertEquals(PutUpIntents.Result.Holodeck, match("put the build job up"))
+        assertTrue(PutUpIntents.mightMatch("what's my build doing"))
+        assertEquals(PutUpIntents.Result.None, match("show me the build quality of the house"))
+    }
+
+    // ---- Control phrases (v1.2.19) ----
+
+    @Test
+    fun controlPhrases() {
+        assertEquals(PutUpIntents.Result.ClearAll, PutUpIntents.matchControl("clear the screen"))
+        assertEquals(PutUpIntents.Result.ClearAll, PutUpIntents.matchControl("clear"))
+        assertEquals(PutUpIntents.Result.ClearAll, PutUpIntents.matchControl("take it all down"))
+        assertEquals(PutUpIntents.Result.Pin, PutUpIntents.matchControl("keep that up"))
+        assertEquals(PutUpIntents.Result.Pin, PutUpIntents.matchControl("pin that"))
+        assertEquals(PutUpIntents.Result.Unpin, PutUpIntents.matchControl("unpin that"))
+        assertEquals(PutUpIntents.Result.Unpin, PutUpIntents.matchControl("let it go"))
+        assertEquals(PutUpIntents.Result.Grow, PutUpIntents.matchControl("make it bigger"))
+        assertEquals(PutUpIntents.Result.Shrink, PutUpIntents.matchControl("make it smaller"))
+        // Near-misses are conversation, not tile commands.
+        assertEquals(null, PutUpIntents.matchControl("clearance sale prices"))
+        assertEquals(null, PutUpIntents.matchControl("keep that thought"))
+        assertEquals(null, PutUpIntents.matchControl("make it bigger next time we order pizza"))
+    }
+
+    // ---- Multi put-up in one breath (v1.2.19) ----
+
+    @Test
+    fun multiBriefAndPorch() {
+        val r = PutUpIntents.matchMulti("put the brief up and the porch", names)
+        assertTrue(r is PutUpIntents.Result.Multi)
+        r as PutUpIntents.Result.Multi
+        assertEquals(listOf(PutUpIntents.Result.Brief, PutUpIntents.Result.Camera("Front Porch")), r.parts)
+        assertEquals(emptyList<String>(), r.unresolved)
+    }
+
+    @Test
+    fun multiThreeItems() {
+        val r = PutUpIntents.matchMulti("show the house and my next event and the brief", names)
+        assertTrue(r is PutUpIntents.Result.Multi)
+        r as PutUpIntents.Result.Multi
+        assertEquals(
+            listOf(PutUpIntents.Result.House, PutUpIntents.Result.NextEvent, PutUpIntents.Result.Brief),
+            r.parts
+        )
+        assertEquals(emptyList<String>(), r.unresolved)
+    }
+
+    @Test
+    fun multiCamerasAndHolodeck() {
+        val r = PutUpIntents.matchMulti("show the cameras and the holodeck job", names)
+        assertTrue(r is PutUpIntents.Result.Multi)
+        r as PutUpIntents.Result.Multi
+        assertEquals(listOf(PutUpIntents.Result.CamerasAll, PutUpIntents.Result.Holodeck), r.parts)
+    }
+
+    @Test
+    fun multiNamesTheUnresolvable() {
+        val r = PutUpIntents.matchMulti("put the brief up and the game score", names)
+        assertTrue(r is PutUpIntents.Result.Multi)
+        r as PutUpIntents.Result.Multi
+        assertEquals(listOf(PutUpIntents.Result.Brief), r.parts)
+        assertEquals(listOf("game score"), r.unresolved) // named back, never silently dropped
+    }
+
+    @Test
+    fun multiNeedsAConjunctionAndAResolution() {
+        assertEquals(null, PutUpIntents.matchMulti("put the brief up", names))
+        assertEquals(null, PutUpIntents.matchMulti("show me love and affection", names))
+    }
 }

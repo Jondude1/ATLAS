@@ -1549,9 +1549,62 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
      * Only real data is ever put up: a missing source gets an honest tile or line.
      */
     private fun putUpAsk(ctx: Context, userText: String): String? {
+        // Tile-control phrases first (v1.2.19): they command the tiles already up and
+        // don't start with a show verb ("keep that up", "clear the screen").
+        when (PutUpIntents.matchControl(userText)) {
+            PutUpIntents.Result.Pin -> {
+                val title = TileManager.pinActive()
+                return if (title != null) "Pinned — $title stays up until you unpin it."
+                else if (TileManager.state().visible.isEmpty()) "Nothing's up to pin."
+                else "That one's not pinned."
+            }
+            PutUpIntents.Result.Unpin -> {
+                return if (TileManager.unpinActive()) "Unpinned."
+                else "Nothing pinned is up right now."
+            }
+            PutUpIntents.Result.Grow -> {
+                return if (TileManager.growActive()) "Bigger."
+                else "Nothing's up to make bigger."
+            }
+            PutUpIntents.Result.Shrink -> {
+                // Only intercept when something is actually grown; otherwise the
+                // phrase belongs to the model conversation, untouched.
+                if (TileManager.state().grownId != null) {
+                    TileManager.shrink()
+                    return "Back to normal size."
+                }
+                return null
+            }
+            PutUpIntents.Result.ClearAll -> {
+                val before = TileManager.state()
+                TileManager.clearAll()
+                val kept = TileManager.state().visible
+                return when {
+                    before.total == 0 -> "Nothing's up to clear."
+                    kept.isNotEmpty() -> "Cleared — the pinned ${if (kept.size == 1) "tile stays" else "tiles stay"} up."
+                    else -> "Cleared."
+                }
+            }
+            else -> {}
+        }
         if (!PutUpIntents.mightMatch(userText)) return null
         val cams = HomeAssistant.cameras()
-        return when (val r = PutUpIntents.match(userText, cams.map { it.name })) {
+        // Multi put-up in one breath (v1.2.19): each part becomes a tile in ONE action;
+        // what couldn't be put up is named back, never silently dropped.
+        (PutUpIntents.matchMulti(userText, cams.map { it.name }) as? PutUpIntents.Result.Multi)?.let { multi ->
+            val said = ArrayList<String>()
+            for (part in multi.parts) handlePutUp(ctx, part, cams)?.let { said += it }
+            for (seg in multi.unresolved) {
+                said += "Couldn't put up \"$seg\" — nothing connected for that yet."
+            }
+            return said.joinToString(" ")
+        }
+        return handlePutUp(ctx, PutUpIntents.match(userText, cams.map { it.name }), cams)
+    }
+
+    /** One matched put-up: fetch its real data, put the tile up, return the line to speak (null = not a put-up). */
+    private fun handlePutUp(ctx: Context, r: PutUpIntents.Result, cams: List<HomeAssistant.HaCamera>): String? {
+        return when (r) {
             is PutUpIntents.Result.Camera -> {
                 if (cams.isEmpty()) {
                     TileManager.putUpCamerasNotSetUp(ctx)
@@ -1585,11 +1638,48 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
                 if (b == null) {
                     "I can't reach the hub on Obelisk right now, so I don't have a brief to put up."
                 } else {
-                    val lines = b.urgent.map { "${it.app}: ${it.title}" } + HoloCards.lines(b.text, 6)
-                    TileManager.putUpList(ctx, "Brief", lines.ifEmpty { listOf("Nothing in the brief right now.") })
+                    // The brief goes up as a fanned deck (v1.2.19): one card per item,
+                    // built only from the brief's real contents; an empty brief is one
+                    // honest NO BRIEF YET card.
+                    val cards = com.jondude.anzu.overlay.BriefDeck.cards(
+                        b.urgent.map { it.app to it.title },
+                        HoloCards.lines(b.text, 8)
+                    )
+                    TileManager.putUpBriefDeck(
+                        ctx,
+                        cards.ifEmpty { listOf(com.jondude.anzu.overlay.DeckCard("Brief", listOf("NO BRIEF YET"))) }
+                    )
                     "Your brief is up."
                 }
             }
+            PutUpIntents.Result.Holodeck -> {
+                when (val look = Holodeck.currentJob()) {
+                    is Holodeck.Lookup.Found -> {
+                        TileManager.putUp(ctx, Holodeck.tile(look.job))
+                        when {
+                            look.job.done -> "${Holodeck.displayTitle(look.job)} is up — done, and ready in the Holodeck."
+                            look.job.failed -> "Your build is up — it failed. The tile has the details."
+                            else -> "Your build is up — ${Holodeck.statusWord(look.job).lowercase()}."
+                        }
+                    }
+                    Holodeck.Lookup.None -> {
+                        TileManager.putUp(ctx, Holodeck.noJobTile(""))
+                        "No Holodeck job is running."
+                    }
+                    Holodeck.Lookup.Unreachable -> {
+                        if (Hub.needsToken) {
+                            "The hub wants its token before it'll show the build. It goes in Settings, Obelisk."
+                        } else {
+                            TileManager.putUp(ctx, Holodeck.noJobTile(Prefs.lastCadJobSummary))
+                            "I can't reach the hub on Obelisk right now, so I can't check the build."
+                        }
+                    }
+                }
+            }
+            // Control/multi results are handled in putUpAsk before this point; reaching
+            // here means the ask wasn't a put-up after all — let it flow to the model.
+            is PutUpIntents.Result.Multi, PutUpIntents.Result.Pin, PutUpIntents.Result.Unpin,
+            PutUpIntents.Result.Grow, PutUpIntents.Result.Shrink, PutUpIntents.Result.ClearAll -> null
             PutUpIntents.Result.House -> {
                 if (!HomeAssistant.configured()) {
                     "Home Assistant isn't set up in settings, so there's no house to show."

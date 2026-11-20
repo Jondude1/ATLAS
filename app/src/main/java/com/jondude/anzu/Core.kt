@@ -291,6 +291,16 @@ object Prefs {
     var headphonesOnlySpeech by BoolPref("headphonesOnlySpeech", true)
     /** The launcher has asked for the microphone once (for the wake word); never nag again after that. */
     var wakeMicPrompted by BoolPref("wakeMicPromptedV1", false)
+    // Overlay tiles (v1.2.19): interaction-layer persistence.
+    /** Pinned tile ids (unit-separator joined), re-armed on the stack at startup so pins survive overlay restarts. */
+    var tilePinnedIds by StrPref("tilePinnedIdsV1", "")
+    /** Dragged tile positions, serialized by TilePositions (id TAB x TAB y per line). */
+    var tilePositions by StrPref("tilePositionsV1", "")
+    /** The last CAD job the Holodeck tile saw, and its one-line summary for the stale display. */
+    var lastCadJobId by StrPref("lastCadJobId", "")
+    var lastCadJobSummary by StrPref("lastCadJobSummary", "")
+    /** Lock screen: the Atlas orb over the keyguard (v1.2.19). Default ON for this device; Jon can turn it off. */
+    var lockOrb by BoolPref("lockOrbV1", true)
     // Context Discretion
     var guestsUntil by LongPref("guestsUntil", 0L)
     var bedtimeHour by IntPref("bedtimeHour", 23)
