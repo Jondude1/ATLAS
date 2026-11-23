@@ -63,6 +63,50 @@ class HermesHardwireTest {
     }
 
     @Test
+    fun failedAttemptBacksOffSecondsNotHours() {
+        Prefs.hubToken = "test-token"
+        Prefs.hermesKey = ""
+        Prefs.hermesProvisionTriedAt = 0L
+        val now = System.currentTimeMillis()
+        assertTrue(Hub.claimProvisionAttempt(now))
+        Hub.releaseFailedProvisionAttempt(now)
+        assertFalse(Hub.claimProvisionAttempt(now + 30_000L))
+        assertTrue(Hub.claimProvisionAttempt(now + 61_000L))
+        // A failure at +61s resets the short backoff again; still nowhere near 6h.
+        Hub.releaseFailedProvisionAttempt(now + 61_000L)
+        assertFalse(Hub.claimProvisionAttempt(now + 61_000L + 30_000L))
+        assertTrue(Hub.claimProvisionAttempt(now + 61_000L + 61_000L))
+    }
+
+    @Test
+    fun changingHubTokenRearmsProvisioningInsideTheWindow() {
+        Prefs.hubToken = "mistyped-token"
+        Prefs.hermesKey = ""
+        Prefs.hermesProvisionTriedAt = 0L
+        val now = System.currentTimeMillis()
+        assertTrue(Hub.claimProvisionAttempt(now))
+        assertFalse(Hub.claimProvisionAttempt(now + 1_000L))
+        Prefs.hubToken = "corrected-token"
+        assertTrue(Hub.claimProvisionAttempt(now + 2_000L))
+        // The new hash was recorded, so the corrected token is throttled like any other.
+        assertFalse(Hub.claimProvisionAttempt(now + 3_000L))
+        // Only a hash is stored, never the token itself.
+        assertFalse(Prefs.hermesProvisionTokenHash.contains("corrected-token"))
+        assertEquals(64, Prefs.hermesProvisionTokenHash.length)
+    }
+
+    @Test
+    fun unchangedTokenWithRecentAttemptStillThrottlesForSixHours() {
+        Prefs.hubToken = "test-token"
+        Prefs.hermesKey = ""
+        Prefs.hermesProvisionTriedAt = 0L
+        val now = System.currentTimeMillis()
+        assertTrue(Hub.claimProvisionAttempt(now))
+        assertFalse(Hub.claimProvisionAttempt(now + 5 * 60 * 60 * 1000L))
+        assertTrue(Hub.claimProvisionAttempt(now + 6 * 60 * 60 * 1000L + 1L))
+    }
+
+    @Test
     fun claimRefusesWhenKeyPresentOrTokenMissing() {
         val now = System.currentTimeMillis()
         // Key already landed: no claim, and no attempt stamp is consumed.

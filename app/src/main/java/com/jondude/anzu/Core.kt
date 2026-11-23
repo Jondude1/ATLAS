@@ -257,6 +257,7 @@ object Prefs {
     var hermesKey by StrPref("hermesKey", "")
     var hermesModel by StrPref("hermesModel", "hermes-agent")
     var hermesProvisionTriedAt by LongPref("hermesProvisionTriedAt", 0L)
+    var hermesProvisionTokenHash by StrPref("hermesProvisionTokenHash", "")
     var buddieFastLink by BoolPref("buddieFastLink", false)
     var buddieCompressedFirst by BoolPref("buddieCompressedFirst", false)
     var commuteAlerts by BoolPref("commuteAlerts", true)
@@ -299,6 +300,9 @@ object Prefs {
     /** The last CAD job the Holodeck tile saw, and its one-line summary for the stale display. */
     var lastCadJobId by StrPref("lastCadJobId", "")
     var lastCadJobSummary by StrPref("lastCadJobSummary", "")
+    /** DONE watcher (v1.2.20): both belong to lastCadJobId and reset whenever a new id is remembered. */
+    var cadJobSeenActive by BoolPref("cadJobSeenActiveV1", false)
+    var cadJobDoneAnnounced by BoolPref("cadJobDoneAnnouncedV1", false)
     /** Lock screen: the Atlas orb over the keyguard (v1.2.19). Default ON for this device; Jon can turn it off. */
     var lockOrb by BoolPref("lockOrbV1", true)
     // Context Discretion

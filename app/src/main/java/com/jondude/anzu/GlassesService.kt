@@ -522,6 +522,12 @@ class GlassesService : Service() {
         if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
             scope.launch(Dispatchers.IO) { com.jondude.anzu.assist.Producers.runOnce(this@GlassesService) }
         }
+        // Holodeck DONE watcher (v1.2.20): same cadence, its own guard so it can never break the polls above.
+        if (com.jondude.anzu.assist.Hub.configured() && ticks % 4 == 0) {
+            scope.launch(Dispatchers.IO) {
+                try { com.jondude.anzu.assist.Holodeck.watchOnce(this@GlassesService) } catch (_: Throwable) {}
+            }
+        }
         // Co-pilot works through whatever is playing audio, the car included, so it runs before the "worn" check.
         when (val c = com.jondude.anzu.assist.CoPilot.update(com.jondude.anzu.assist.CoPilot.detect(this))) {
             is com.jondude.anzu.assist.CoPilot.Change.Started -> if (System.currentTimeMillis() >= Prefs.quietUntil) {

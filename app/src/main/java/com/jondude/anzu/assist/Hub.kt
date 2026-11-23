@@ -75,19 +75,34 @@ object Hub {
     }
 
     private const val PROVISION_RETRY_MS = 6 * 60 * 60 * 1000L
+    private const val PROVISION_FAILED_RETRY_MS = 60_000L
+
+    private fun tokenHash(token: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * True (and stamps the attempt) when Hermes still needs its KEY, the hub is set up,
-     * and no attempt ran in the last 6 hours. The gate is the key, not Hermes.configured():
-     * the Hermes URL is hardwired now (Prefs.hermesUrl defaults to HERMES_URL), so
-     * "configured" is always true and would starve provisioning forever.
+     * and either no attempt ran in the last 6 hours or the hub token changed since the last
+     * attempt (a corrected typo re-arms provisioning at once). The gate is the key, not
+     * Hermes.configured(): the Hermes URL is hardwired now (Prefs.hermesUrl defaults to
+     * HERMES_URL), so "configured" is always true and would starve provisioning forever.
      */
     @Synchronized
     internal fun claimProvisionAttempt(now: Long = System.currentTimeMillis()): Boolean {
         if (Prefs.hermesKey.isNotBlank() || !configured() || Prefs.hubToken.isBlank()) return false
-        if (now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
+        val hash = tokenHash(Prefs.hubToken)
+        val tokenChanged = hash != Prefs.hermesProvisionTokenHash
+        if (!tokenChanged && now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
         Prefs.hermesProvisionTriedAt = now
+        Prefs.hermesProvisionTokenHash = hash
         return true
+    }
+
+    /** A failed attempt must not burn the 6h throttle: shorten it so the next claim is allowed ~60s later. */
+    @Synchronized
+    internal fun releaseFailedProvisionAttempt(now: Long = System.currentTimeMillis()) {
+        Prefs.hermesProvisionTriedAt = now - (PROVISION_RETRY_MS - PROVISION_FAILED_RETRY_MS)
     }
 
     /** Blocking, silent on any failure. Fetches Hermes' endpoint and key from the hub when they aren't set yet. */
@@ -95,13 +110,17 @@ object Hub {
         try {
             if (!claimProvisionAttempt()) return
             val (code, body) = Net.get(base() + "/atlas/hermes-config", auth(), 5_000, connectTimeoutMs = 2_000)
-            if (code !in 200..299) return
-            val cfg = parseHermesConfig(body) ?: return
+            val cfg = if (code in 200..299) parseHermesConfig(body) else null
+            if (cfg == null) {
+                releaseFailedProvisionAttempt()
+                return
+            }
             Prefs.hermesUrl = cfg.url
             Prefs.hermesKey = cfg.key
             Prefs.hermesModel = cfg.model
             Store.logAction("Hermes provisioned from the hub")
         } catch (_: Exception) {
+            releaseFailedProvisionAttempt()
         }
     }
 
@@ -414,6 +433,19 @@ object Hub {
     fun cadJob(id: String): Pair<Int, CadJob?> {
         val (code, body) = call("GET", "/atlas/cad-job/$id", null, 8_000)
         return code to if (code in 200..299) parseCadJob(body) else null
+    }
+
+    /** The job id from POST /atlas/cad-job's reply; null when it's blank, missing or not JSON. */
+    fun parseCadJobCreated(body: String): String? = try {
+        JSONObject(body).optString("job_id").trim().ifBlank { null }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. Creates a CAD job from a build prompt: (http code, job_id) — -1 = hub unreachable, id null unless the hub accepted it. */
+    fun createCadJob(prompt: String): Pair<Int, String?> {
+        val (code, body) = call("POST", "/atlas/cad-job", JSONObject().put("prompt", prompt), 15_000)
+        return code to if (code in 200..299) parseCadJobCreated(body) else null
     }
 
     /** One library entry: finished Holodeck builds and imported STLs, newest first as the hub sorts them. */

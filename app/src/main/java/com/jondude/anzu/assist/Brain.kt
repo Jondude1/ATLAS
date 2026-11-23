@@ -1602,6 +1602,17 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         return handlePutUp(ctx, PutUpIntents.match(userText, cams.map { it.name }), cams)
     }
 
+    /** A matched build ask: create the hub CAD job, put the Holodeck tile up, return the line to speak. Blocking. */
+    private fun dispatchCad(ctx: Context, prompt: String): String {
+        val (code, jobId) = Hub.createCadJob(prompt)
+        if (jobId == null) return Hub.failure(code)
+        val queued = Holodeck.rememberCreated(jobId, prompt)
+        TileManager.putUp(ctx, Holodeck.tile(queued))
+        val summary = Holodeck.summary(prompt)
+        try { Store.logAction("CAD job dispatched from phone: $summary") } catch (_: Throwable) {}
+        return "Building $summary — the tile's up, and I'll put it back up when it's done."
+    }
+
     /** One matched put-up: fetch its real data, put the tile up, return the line to speak (null = not a put-up). */
     private fun handlePutUp(ctx: Context, r: PutUpIntents.Result, cams: List<HomeAssistant.HaCamera>): String? {
         return when (r) {
@@ -1749,6 +1760,12 @@ Tools: remember is for durable facts about Jon, used sparingly. save_note captur
         // "Put it up": show-asks become overlay tiles (v1.2.18), matched before any model call.
         // Returns the line to speak, or null when the ask isn't a put-up and should flow on.
         putUpAsk(ctx, userText)?.let { said ->
+            record(userText, said)
+            return@withContext said
+        }
+        // "Make me a shelf bracket" (v1.2.20): after the put-up asks so an explicit show-ask always wins.
+        CadIntents.match(userText)?.let { prompt ->
+            val said = dispatchCad(ctx, prompt)
             record(userText, said)
             return@withContext said
         }

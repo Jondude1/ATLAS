@@ -1,8 +1,11 @@
 package com.jondude.anzu.assist
 
+import android.content.Context
 import com.jondude.anzu.Prefs
+import com.jondude.anzu.Store
 import com.jondude.anzu.overlay.OverlayTile
 import com.jondude.anzu.overlay.TileKind
+import com.jondude.anzu.overlay.TileManager
 
 /**
  * The Holodeck tile's data (v1.2.19): the hub's CAD job state, shown as a tile.
@@ -97,8 +100,53 @@ object Holodeck {
         }
 
     private fun remember(job: Hub.CadJob) {
+        // The watcher flags belong to the id: a different job starts unwatched and unannounced.
+        if (Prefs.lastCadJobId != job.jobId) resetWatcher()
         Prefs.lastCadJobId = job.jobId
         Prefs.lastCadJobSummary = displayTitle(job)
+    }
+
+    private fun resetWatcher() {
+        Prefs.cadJobSeenActive = false
+        Prefs.cadJobDoneAnnounced = false
+    }
+
+    /**
+     * A job this phone just dispatched: remembered as queued, watcher flags reset.
+     * Returns the queued job (what the tile is built from).
+     */
+    fun rememberCreated(jobId: String, prompt: String): Hub.CadJob {
+        val queued = Hub.CadJob(jobId, "queued", "", prompt.trim(), "", "", 0)
+        Prefs.lastCadJobId = jobId
+        Prefs.lastCadJobSummary = displayTitle(queued)
+        resetWatcher()
+        return queued
+    }
+
+    /** Pure: pop only a job the phone watched building, that is done, and not already announced. */
+    fun shouldPop(seenActive: Boolean, announced: Boolean, job: Hub.CadJob): Boolean =
+        job.done && !announced && seenActive
+
+    /**
+     * Blocking. One pass of the DONE watcher: when the remembered job finishes while the
+     * Holodeck tile is NOT up, put the tile up once. Never speaks. While the tile is up
+     * TileManager's own poll owns updates, so this stays out of the way.
+     */
+    fun watchOnce(ctx: Context) {
+        if (!Hub.configured()) return
+        val id = Prefs.lastCadJobId
+        if (id.isBlank()) return
+        if (TileManager.state().visible.any { it.id == TILE_ID }) return
+        val job = poll(id) ?: return
+        when {
+            job.active -> Prefs.cadJobSeenActive = true
+            job.failed -> Prefs.cadJobSeenActive = false
+            shouldPop(Prefs.cadJobSeenActive, Prefs.cadJobDoneAnnounced, job) -> {
+                TileManager.putUp(ctx, tile(job))
+                Prefs.cadJobDoneAnnounced = true
+                try { Store.logAction("Holodeck job done — tile put up: ${displayTitle(job)}") } catch (_: Throwable) {}
+            }
+        }
     }
 
     /**
