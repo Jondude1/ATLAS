@@ -317,6 +317,164 @@ def hermes_config():
 
 
 # ---------------------------------------------------------------------------
+# Skills Marketplace (Atlas app <-> Hermes on Athena). The app searches and
+# one-tap-installs Hermes Skills Hub skills; every operation is executed by
+# Athena's own `hermes skills` CLI over the hub's SSH channel, so installs go
+# through Hermes's Skills Guard scan exactly as a desktop install would.
+# --force is never used: a blocked scan verdict stays blocked. Installs and
+# uninstalls are filed as hub reports (app "skills") for the audit trail.
+HERMES_EXE = r"C:\Users\Jon\AppData\Local\hermes\bin\hermes.exe"
+_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/:@~]*$")
+_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
+_SKILL_QUERY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._\-]*$")
+_SKILL_SOURCES = {
+    "all", "official", "skills-sh", "well-known", "github", "clawhub",
+    "lobehub", "browse-sh", "nvidia", "openai", "anthropic", "huggingface",
+    "voltagent", "gstack", "minimax",
+}
+
+
+def _check_skill_identifier(identifier: str) -> str:
+    identifier = (identifier or "").strip()
+    if (
+        not identifier
+        or len(identifier) > 200
+        or not _SKILL_ID_RE.match(identifier)
+        or ".." in identifier.split("/")
+    ):
+        raise HTTPException(status_code=400, detail="bad skill identifier")
+    return identifier
+
+
+async def _run_hermes_skills(args: str, timeout_s: int) -> tuple[int, str]:
+    code, out, err = await _run_athena_ssh(f'"{HERMES_EXE}" skills {args}', timeout_s)
+    return code, (out or "") + (("\n" + err) if err else "")
+
+
+@app.get("/atlas/skills/search", dependencies=[Depends(require_token)])
+async def skills_search(q: str, limit: int = 25, source: str = "all"):
+    q = (q or "").strip()
+    if not q or len(q) > 60 or not _SKILL_QUERY_RE.match(q):
+        raise HTTPException(status_code=400, detail="bad query")
+    if source not in _SKILL_SOURCES:
+        raise HTTPException(status_code=400, detail="bad source")
+    limit = max(1, min(int(limit), 50))
+    src = "" if source == "all" else f" --source {source}"
+    code, out = await _run_hermes_skills(f'search "{q}" --json --limit {limit}{src}', 120)
+    lo, hi = out.find("["), out.rfind("]")
+    if code != 0 or lo < 0 or hi <= lo:
+        raise HTTPException(status_code=502, detail="skill search failed on Athena")
+    try:
+        results = json.loads(out[lo : hi + 1])
+    except Exception:
+        raise HTTPException(status_code=502, detail="skill search returned unreadable results")
+    clean = []
+    for r in results if isinstance(results, list) else []:
+        if not isinstance(r, dict):
+            continue
+        clean.append(
+            {
+                "name": str(r.get("name", "")),
+                "identifier": str(r.get("identifier", "")),
+                "source": str(r.get("source", "")),
+                "trust_level": str(r.get("trust_level", "")),
+                "description": str(r.get("description", "")),
+            }
+        )
+    return {"query": q, "results": clean}
+
+
+@app.get("/atlas/skills/installed", dependencies=[Depends(require_token)])
+async def skills_installed():
+    code, out = await _run_hermes_skills("list --source hub", 60)
+    if code != 0:
+        raise HTTPException(status_code=502, detail="installed-skill list failed on Athena")
+    rows = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("│"):
+            cells = [c.strip() for c in line.strip("│").split("│")]
+            if len(cells) >= 5 and cells[0] and cells[0] != "Name":
+                rows.append(
+                    {
+                        "name": cells[0],
+                        "category": cells[1],
+                        "source": cells[2],
+                        "trust": cells[3],
+                        "status": cells[4],
+                    }
+                )
+    return {"installed": rows}
+
+
+@app.get("/atlas/skills/inspect", dependencies=[Depends(require_token)])
+async def skills_inspect(identifier: str):
+    identifier = _check_skill_identifier(identifier)
+    code, out = await _run_hermes_skills(f'inspect "{identifier}"', 120)
+    if code != 0:
+        raise HTTPException(status_code=502, detail="skill inspect failed on Athena")
+    return {"identifier": identifier, "text": out[:12000]}
+
+
+class SkillInstall(BaseModel):
+    identifier: str
+
+
+@app.post("/atlas/skills/install", dependencies=[Depends(require_token)])
+async def skills_install(body: SkillInstall):
+    identifier = _check_skill_identifier(body.identifier)
+    code, out = await _run_hermes_skills(f'install "{identifier}" --yes', 300)
+    installed_name = ""
+    verdict = ""
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("Installed:"):
+            installed_name = s.split(":", 1)[1].strip().split("/")[-1]
+        if "Verdict:" in s:
+            verdict = s.split("Verdict:", 1)[1].strip()
+    ok = code == 0 and bool(installed_name)
+    try:
+        await report(
+            Report(
+                app="skills",
+                title=f"Skill install {'ok' if ok else 'FAILED'}: {identifier}",
+                body=f"installed={installed_name or '-'} scan={verdict or '-'}\n{out[-400:]}",
+                priority="normal",
+                key=None,
+            )
+        )
+    except Exception:
+        pass
+    return {"ok": ok, "installed": installed_name, "scan": verdict, "output": out[-2000:]}
+
+
+class SkillUninstall(BaseModel):
+    name: str
+
+
+@app.post("/atlas/skills/uninstall", dependencies=[Depends(require_token)])
+async def skills_uninstall(body: SkillUninstall):
+    name = (body.name or "").strip()
+    if not name or len(name) > 80 or not _SKILL_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="bad skill name")
+    code, out = await _run_hermes_skills(f'uninstall "{name}" --yes', 120)
+    ok = code == 0 and "Uninstalled" in out
+    try:
+        await report(
+            Report(
+                app="skills",
+                title=f"Skill uninstall {'ok' if ok else 'FAILED'}: {name}",
+                body=out[-400:],
+                priority="normal",
+                key=None,
+            )
+        )
+    except Exception:
+        pass
+    return {"ok": ok, "output": out[-1000:]}
+
+
+# ---------------------------------------------------------------------------
 # Proactive trigger registry (Life OS Phase 3). Producers register structured
 # events; the app fetches the pending ones, decides under its own guardrails,
 # and acks the decision back. Decided rows are kept as the audit trail.

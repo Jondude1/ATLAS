@@ -53,6 +53,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
@@ -490,6 +491,7 @@ private val settingsIndex: Map<String, Pair<ImageVector, String>> = mapOf(
     "Connections" to (Icons.Filled.Share to "Everything Atlas can reach and control"),
     "Athena" to (Icons.Filled.Build to "Containers on Athena, and a command line to it"),
     "Systems" to (Icons.Filled.Share to "Every service on Obelisk, Athena and the house, checked live"),
+    "Skills Marketplace" to (Icons.Filled.Add to "Browse and install Hermes skills from the Skills Hub"),
     "Hermes and your vault" to (Icons.Filled.Build to "Hand-offs to Hermes, Obsidian"),
     "Obelisk and local models" to (Icons.Filled.Lock to "Your own server and models"),
     "App" to (Icons.Filled.Info to "Version, updates, usage")
@@ -841,6 +843,166 @@ fun AthenaPanel() {
         output, style = mono,
         modifier = Modifier.fillMaxWidth().background(Panel).padding(12.dp).horizontalScroll(rememberScrollState())
     )
+}
+
+/** Settings page: browse Hermes's Skills Hub through the house hub, install with one tap, uninstall with a confirm. */
+@Composable
+fun SkillsMarketplacePanel() {
+    if (!com.jondude.anzu.assist.Hub.configured()) {
+        EmptyHint("The Skills Marketplace needs the house hub. Set up the hub in Settings first.")
+        return
+    }
+    val hub = com.jondude.anzu.assist.Hub
+    val scope = rememberCoroutineScope()
+    var installed by remember { mutableStateOf<List<com.jondude.anzu.assist.Hub.SkillInstalled>>(emptyList()) }
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var results by remember { mutableStateOf<List<com.jondude.anzu.assist.Hub.SkillHit>?>(null) }
+    var searchError by remember { mutableStateOf<String?>(null) }
+    var installing by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var inspecting by remember { mutableStateOf<com.jondude.anzu.assist.Hub.SkillHit?>(null) }
+    var confirmRemove by remember { mutableStateOf<com.jondude.anzu.assist.Hub.SkillInstalled?>(null) }
+
+    fun refreshInstalled() = scope.launch {
+        val (code, list) = withContext(Dispatchers.IO) { hub.installedSkills() }
+        if (code in 200..299) installed = list
+    }
+    LaunchedEffect(Unit) { refreshInstalled() }
+
+    fun isInstalled(name: String) = installed.any { it.name.equals(name, ignoreCase = true) }
+
+    fun search(term: String) {
+        val q = term.trim()
+        if (q.isBlank() || searching) return
+        query = q; searching = true; searchError = null
+        scope.launch {
+            val (code, hits) = withContext(Dispatchers.IO) { hub.searchSkills(q) }
+            if (code in 200..299) results = hits else { results = null; searchError = hub.failure(code) }
+            searching = false
+        }
+    }
+
+    fun install(hit: com.jondude.anzu.assist.Hub.SkillHit) {
+        if (installing != null) return
+        installing = hit.identifier; status = null
+        scope.launch {
+            val (code, r) = withContext(Dispatchers.IO) { hub.installSkill(hit.identifier) }
+            status = when {
+                code !in 200..299 -> hub.failure(code)
+                r == null -> "The hub had trouble with that ($code)."
+                r.ok -> "Installed ${r.installed.ifBlank { hit.name }}. Scan verdict: ${r.scan.ifBlank { "clean" }}. Atlas picks up new skills on its next conversation."
+                else -> r.output.ifBlank { "The install didn't go through." }
+            }
+            installing = null
+            refreshInstalled()
+        }
+    }
+
+    val mono = androidx.compose.ui.text.TextStyle(fontFamily = Mono, fontSize = 12.sp, lineHeight = 17.sp, color = Cream)
+
+    Text("INSTALLED FROM THE HUB", color = Stark.cyan, fontFamily = HoloMono, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
+    if (installed.isEmpty()) EmptyHint("Nothing installed from the Hub yet — search above to add Atlas's first skill.")
+    installed.forEach { s ->
+        Row(Modifier.fillMaxWidth().background(Panel).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(s.name, color = Cream, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(listOf(s.category, s.source).filter { it.isNotBlank() }.joinToString(" · "), color = Muted, fontSize = 13.sp)
+                if (s.status.isNotBlank()) Text(s.status, color = Muted, fontSize = 13.sp)
+            }
+            SoftButton(onClick = { confirmRemove = s }) { Text("UNINSTALL") }
+        }
+    }
+
+    OutlinedTextField(
+        value = query, onValueChange = { query = it },
+        label = { Text("Search Hermes skills") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { search(query) }),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Button(enabled = query.isNotBlank() && !searching, onClick = { search(query) }) { Text("SEARCH") }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Productivity", "Research", "Music", "Creative", "DevOps", "Smart Home", "Finance", "Email").forEach { c ->
+            SoftButton(enabled = !searching, onClick = { search(c) }) { Text(c) }
+        }
+    }
+
+    status?.let { Text(it, color = Cream, fontSize = 14.sp, lineHeight = 20.sp) }
+    if (searching) {
+        LinearProgressIndicator(Modifier.fillMaxWidth(), color = Stark.cyan)
+        Text("Searching the Skills Hub… this can take up to a minute.", color = Muted, fontSize = 14.sp)
+    }
+    searchError?.let { Text(it, color = Muted, fontSize = 14.sp) }
+    val hits = results
+    if (hits != null && !searching && searchError == null && hits.isEmpty()) EmptyHint("No skills matched that search.")
+    hits?.forEach { hit ->
+        val have = isInstalled(hit.name)
+        Column(
+            Modifier.fillMaxWidth().background(Panel).clickable { inspecting = hit }.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(hit.name, color = Cream, fontFamily = Display, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text(
+                listOf(hit.source, hit.trustLevel).filter { it.isNotBlank() }.joinToString(" · ").uppercase(),
+                color = Stark.cyanDim, fontFamily = HoloMono, fontSize = 11.sp, letterSpacing = 1.2.sp
+            )
+            if (hit.description.isNotBlank()) Text(hit.description, color = Muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(hit.identifier, style = mono.copy(color = Muted, fontSize = 11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (have) Text("INSTALLED", color = Stark.cyan, fontFamily = HoloMono, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+            else {
+                val busy = installing == hit.identifier
+                Button(enabled = installing == null, onClick = { install(hit) }, modifier = Modifier.padding(top = 4.dp)) {
+                    Text(if (busy) "INSTALLING — SCANNING…" else "INSTALL")
+                }
+            }
+        }
+    }
+
+    inspecting?.let { hit ->
+        var preview by remember(hit.identifier) { mutableStateOf<String?>(null) }
+        var previewError by remember(hit.identifier) { mutableStateOf<String?>(null) }
+        LaunchedEffect(hit.identifier) {
+            val (code, text) = withContext(Dispatchers.IO) { hub.inspectSkill(hit.identifier) }
+            if (code in 200..299 && text != null) preview = text else previewError = hub.failure(code)
+        }
+        val have = isInstalled(hit.name)
+        AlertDialog(
+            onDismissRequest = { inspecting = null },
+            title = { Text(hit.name) },
+            text = {
+                Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                    Text(preview ?: previewError ?: "Loading preview…", style = mono)
+                }
+            },
+            confirmButton = {
+                if (!have) TextButton(enabled = installing == null, onClick = { inspecting = null; install(hit) }) {
+                    Text(if (installing == hit.identifier) "INSTALLING — SCANNING…" else "INSTALL")
+                }
+            },
+            dismissButton = { TextButton(onClick = { inspecting = null }) { Text("CLOSE") } }
+        )
+    }
+
+    confirmRemove?.let { s ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text("Uninstall ${s.name}?") },
+            text = { Text("Atlas will stop using this skill. You can install it again from the Hub.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = null
+                    scope.launch {
+                        val (code, ok) = withContext(Dispatchers.IO) { hub.uninstallSkill(s.name) }
+                        status = if (ok) "Uninstalled ${s.name}." else if (code in 200..299) "The uninstall didn't go through." else hub.failure(code)
+                        refreshInstalled()
+                    }
+                }) { Text("UNINSTALL") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("CANCEL") } }
+        )
+    }
 }
 
 /** Athena's state as ATLAS would say it. */
@@ -1716,6 +1878,21 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
                 "Right now: $wakeNow." + if (Prefs.lastWake > 0) " Last woke ${timeAgo(Prefs.lastWake)} through ${Prefs.lastWakeSource}." else "",
                 color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
             )
+            ToggleRow(
+                "Spoken responses: headphones only",
+                "Atlas speaks out loud only while earphones or headphones are connected. Without them, replies stay on screen in full and announcements wait in the held digest instead of being spoken to the room.",
+                Prefs.headphonesOnlySpeech
+            ) { Prefs.headphonesOnlySpeech = it }
+            ToggleRow(
+                "Lock screen: Atlas orb",
+                "When the phone wakes while locked, the Atlas orb — the living sphere in its instrument ring — shows over the lock screen. No information is ever shown there, and any touch goes to the normal unlock.",
+                Prefs.lockOrb
+            ) { Prefs.lockOrb = it }
+            Text(
+                "Overlay tiles remember where you drag them. Resetting puts every tile back to its automatic placement.",
+                color = Muted, fontSize = 14.sp, fontWeight = FontWeight.Light
+            )
+            SoftButton(onClick = { com.jondude.anzu.overlay.TileManager.resetPositions() }) { Text("Reset tile positions") }
             ToggleRow("Whisper back", "A quiet question gets a quiet answer", Prefs.whisperBack) { Prefs.whisperBack = it }
             Text("Speaking speed")
             Slider(value = rate, onValueChange = { rate = it; Prefs.speechRate = it.toInt() }, valueRange = 70f..160f)
@@ -1725,6 +1902,8 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
         Section("Systems") { SystemsPanel() }
 
         Section("Athena") { AthenaPanel() }
+
+        Section("Skills Marketplace") { SkillsMarketplacePanel() }
 
         Section("Home Assistant") {
             Text("Address: $HOME_ASSISTANT (built in)", fontSize = 14.sp)
@@ -1800,10 +1979,17 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}) {
         }
 
         Section("Hermes and your vault") {
-            Text("${Prefs.name} hands bigger, tool-heavy jobs to Hermes through the hub on Obelisk, then reports back. A direct Hermes address is only needed if you're not using the hub.", color = Muted, fontSize = 13.sp)
-            PrefField("Hermes API address (ends in /v1)", Prefs.hermesUrl) { Prefs.hermesUrl = it.trim() }
-            PrefField("Hermes API key (if it needs one)", Prefs.hermesKey, secret = true) { Prefs.hermesKey = it.trim() }
-            PrefField("Model name to send", Prefs.hermesModel) { Prefs.hermesModel = it.trim() }
+            Text("${Prefs.name} hands bigger, tool-heavy jobs to Hermes through the hub on Obelisk, then reports back.", color = Muted, fontSize = 13.sp)
+            // Hardwired 2026-11-20: address and model are built in, not editable — an edit
+            // here could only break the tailnet hardwiring. The key is never typed either;
+            // the hub provisions it (Settings → Obelisk and local models → Hub token).
+            Text("Hermes: built in — Athena via Tailscale (${HERMES_URL.removePrefix("http://")})", color = Cream, fontSize = 15.sp)
+            Text("Model: ${Prefs.hermesModel} (built in)", color = Muted, fontSize = 13.sp)
+            Text(
+                if (Prefs.hermesKey.isBlank()) "Hermes key: not provisioned yet — it arrives from the hub once the hub token is in."
+                else "Hermes key: provisioned from the hub.",
+                color = Muted, fontSize = 13.sp
+            )
             var vault by remember { mutableStateOf(Prefs.vaultUri) }
             val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
                 if (uri != null) {

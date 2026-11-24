@@ -75,15 +75,34 @@ object Hub {
     }
 
     private const val PROVISION_RETRY_MS = 6 * 60 * 60 * 1000L
+    private const val PROVISION_FAILED_RETRY_MS = 60_000L
 
-    /** True (and stamps the attempt) when Hermes still needs its config, the hub is set up, and no attempt ran in the last 6 hours. */
+    private fun tokenHash(token: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /**
+     * True (and stamps the attempt) when Hermes still needs its KEY, the hub is set up,
+     * and either no attempt ran in the last 6 hours or the hub token changed since the last
+     * attempt (a corrected typo re-arms provisioning at once). The gate is the key, not
+     * Hermes.configured(): the Hermes URL is hardwired now (Prefs.hermesUrl defaults to
+     * HERMES_URL), so "configured" is always true and would starve provisioning forever.
+     */
     @Synchronized
-    private fun claimProvisionAttempt(): Boolean {
-        if (Hermes.configured() || !configured() || Prefs.hubToken.isBlank()) return false
-        val now = System.currentTimeMillis()
-        if (now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
+    internal fun claimProvisionAttempt(now: Long = System.currentTimeMillis()): Boolean {
+        if (Prefs.hermesKey.isNotBlank() || !configured() || Prefs.hubToken.isBlank()) return false
+        val hash = tokenHash(Prefs.hubToken)
+        val tokenChanged = hash != Prefs.hermesProvisionTokenHash
+        if (!tokenChanged && now - Prefs.hermesProvisionTriedAt < PROVISION_RETRY_MS) return false
         Prefs.hermesProvisionTriedAt = now
+        Prefs.hermesProvisionTokenHash = hash
         return true
+    }
+
+    /** A failed attempt must not burn the 6h throttle: shorten it so the next claim is allowed ~60s later. */
+    @Synchronized
+    internal fun releaseFailedProvisionAttempt(now: Long = System.currentTimeMillis()) {
+        Prefs.hermesProvisionTriedAt = now - (PROVISION_RETRY_MS - PROVISION_FAILED_RETRY_MS)
     }
 
     /** Blocking, silent on any failure. Fetches Hermes' endpoint and key from the hub when they aren't set yet. */
@@ -91,19 +110,23 @@ object Hub {
         try {
             if (!claimProvisionAttempt()) return
             val (code, body) = Net.get(base() + "/atlas/hermes-config", auth(), 5_000, connectTimeoutMs = 2_000)
-            if (code !in 200..299) return
-            val cfg = parseHermesConfig(body) ?: return
+            val cfg = if (code in 200..299) parseHermesConfig(body) else null
+            if (cfg == null) {
+                releaseFailedProvisionAttempt()
+                return
+            }
             Prefs.hermesUrl = cfg.url
             Prefs.hermesKey = cfg.key
             Prefs.hermesModel = cfg.model
             Store.logAction("Hermes provisioned from the hub")
         } catch (_: Exception) {
+            releaseFailedProvisionAttempt()
         }
     }
 
-    /** Background version of [provisionHermesNow]; a cheap no-op when already configured or tried recently. */
+    /** Background version of [provisionHermesNow]; a cheap no-op once the key has landed or when tried recently. */
     fun provisionHermesIfNeeded() {
-        if (Hermes.configured()) return
+        if (Prefs.hermesKey.isNotBlank()) return
         Atlas.scope.launch(Dispatchers.IO) { provisionHermesNow() }
     }
 
@@ -375,6 +398,166 @@ object Hub {
         } catch (e: Exception) {
             -1 to ""
         }
+    }
+
+    // ---- Holodeck CAD jobs (v1.2.19): the same hub routes the Holodeck app uses ----
+
+    /**
+     * One CAD job as GET /atlas/cad-job/{id} reports it. The hub's stages are NAMES
+     * (queued / writing / building / fetching / done / failed) with no x-of-y count —
+     * so no honest percentage can be derived, and the tile shows status words only.
+     */
+    data class CadJob(
+        val jobId: String, val status: String, val stage: String, val prompt: String,
+        val name: String, val error: String, val attempts: Int
+    ) {
+        val active: Boolean get() = status == "queued" || status == "working"
+        val done: Boolean get() = status == "done"
+        val failed: Boolean get() = status == "failed"
+    }
+
+    fun parseCadJob(body: String): CadJob? = try {
+        val o = JSONObject(body)
+        val id = o.optString("job_id").trim()
+        if (id.isBlank()) null
+        else CadJob(
+            id, o.optString("status").trim(), o.optString("stage").trim(),
+            o.optString("prompt").trim(), o.optString("name").trim(),
+            o.optString("error").trim(), o.optInt("attempts")
+        )
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. (http code, job): -1 = hub unreachable, 404 = no such job, 200 = [CadJob]. */
+    fun cadJob(id: String): Pair<Int, CadJob?> {
+        val (code, body) = call("GET", "/atlas/cad-job/$id", null, 8_000)
+        return code to if (code in 200..299) parseCadJob(body) else null
+    }
+
+    /** The job id from POST /atlas/cad-job's reply; null when it's blank, missing or not JSON. */
+    fun parseCadJobCreated(body: String): String? = try {
+        JSONObject(body).optString("job_id").trim().ifBlank { null }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Blocking. Creates a CAD job from a build prompt: (http code, job_id) — -1 = hub unreachable, id null unless the hub accepted it. */
+    fun createCadJob(prompt: String): Pair<Int, String?> {
+        val (code, body) = call("POST", "/atlas/cad-job", JSONObject().put("prompt", prompt), 15_000)
+        return code to if (code in 200..299) parseCadJobCreated(body) else null
+    }
+
+    /** One library entry: finished Holodeck builds and imported STLs, newest first as the hub sorts them. */
+    data class LibEntry(val id: String, val kind: String, val name: String, val created: Double, val jobId: String?)
+
+    fun parseLibrary(body: String): List<LibEntry> = try {
+        val arr = JSONObject(body).optJSONArray("entries") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            LibEntry(
+                o.optString("id"), o.optString("kind"), o.optString("name"),
+                o.optDouble("created", 0.0), o.optString("job_id").trim().ifBlank { null }
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /** Blocking. (http code, entries): the hub's library — the only job-history surface the hub exposes (there is no cad-job list route). */
+    fun library(): Pair<Int, List<LibEntry>> {
+        val (code, body) = call("GET", "/atlas/library", null, 15_000)
+        return code to if (code in 200..299) parseLibrary(body) else emptyList()
+    }
+
+    // ---- Skills Marketplace (v1.2.21): Hermes's Skills Hub through the house hub ----
+
+    data class SkillHit(val name: String, val identifier: String, val source: String, val trustLevel: String, val description: String)
+
+    data class SkillInstalled(val name: String, val category: String, val source: String, val trust: String, val status: String)
+
+    data class SkillInstallResult(val ok: Boolean, val installed: String, val scan: String, val output: String)
+
+    fun parseSkillSearch(body: String): List<SkillHit> = try {
+        val arr = JSONObject(body).optJSONArray("results") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val identifier = o.optString("identifier").trim()
+            if (identifier.isBlank()) null
+            else SkillHit(
+                o.optString("name").trim(), identifier, o.optString("source").trim(),
+                o.optString("trust_level").trim(), o.optString("description").trim()
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    fun parseSkillInstalled(body: String): List<SkillInstalled> = try {
+        val arr = JSONObject(body).optJSONArray("installed") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val name = o.optString("name").trim()
+            if (name.isBlank()) null
+            else SkillInstalled(
+                name, o.optString("category").trim(), o.optString("source").trim(),
+                o.optString("trust").trim(), o.optString("status").trim()
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    fun parseSkillInspect(body: String): String? = try {
+        val o = JSONObject(body)
+        if (o.has("text") && !o.isNull("text")) o.optString("text") else null
+    } catch (e: Exception) {
+        null
+    }
+
+    fun parseSkillInstall(body: String): SkillInstallResult? = try {
+        val o = JSONObject(body)
+        if (!o.has("ok")) null
+        else SkillInstallResult(o.optBoolean("ok"), o.optString("installed").trim(), o.optString("scan").trim(), o.optString("output").trim())
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun enc(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
+
+    /** Blocking. (http code, hits): the hub's Hermes CLI search can take 10-45s. */
+    fun searchSkills(q: String, limit: Int = 25): Pair<Int, List<SkillHit>> {
+        val (code, body) = call("GET", "/atlas/skills/search?q=${enc(q)}&limit=$limit", null, 150_000)
+        return code to if (code in 200..299) parseSkillSearch(body) else emptyList()
+    }
+
+    /** Blocking. (http code, skills installed from the hub). */
+    fun installedSkills(): Pair<Int, List<SkillInstalled>> {
+        val (code, body) = call("GET", "/atlas/skills/installed", null, 90_000)
+        return code to if (code in 200..299) parseSkillInstalled(body) else emptyList()
+    }
+
+    /** Blocking. (http code, preview text). */
+    fun inspectSkill(identifier: String): Pair<Int, String?> {
+        val (code, body) = call("GET", "/atlas/skills/inspect?identifier=${enc(identifier)}", null, 150_000)
+        return code to if (code in 200..299) parseSkillInspect(body) else null
+    }
+
+    /** Blocking. Installs run Hermes's security scan and can take about two minutes. No force option exists. */
+    fun installSkill(identifier: String): Pair<Int, SkillInstallResult?> {
+        val (code, body) = call("POST", "/atlas/skills/install", JSONObject().put("identifier", identifier), 330_000)
+        return code to if (code in 200..299) parseSkillInstall(body) else null
+    }
+
+    /** Blocking. True only when the hub's reply parses and says ok. */
+    fun uninstallSkill(name: String): Pair<Int, Boolean> {
+        val (code, body) = call("POST", "/atlas/skills/uninstall", JSONObject().put("name", name), 150_000)
+        val ok = code in 200..299 && try {
+            JSONObject(body).optBoolean("ok", false)
+        } catch (e: Exception) {
+            false
+        }
+        return code to ok
     }
 
     /** Plain words for a failed hub call. */
